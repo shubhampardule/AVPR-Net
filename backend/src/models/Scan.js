@@ -72,4 +72,4 @@ const scanSchema = new mongoose.Schema(
 
 scanSchema.index({ organization: 1, owner: 1, repo: 1, createdAt: -1 });
 
-module.exports = mongoose.model("Scan", scanSchema);
+module.exports = mongoose.models.Scan || mongoose.model("Scan", scanSchema);

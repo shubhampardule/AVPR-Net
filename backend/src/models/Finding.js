@@ -110,4 +110,4 @@ const findingSchema = new mongoose.Schema(
 findingSchema.index({ scan: 1, fingerprint: 1 });
 findingSchema.index({ organization: 1, owner: 1, repo: 1 });
 
-module.exports = mongoose.model("Finding", findingSchema);
+module.exports = mongoose.models.Finding || mongoose.model("Finding", findingSchema);

@@ -34,7 +34,7 @@ class ScanService {
       status: "queued",
     });
 
-    // 3. Enqueue BullMQ job
+    // 3. Enqueue the job through BullMQ locally or Vercel Queues in production.
     let job;
     try {
       job = await scanQueue.add("process-repository-scan", {
@@ -49,11 +49,11 @@ class ScanService {
       await scan.save();
     } catch (queueErr) {
       scan.status = "failed";
-      scan.errorMessage = `Failed to enqueue scan in BullMQ: ${queueErr.message}. Ensure Redis server is active.`;
+      scan.errorMessage = `Failed to enqueue scan: ${queueErr.message}`;
       await scan.save();
       const err = new Error(scan.errorMessage);
       err.statusCode = 503;
-      err.code = "REDIS_UNAVAILABLE";
+      err.code = "SCAN_QUEUE_UNAVAILABLE";
       throw err;
     }
 

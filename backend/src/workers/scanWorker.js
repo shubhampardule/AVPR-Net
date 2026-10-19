@@ -6,7 +6,7 @@ dotenv.config();
 
 const env = require("../config/env");
 const { redisConnection } = require("../config/redis");
-const { SCAN_QUEUE_NAME } = require("../queues/scanQueue");
+const { SCAN_QUEUE_NAME, SCAN_QUEUE_REGION } = require("../queues/scanQueue");
 const Scan = require("../models/Scan");
 const Finding = require("../models/Finding");
 const { createEphemeralWorkspace } = require("../services/workspace.service");
@@ -48,6 +48,11 @@ const processScanJob = async (job) => {
   const scan = await Scan.findById(scanId);
   if (!scan) {
     throw new Error(`Scan ${scanId} not found in database.`);
+  }
+
+  if (scan.status === "completed") {
+    console.info(`[ScanWorker] Scan ${scanId} was already completed; skipping duplicate delivery.`);
+    return { success: true, skipped: true, summary: scan.summary };
   }
 
   scan.status = "running";
@@ -124,7 +129,13 @@ const processScanJob = async (job) => {
 
     // Step 9: Persist findings to MongoDB
     if (findingsToInsert.length > 0) {
-      await Finding.insertMany(findingsToInsert);
+      await Finding.bulkWrite(findingsToInsert.map((finding) => ({
+        updateOne: {
+          filter: { scan: scan._id, fingerprint: finding.fingerprint },
+          update: { $setOnInsert: finding },
+          upsert: true,
+        },
+      })), { ordered: false });
     }
     console.info(`[ScanWorker] Persisted ${findingsToInsert.length} findings to MongoDB.`);
 
@@ -160,24 +171,92 @@ const processScanJob = async (job) => {
   }
 };
 
-const worker = new Worker(SCAN_QUEUE_NAME, processScanJob, {
-  connection: redisConnection,
-  concurrency: 2,
-});
+const createBullMqWorker = () => {
+  if (!redisConnection) throw new Error("REDIS_URL is required to run the local BullMQ scan worker");
+  const worker = new Worker(SCAN_QUEUE_NAME, processScanJob, {
+    connection: redisConnection,
+    concurrency: 2,
+  });
+  worker.on("ready", () => {
+    console.info(`[ScanWorker] Ready and listening for jobs on queue '${SCAN_QUEUE_NAME}'...`);
+  });
+  worker.on("failed", (job, err) => {
+    console.error(`[ScanWorker] Job ${job?.id} failed with error:`, err.message);
+  });
+  worker.on("error", (err) => {
+    console.error("[ScanWorker] Worker error:", err.message);
+  });
+  return worker;
+};
 
-worker.on("ready", () => {
-  console.info(`[ScanWorker] Ready and listening for jobs on queue '${SCAN_QUEUE_NAME}'...`);
-});
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-worker.on("failed", (job, err) => {
-  console.error(`[ScanWorker] Job ${job?.id} failed with error:`, err.message);
-});
+const startVercelQueueWorker = async () => {
+  const [{ PollingQueueClient }, { getVercelOidcToken }] = await Promise.all([
+    import("@vercel/queue"),
+    import("@vercel/oidc"),
+  ]);
+  let shuttingDown = false;
+  process.once("SIGTERM", () => {
+    shuttingDown = true;
+    console.info("[ScanWorker] Shutdown requested; finishing the current job.");
+  });
 
-worker.on("error", (err) => {
-  console.error("[ScanWorker] Worker error:", err.message);
-});
+  console.info(`[ScanWorker] Polling Vercel Queue '${SCAN_QUEUE_NAME}' in ${SCAN_QUEUE_REGION}...`);
+  let pollDelayMs = 5000;
+  while (!shuttingDown) {
+    try {
+      const token = await getVercelOidcToken();
+      const queue = new PollingQueueClient({
+        region: SCAN_QUEUE_REGION,
+        deploymentId: null,
+        token,
+      });
+      const result = await queue.receive(
+        SCAN_QUEUE_NAME,
+        "scan-worker",
+        async (message) => {
+          if (!message || typeof message.scanId !== "string") {
+            throw new Error("Scan queue message is invalid");
+          }
+          await processScanJob({ id: message.scanId, data: message });
+        },
+        { limit: 1, visibilityTimeoutSeconds: 3600 },
+      );
+      if (!result.ok) {
+        if (result.reason !== "empty") {
+          console.warn(`[ScanWorker] Queue receive returned ${result.reason}.`);
+        }
+        await wait(pollDelayMs);
+        pollDelayMs = Math.min(pollDelayMs * 2, 30000);
+      } else {
+        pollDelayMs = 5000;
+      }
+    } catch (error) {
+      console.error(`[ScanWorker] Vercel Queue poll failed: ${error.message}`);
+      await wait(pollDelayMs);
+      pollDelayMs = Math.min(pollDelayMs * 2, 30000);
+    }
+  }
+
+  await mongoose.disconnect();
+  if (redisConnection) await redisConnection.quit();
+};
+
+if (require.main === module) {
+  if (process.env.VERCEL_OIDC_TOKEN_FILE ||
+    (process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production")) {
+    startVercelQueueWorker().catch((error) => {
+      console.error(`[ScanWorker] Vercel Queue worker stopped: ${error.message}`);
+      process.exitCode = 1;
+    });
+  } else {
+    createBullMqWorker();
+  }
+}
 
 module.exports = {
-  worker,
+  createBullMqWorker,
   processScanJob,
+  startVercelQueueWorker,
 };

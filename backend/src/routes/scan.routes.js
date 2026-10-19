@@ -1,6 +1,7 @@
 const express = require("express");
 const { requireAuth } = require("../middleware/auth.middleware");
 const { requireOrganizationMember } = require("../middleware/organization.middleware");
+const { requireScanMember } = require("../middleware/scanAccess.middleware");
 const {
   enqueueScan,
   getScanStatus,
@@ -27,9 +28,9 @@ router.get(
 );
 
 // Get status and summary of a scan
-router.get("/:scanId", requireAuth, getScanStatus);
+router.get("/:scanId", requireAuth, requireScanMember, getScanStatus);
 
 // Get paginated findings of a scan
-router.get("/:scanId/findings", requireAuth, getScanFindings);
+router.get("/:scanId/findings", requireAuth, requireScanMember, getScanFindings);
 
 module.exports = router;

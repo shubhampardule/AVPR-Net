@@ -281,10 +281,10 @@ export default function ScanPage() {
                   <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
                 </div>
                 <h3 className="text-sm font-semibold text-white">
-                  {activeScan.status === "queued" ? "Scan is Queued in BullMQ" : "Analyzing Code with Orchestrated Scanners"}
+                  {activeScan.status === "queued" ? "Waiting for scan worker" : "Scanning repository"}
                 </h3>
                 <p className="text-xs text-text-muted max-w-md mt-1 leading-relaxed">
-                  Ephemeral workspace downloaded from GitHub App authorization. Executing Semgrep and Bandit security rules...
+                  {activeScan.status === "queued" ? "Your scan is queued. Results will appear here when processing starts." : "Checking the authorized repository with Semgrep and Bandit security rules..."}
                 </p>
               </div>
             )}
