@@ -1,0 +1,49 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "worker": "node src/workers/scanWorker.js",
+    "test": "jest --runInBand",
+    "nvidia:health": "node src/cli/nvidia-health.js",
+    "test:nvidia": "jest tests/nvidia.test.js --runInBand",
+    "rag:index": "node src/cli/rag.js index",
+    "rag:query": "node src/cli/rag.js query",
+    "rag:status": "node src/cli/rag.js status",
+    "assistant": "node src/cli/assistant.js",
+    "demo": "node src/cli/demo.js",
+    "evaluate": "node src/cli/evaluate.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/parser": "7.29.9",
+    "adm-zip": "^0.6.1",
+    "bullmq": "^6.3.11",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "mongoose": "^9.9.1",
+    "morgan": "^1.11.0",
+    "octokit": "^5.0.5",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
+  }
+}
