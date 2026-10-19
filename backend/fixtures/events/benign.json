@@ -1,0 +1,11 @@
+{
+  "id": "synthetic-health-001",
+  "timestamp": "2026-10-19T12:01:00Z",
+  "category": "service_check",
+  "synthetic": true,
+  "protocol": "https",
+  "destination_port": 443,
+  "connections": 6,
+  "window_seconds": 60,
+  "description": "Synthetic expected monitoring check every ten seconds, successful requests. Confirm inventory and schedule."
+}

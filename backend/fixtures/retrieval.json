@@ -1,0 +1,7 @@
+[
+  { "id": "ssh-failures", "query": "Repeated SSH authentication failures and successful login events", "expected_source": "backend/knowledge/network-investigation.md" },
+  { "id": "health-check", "query": "Expected periodic benign service health checks confirm monitoring inventory", "expected_source": "backend/knowledge/network-investigation.md" },
+  { "id": "python-subprocess", "query": "Python subprocess shell=False timeout argument list secure coding", "expected_source": "backend/knowledge/secure-coding.md" },
+  { "id": "risk-formula", "query": "Risk formula severity exploitability occurrence business impact weighted score category", "expected_source": "backend/src/services/risk.service.js" },
+  { "id": "c-buffer", "query": "C C++ bound buffer sizes integer conversions ownership lifetime", "expected_source": "backend/knowledge/secure-coding.md" }
+]

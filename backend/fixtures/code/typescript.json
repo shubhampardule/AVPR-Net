@@ -1,0 +1,5 @@
+{
+  "language": "typescript",
+  "mode": "generate",
+  "request": "Write an exported pure TypeScript validatePort(value: unknown): number function that accepts only integer numbers from 1 to 65535, throwing on strings, NaN, Infinity and booleans. No dependencies or side effects. Suggest focused tests."
+}

@@ -1,0 +1,5 @@
+{
+  "language": "python",
+  "mode": "generate",
+  "request": "Write a pure function summarize_failures(events) that validates a list of dictionaries with service (string, max 80 chars) and failed_attempts (nonnegative integer, reject bool), then returns counts by service. Cap input to 1000 entries. No files, shell, network or external dependencies. Include focused unittest suggestions for valid and invalid input."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "synthetic-ssh-001",
+  "timestamp": "2026-10-19T12:00:00Z",
+  "category": "authentication",
+  "synthetic": true,
+  "protocol": "ssh",
+  "destination_port": 22,
+  "failed_attempts": 120,
+  "successful_logins": 0,
+  "window_seconds": 60,
+  "description": "Synthetic repeated SSH authentication failures. Investigate guessing versus misconfigured automation; compromise is not established."
+}

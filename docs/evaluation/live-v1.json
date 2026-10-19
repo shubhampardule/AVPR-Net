@@ -1,0 +1,251 @@
+{
+  "mode": "live_nvidia",
+  "startedAt": "2026-10-19T15:28:55.004Z",
+  "environment": {
+    "node": "v22.23.1",
+    "platform": "win32",
+    "architecture": "x64"
+  },
+  "configuration": {
+    "version": "lines-2200bytes-overlap2-v1",
+    "model": "nvidia/nemotron-3-embed-1b",
+    "dimensions": 2048,
+    "endpoint": "https://integrate.api.nvidia.com/v1",
+    "collection": "approved-shared",
+    "chatModel": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "headerTimeoutMs": 30000,
+    "bodyTimeoutMs": 60000,
+    "retries": 2,
+    "maxTokens": 2048
+  },
+  "corpus": {
+    "chunks": 8,
+    "sources": [
+      "SETUP.md",
+      "backend/knowledge/network-investigation.md",
+      "backend/knowledge/secure-coding.md",
+      "backend/src/services/risk.service.js"
+    ],
+    "contentHash": "0c1ee11cbd1c0e340efcc54ae17dfc2b01c5b41da1e95151de46869d81adb5be",
+    "indexing": {
+      "chunks": 8,
+      "embedded": 0,
+      "reused": 8,
+      "updatedAt": "2026-10-19T15:28:54.983Z"
+    }
+  },
+  "retrieval": [
+    {
+      "id": "ssh-failures",
+      "hit": true,
+      "expectedSource": "backend/knowledge/network-investigation.md",
+      "returnedSources": [
+        "backend/knowledge/network-investigation.md"
+      ],
+      "latencyMs": 580
+    },
+    {
+      "id": "health-check",
+      "hit": true,
+      "expectedSource": "backend/knowledge/network-investigation.md",
+      "returnedSources": [
+        "backend/knowledge/network-investigation.md"
+      ],
+      "latencyMs": 303
+    },
+    {
+      "id": "python-subprocess",
+      "hit": true,
+      "expectedSource": "backend/knowledge/secure-coding.md",
+      "returnedSources": [
+        "backend/knowledge/secure-coding.md",
+        "SETUP.md"
+      ],
+      "latencyMs": 320
+    },
+    {
+      "id": "risk-formula",
+      "hit": true,
+      "expectedSource": "backend/src/services/risk.service.js",
+      "returnedSources": [
+        "backend/src/services/risk.service.js",
+        "backend/src/services/risk.service.js",
+        "backend/src/services/risk.service.js"
+      ],
+      "latencyMs": 314
+    },
+    {
+      "id": "c-buffer",
+      "hit": false,
+      "expectedSource": "backend/knowledge/secure-coding.md",
+      "returnedSources": [],
+      "latencyMs": 307
+    }
+  ],
+  "workflows": [
+    {
+      "id": "event-suspicious",
+      "status": "complete",
+      "latencyMs": 8164,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": true,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "event-benign",
+      "status": "complete",
+      "latencyMs": 10337,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": true,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-python",
+      "status": "complete",
+      "latencyMs": 19014,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 2,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "passed",
+      "parser": "python-ast",
+      "executed": false,
+      "proposedCodeHash": "542cc015b8da0263de347d75adbc3701dc7bc7ada85366c2fb01fd63bc26a25c"
+    },
+    {
+      "id": "code-javascript",
+      "status": "complete",
+      "latencyMs": 9046,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "passed",
+      "parser": "babel-parser",
+      "executed": false,
+      "proposedCodeHash": "f5f806dd9f2dd2714a8cc3aa2612bd743d7aab646bc2837c554dd6665bd07c9b"
+    },
+    {
+      "id": "code-typescript",
+      "status": "complete",
+      "latencyMs": 14630,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "passed",
+      "parser": "babel-parser",
+      "executed": false,
+      "proposedCodeHash": "34f2e4f2b680c60e958c50ffeabb0c737ddf3b26cbf4d79c18811ca207c1cb45"
+    },
+    {
+      "id": "code-c",
+      "status": "unavailable",
+      "latencyMs": 44980,
+      "error": "AI_INVALID_OUTPUT",
+      "structuredValid": false,
+      "citedCount": 0,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-cpp",
+      "status": "unavailable",
+      "latencyMs": 45917,
+      "error": "AI_INVALID_OUTPUT",
+      "structuredValid": false,
+      "citedCount": 0,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-bash",
+      "status": "complete",
+      "latencyMs": 22754,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "unavailable",
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": "6a03ea7421b8a96629e5e6344468e91abf740d893679f3abf069033ed1b4f126"
+    },
+    {
+      "id": "code-review",
+      "status": "complete",
+      "latencyMs": 56820,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "unavailable",
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": "4fe9a6a5ef1d75dd8e295e01af73f53dd76c458de50841be6711f0f027a184df"
+    }
+  ],
+  "limitations": [
+    "Small project-authored synthetic sample; not a representative benchmark.",
+    "No detector accuracy, generated-code behavioral pass rate or production performance is measured.",
+    "Citation validity checks ID membership, not whether the source substantively proves every claim.",
+    "Syntax checks do not establish functional correctness or security; generated tests are never executed."
+  ],
+  "metrics": {
+    "retrievalHitAt3": {
+      "hits": 4,
+      "total": 5
+    },
+    "structuredValidity": {
+      "valid": 7,
+      "total": 9
+    },
+    "citationIdValidity": {
+      "validResponses": 7,
+      "totalResponses": 7,
+      "citedIds": 8
+    },
+    "syntax": {
+      "passed": 3,
+      "checked": 3,
+      "unavailable": 2
+    },
+    "generatedUnitTests": {
+      "executed": 0,
+      "passRate": null
+    },
+    "logicalWorkflowErrorRate": 0.2222222222222222,
+    "providerAttempts": 26,
+    "providerFailedAttempts": 3,
+    "latencyMs": {
+      "median": 19014,
+      "max": 56820
+    }
+  },
+  "completedAt": "2026-10-19T15:32:48.503Z"
+}

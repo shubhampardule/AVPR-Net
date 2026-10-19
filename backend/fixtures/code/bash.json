@@ -1,0 +1,5 @@
+{
+  "language": "bash",
+  "mode": "generate",
+  "request": "Write an unexecuted Bash function is_valid_port that validates a single decimal argument as a port 1 through 65535 and returns 0 if valid, 1 otherwise. Reject whitespace, signs, empty arguments, overflow and command strings. Use Bash builtins, quote expansions, no eval or external commands. Suggest test cases without executing them."
+}

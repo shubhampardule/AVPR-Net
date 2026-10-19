@@ -1,0 +1,5 @@
+{
+  "language": "cpp",
+  "mode": "generate",
+  "request": "Write a C++17 pure std::optional<unsigned short> parse_port(std::string_view text) for a decimal port 1 through 65535. Reject signs, whitespace, empty input, trailing junk and overflow. No side effects or third-party dependencies. Suggest boundary tests."
+}

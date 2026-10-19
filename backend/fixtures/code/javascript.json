@@ -1,0 +1,5 @@
+{
+  "language": "javascript",
+  "mode": "generate",
+  "request": "Write a pure JavaScript validatePort(value) function that accepts only integer numbers from 1 to 65535 and returns the port, throwing on strings, NaN, Infinity and booleans. No dependencies or side effects. Suggest focused tests."
+}

@@ -1,0 +1,257 @@
+{
+  "mode": "live_nvidia",
+  "startedAt": "2026-10-19T15:35:05.838Z",
+  "environment": {
+    "node": "v22.23.1",
+    "platform": "win32",
+    "architecture": "x64"
+  },
+  "configuration": {
+    "version": "sections-lines-2200bytes-overlap2-v2",
+    "model": "nvidia/nemotron-3-embed-1b",
+    "dimensions": 2048,
+    "endpoint": "https://integrate.api.nvidia.com/v1",
+    "collection": "approved-shared",
+    "chatModel": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "headerTimeoutMs": 30000,
+    "bodyTimeoutMs": 60000,
+    "retries": 2,
+    "maxTokens": 2048
+  },
+  "corpus": {
+    "chunks": 29,
+    "sources": [
+      "SETUP.md",
+      "backend/knowledge/network-investigation.md",
+      "backend/knowledge/secure-coding.md",
+      "backend/src/services/risk.service.js"
+    ],
+    "contentHash": "3597902170315e8c0528e20d3370da33ef915251b2541afaa2ca5d0da52c4a1d",
+    "indexing": {
+      "chunks": 29,
+      "embedded": 0,
+      "reused": 29,
+      "updatedAt": "2026-10-19T15:35:05.791Z"
+    }
+  },
+  "retrieval": [
+    {
+      "id": "ssh-failures",
+      "hit": true,
+      "expectedSource": "backend/knowledge/network-investigation.md",
+      "returnedSources": [
+        "backend/knowledge/network-investigation.md",
+        "backend/knowledge/network-investigation.md",
+        "SETUP.md"
+      ],
+      "latencyMs": 755
+    },
+    {
+      "id": "health-check",
+      "hit": true,
+      "expectedSource": "backend/knowledge/network-investigation.md",
+      "returnedSources": [
+        "backend/knowledge/network-investigation.md",
+        "backend/knowledge/network-investigation.md"
+      ],
+      "latencyMs": 301
+    },
+    {
+      "id": "python-subprocess",
+      "hit": true,
+      "expectedSource": "backend/knowledge/secure-coding.md",
+      "returnedSources": [
+        "backend/knowledge/secure-coding.md",
+        "backend/knowledge/secure-coding.md",
+        "SETUP.md"
+      ],
+      "latencyMs": 334
+    },
+    {
+      "id": "risk-formula",
+      "hit": true,
+      "expectedSource": "backend/src/services/risk.service.js",
+      "returnedSources": [
+        "backend/src/services/risk.service.js",
+        "backend/src/services/risk.service.js",
+        "backend/src/services/risk.service.js"
+      ],
+      "latencyMs": 193
+    },
+    {
+      "id": "c-buffer",
+      "hit": true,
+      "expectedSource": "backend/knowledge/secure-coding.md",
+      "returnedSources": [
+        "backend/knowledge/secure-coding.md"
+      ],
+      "latencyMs": 184
+    }
+  ],
+  "workflows": [
+    {
+      "id": "event-suspicious",
+      "status": "complete",
+      "latencyMs": 40485,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 3,
+      "citationIdsValid": true,
+      "inputPreserved": true,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "event-benign",
+      "status": "complete",
+      "latencyMs": 7321,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 2,
+      "citationIdsValid": true,
+      "inputPreserved": true,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-python",
+      "status": "unavailable",
+      "latencyMs": 12809,
+      "error": "AI_INVALID_OUTPUT",
+      "structuredValid": false,
+      "citedCount": 0,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-javascript",
+      "status": "complete",
+      "latencyMs": 9550,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "passed",
+      "parser": "babel-parser",
+      "executed": false,
+      "proposedCodeHash": "50e0e987c46ed0c91acc42f4e8707be27507756098f43cbc476258c583655996"
+    },
+    {
+      "id": "code-typescript",
+      "status": "complete",
+      "latencyMs": 11324,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "passed",
+      "parser": "babel-parser",
+      "executed": false,
+      "proposedCodeHash": "41eb2cad6fe769350741eda5954c35df23b07cc38c88923f5d21536820404e02"
+    },
+    {
+      "id": "code-c",
+      "status": "complete",
+      "latencyMs": 12119,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "unavailable",
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": "66bf0e312268596c91ef952a51913dc95e1d89f5703f2671e50c19fe4ce096cc"
+    },
+    {
+      "id": "code-cpp",
+      "status": "unavailable",
+      "latencyMs": 7328,
+      "error": "AI_INVALID_OUTPUT",
+      "structuredValid": false,
+      "citedCount": 0,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": null,
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": null
+    },
+    {
+      "id": "code-bash",
+      "status": "complete",
+      "latencyMs": 5180,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "unavailable",
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": "4f6786811da9e5f58041fd79c7293df657eb3f63a8f907019da6ad683b4fe378"
+    },
+    {
+      "id": "code-review",
+      "status": "complete",
+      "latencyMs": 16713,
+      "error": null,
+      "structuredValid": true,
+      "citedCount": 1,
+      "citationIdsValid": true,
+      "inputPreserved": null,
+      "syntax": "unavailable",
+      "parser": null,
+      "executed": false,
+      "proposedCodeHash": "e99bf3b73136870cb25e079d50beb630ea0314304ee70f6ab0603f100f0ea5fa"
+    }
+  ],
+  "limitations": [
+    "Small project-authored synthetic sample; not a representative benchmark.",
+    "No detector accuracy, generated-code behavioral pass rate or production performance is measured.",
+    "Citation validity checks ID membership, not whether the source substantively proves every claim.",
+    "Syntax checks do not establish functional correctness or security; generated tests are never executed."
+  ],
+  "metrics": {
+    "retrievalHitAt3": {
+      "hits": 5,
+      "total": 5
+    },
+    "structuredValidity": {
+      "valid": 7,
+      "total": 9
+    },
+    "citationIdValidity": {
+      "validResponses": 7,
+      "totalResponses": 7,
+      "citedIds": 10
+    },
+    "syntax": {
+      "passed": 2,
+      "checked": 2,
+      "unavailable": 3
+    },
+    "generatedUnitTests": {
+      "executed": 0,
+      "passRate": null
+    },
+    "logicalWorkflowErrorRate": 0.2222222222222222,
+    "providerAttempts": 24,
+    "providerFailedAttempts": 1,
+    "latencyMs": {
+      "median": 11324,
+      "max": 40485
+    }
+  },
+  "completedAt": "2026-10-19T15:37:10.447Z"
+}

@@ -1,0 +1,6 @@
+{
+  "language": "javascript",
+  "mode": "review",
+  "request": "Review this port parser and return a unified diff adding strict runtime validation for integer numbers between 1 and 65535, rejecting strings, NaN and booleans. Include a suggested regression test.",
+  "originalCode": "export function validatePort(value) { return parseInt(value, 10); }\n"
+}
