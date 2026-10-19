@@ -1,0 +1,195 @@
+# AVPR-Net / SecurePatch + NVIDIA Nemotron
+
+SecurePatch helps developers prioritize repository vulnerabilities and review
+defensive changes. The supplied folder is named AVPR-Net, while the source and
+UI identify the application as SecurePatch. Its existing detectors are Semgrep
+and Bandit static analyzers; there is no trained neural model, packet capture or
+network detection engine in this repository.
+
+The NVIDIA extension adds source-backed event/finding explanations, defensive
+code generation/review in six languages, and persistent retrieval over approved
+project guidance. Hosted inference runs on NVIDIA; no local LLM/GPU is required.
+
+## Architecture and responsibilities
+
+- **Existing scanning path:** React -> authenticated Express API -> BullMQ/Redis
+  worker -> authorized GitHub archive -> Semgrep/Bandit -> normalization and
+  SHA-256 deduplication -> occurrence counts -> deterministic weighted risk ->
+  MongoDB findings. Temporary source workspaces are cleaned up by the worker.
+- **AI path:** authorized finding or supplied structured event/code request ->
+  best-effort minimization -> NVIDIA query embeddings -> local cosine retrieval
+  -> retrieved excerpts and original evidence -> hosted Nemotron chat -> bounded
+  schema/citation validation -> reviewable UI result. It never changes the
+  detector's result, executes a proposal or deploys a patch.
+- **Indexing:** an operator allowlists explicit files in
+  `backend/knowledge/sources.json`; section-aware overlapping chunks include
+  path, lines, type, language and hash. Passage embeddings/vectors persist in
+  ignored `backend/.local/knowledge.json`. Atomic writes, incremental reuse,
+  model/chunker compatibility checks and an exclusive lock protect updates.
+  This shared nonsensitive corpus is capped at 500 chunks; exact cosine search
+  is appropriate for this demo, not a large multi-tenant vector deployment.
+
+Nemotron `nvidia/nemotron-3.5-lightning-30b-a3b` supplies hosted text/code
+assistance. `nvidia/nemotron-3-embed-1b` supplies 2048-dimensional retrieval
+embeddings using `passage` for indexing and `query` for search. One shared
+provider implements deadlines, bounded retries, response validation and safe
+operational logging. See [provider details](docs/NVIDIA_PROVIDER.md).
+
+## Run the local NVIDIA demo
+
+Prerequisites: Node 22.23.1 or compatible newer Node, npm, a NVIDIA API key and
+internet access. Python 3 is optional for AST-only Python syntax checks. The
+synthetic demo uses the existing backend/frontend without MongoDB, Redis or OAuth.
+
+From the root in PowerShell:
+
+```powershell
+cd backend
+npm ci --ignore-scripts --no-audit --no-fund
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+# Set NVIDIA_API_KEY in backend/.env with your local editor.
+npm run nvidia:health -- --live
+npm run rag:index
+npm run demo
+```
+
+In a second terminal from the root:
+
+```powershell
+cd frontend
+npm ci --ignore-scripts --no-audit --no-fund
+npm run dev -- --host 127.0.0.1
+```
+
+Open [http://127.0.0.1:5174/assistant-demo](http://127.0.0.1:5174/assistant-demo).
+Follow [the two-scenario demo script](docs/DEMO.md). Demo mode binds the API to
+127.0.0.1:5000, requires an explicit demo header/approved browser origin, accepts
+only synthetic events, exposes no scanning/data-store routes, and refuses
+NODE_ENV=production. It is an explicit operator mode in the existing server.
+
+## Configuration
+
+`backend/.env.example` contains all supported settings; `.env` is ignored. Never
+put credentials in frontend source, browser storage, or a VITE_ variable.
+
+```dotenv
+NVIDIA_API_KEY=
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_CHAT_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
+NVIDIA_EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
+NVIDIA_EMBEDDING_DIMENSIONS=2048
+NVIDIA_CONNECTION_TIMEOUT_MS=30000
+NVIDIA_RESPONSE_TIMEOUT_MS=60000
+NVIDIA_MAX_RETRIES=2
+NVIDIA_MAX_TOKENS=2048
+```
+
+Optional server variable `AI_LANGUAGES` selects a comma-separated subset of
+`python,javascript,typescript,c,cpp,bash`. Configuration-only diagnostics never
+call the provider; `reachable: null` means untested. Explicit live diagnostics
+send only tiny synthetic text. Each retry may consume additional quota.
+
+## Run the original scanning application
+
+The default `npm start` / `npm run dev` keeps the existing authenticated server
+and requires DATABASE_URL, SESSION_SECRET, Google OAuth client settings, GitHub
+App settings/private-key path, MongoDB and Redis. The standalone scan worker
+also needs Semgrep and/or Bandit installed on PATH. Start MongoDB/Redis, then
+backend server, worker (`npm run worker` in backend) and frontend. Configure the
+callbacks in `.env.example` to match the OAuth/GitHub applications you own.
+
+After signing in and selecting an organization, run a scan from a connected
+repository. **Explain with Nemotron** links a persisted finding to `/assistant`;
+AI requests require both session authentication and organization membership.
+Finding queries are scoped by finding ID and organization. Original scanner
+severity and weighted risk remain authoritative. The supplied environment lacks
+these original services/credentials/scanners, so full authenticated scanning has
+not been verified here. Core scanner normalization/risk tests still pass.
+
+The default in-memory session store and existing security assumptions are not a
+production deployment design. Some landing-page examples predate this extension
+and depict automated PR/container testing that the backend does not implement.
+
+## Index, test and evaluate
+
+From backend:
+
+```powershell
+npm run rag:index
+npm run rag:status
+npm run rag:query -- "Repeated SSH authentication failures"
+npm run rag:index -- --rebuild
+npm test
+npm run evaluate
+npm run evaluate -- --live
+```
+
+From frontend, `npm run build` verifies the production bundle. The indexer reads
+only allowlisted supported text/source files and excludes dotfiles, secrets,
+dependencies, binaries, build output, symlinks/escapes and oversized files.
+Incremental runs reuse unchanged content and remove no-longer-configured sources.
+Changing the embedding model, dimensions, endpoint or chunker requires rebuild.
+After an interrupted indexer, confirm no indexing process is active before
+removing only its `.lock` file. Do not edit or share private vectors/artifacts.
+
+Offline tests use mocks and never call NVIDIA. The offline evaluator uses
+artificial deterministic vectors/canned responses and is not a model benchmark.
+Live evaluation uses five known-source queries, two events, six languages and
+one review, retaining failures in its results. See [measured evaluation](docs/EVALUATION.md)
+and [fixture provenance](backend/fixtures/README.md).
+
+## API surface
+
+Normal mode: `/api/v1/organizations/:organizationId/ai`; demo mode:
+`/api/v1/ai/demo` with `X-SecurePatch-Demo: 1`.
+
+| Method/path suffix | Input/result |
+| --- | --- |
+| GET /health | Configuration status, languages, execution disabled |
+| GET /knowledge | Index status and approved source metadata |
+| GET /fixtures | Built-in synthetic event/code examples |
+| POST /retrieve | `{query}` -> source excerpts and similarity |
+| POST /analyze | `{event}` or normal-mode `{findingId}` -> original evidence plus advisory analysis |
+| POST /code | `{language,mode,request,originalCode?}` -> code/diff, explanation, sources and parser status |
+
+Requests are bounded to 24 KiB at the HTTP layer and smaller per-field limits.
+Ten costly requests/minute per user and two concurrent workflows bound hosted
+usage. Missing/failed AI services return understandable unavailable results;
+original scan results remain available. Stale/corrupt indexes require operator
+repair; an empty index produces an explicit insufficient-context result.
+
+## Privacy, reliability and limits
+
+Assistant requests and indexed excerpts leave the machine for NVIDIA inference.
+Use approved nonsensitive material. Redaction handles representative credential,
+email and sensitive-field patterns, but cannot guarantee removal of every secret
+or private fact. Private organization files are not indexed by this MVP. Trial
+terms may restrict confidential submissions and allow content use/monitoring;
+see the official references linked in NVIDIA_PROVIDER.md.
+
+Retrieved text, logs and code are untrusted data under a separate system policy.
+Schema/citation checks reject malformed or unsupported outputs, but cannot prove
+all statements are true or defeat every prompt injection. Model severity is
+advisory; risk scores are not probabilities. Synthetic events do not establish
+network detection accuracy. Source-ID validity is not semantic citation proof.
+
+JavaScript/TypeScript are parsed in a bounded worker; Python uses a trusted
+isolated AST parser with stdin, size and time limits. Generated programs/tests
+are never evaluated. C/C++/Bash syntax and unified-diff validation are unavailable
+and labeled as such. No dependency is installed from a generated suggestion.
+No host blocking, firewall change, patch application, deployment or PR occurs.
+
+## Attribution and submission evidence
+
+Package manifests declare ISC; no original root LICENSE was supplied, so verify
+ownership/license text before redistribution. npm dependencies retain their own
+licenses. NVIDIA model cards link OpenMDW-1.1 and API Trial Terms; no weights are
+distributed here. Semgrep/Bandit and downloaded scanner rules retain their own
+terms. All new guidance and fixtures are original project demonstration material;
+no third-party traffic or security corpus was imported.
+
+See [repository audit and phase record](docs/NVIDIA_HACKATHON_PLAN.md),
+[changed-file inventory](docs/CHANGES.md), and [technical submission summary](docs/SUBMISSION.md).
+The specific hackathon was not identified; eligibility, permitted usage and
+submission-rule compliance remain unverified. No detection-accuracy improvement
+or submission readiness is claimed beyond the recorded evidence.
