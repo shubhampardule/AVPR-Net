@@ -1,0 +1,6 @@
+[
+  { "path": "SETUP.md", "type": "project" },
+  { "path": "backend/knowledge/network-investigation.md", "type": "guidance" },
+  { "path": "backend/knowledge/secure-coding.md", "type": "guidance" },
+  { "path": "backend/src/services/risk.service.js", "type": "project" }
+]
