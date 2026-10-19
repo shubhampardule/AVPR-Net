@@ -1,0 +1,51 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "backend": {
+      "root": "backend",
+      "framework": "express",
+      "entrypoint": "src/app.vercel.cjs",
+      "buildCommand": "npm run build:vercel",
+      "functions": {
+        "**": {
+          "includeFiles": "src/**",
+          "regions": ["bom1"]
+        }
+      }
+    },
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "rewrites": [
+        {
+          "source": "/(.*)",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ],
+  "daemons": {
+    "scan-worker": {
+      "root": "backend",
+      "entrypoint": "Dockerfile.worker",
+      "instances": {
+        "bom1": 1
+      },
+      "terminationGracePeriodSeconds": 300
+    }
+  }
+}

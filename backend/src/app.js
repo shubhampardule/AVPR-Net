@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const helmet = require("helmet");
 require("dotenv").config({ quiet: true });
 const demoMode = process.env.SECUREPATCH_DEMO_MODE === "true";
 if (demoMode && process.env.NODE_ENV === "production") throw new Error("Demo mode cannot run in production");
@@ -10,15 +9,33 @@ const notFoundHandler = require("./middleware/notFoundHandler");
 const errorHandler = require("./middleware/errorHandler");
 const session = require("express-session");
 const passport = demoMode ? null : require("./config/passport");
+const env = require("./config/env");
+const connectDatabase = require("./config/database");
+const MongoSessionStore = require("./config/mongoSessionStore");
 
 const app = express();
+if (env.nodeEnv === "production") app.set("trust proxy", 1);
 app.use((req, res, next) => {
   req.requestId = require("node:crypto").randomUUID();
   res.setHeader("X-Request-ID", req.requestId);
   next();
 });
 
-app.use(helmet());
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("Origin-Agent-Cluster", "?1");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-DNS-Prefetch-Control", "off");
+  res.setHeader("X-Download-Options", "noopen");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+  res.setHeader("X-XSS-Protection", "0");
+  next();
+});
 
 app.use(
   cors({
@@ -29,18 +46,35 @@ app.use(
 
 app.use(express.json({ limit: "24kb", strict: true }));
 
-if (!demoMode) app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: false,
-      maxAge: 1000 * 60 * 60 * 24,
-    },
-  })
-);
+if (!demoMode && env.nodeEnv !== "test") {
+  app.use((req, res, next) => {
+    connectDatabase().then(() => next(), next);
+  });
+}
+
+if (!demoMode) {
+  app.use(
+    session({
+      name: "securepatch.sid",
+      secret: process.env.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      store:
+        env.nodeEnv === "test"
+          ? undefined
+          : new MongoSessionStore({
+              collectionName: "sessions",
+              ttl: 60 * 60 * 24,
+            }),
+      cookie: {
+        httpOnly: true,
+        secure: env.nodeEnv === "production",
+        sameSite: "lax",
+        maxAge: 1000 * 60 * 60 * 24,
+      },
+    })
+  );
+}
 
 if (passport) {
   app.use(passport.initialize());

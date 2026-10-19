@@ -36,7 +36,6 @@ organizationMemberSchema.index(
   { unique: true }
 );
 
-module.exports = mongoose.model(
-  "OrganizationMember",
-  organizationMemberSchema
-);
+module.exports =
+  mongoose.models.OrganizationMember ||
+  mongoose.model("OrganizationMember", organizationMemberSchema);

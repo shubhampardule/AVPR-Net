@@ -14,11 +14,13 @@
     "nvidia:health": "node src/cli/nvidia-health.js",
     "test:nvidia": "jest tests/nvidia.test.js --runInBand",
     "rag:index": "node src/cli/rag.js index",
+    "rag:bundle": "node src/cli/rag.js bundle",
     "rag:query": "node src/cli/rag.js query",
     "rag:status": "node src/cli/rag.js status",
     "assistant": "node src/cli/assistant.js",
     "demo": "node src/cli/demo.js",
-    "evaluate": "node src/cli/evaluate.js"
+    "evaluate": "node src/cli/evaluate.js",
+    "build:vercel": "esbuild src/app.js --bundle --platform=node --format=cjs --packages=external --outfile=src/app.vercel.cjs"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +28,8 @@
   "type": "commonjs",
   "dependencies": {
     "@babel/parser": "7.29.9",
+    "@vercel/oidc": "^4.0.1",
+    "@vercel/queue": "^0.8.0",
     "adm-zip": "^0.6.1",
     "bullmq": "^6.3.11",
     "cors": "^2.8.6",
@@ -42,6 +46,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "jest": "^30.4.2",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2"

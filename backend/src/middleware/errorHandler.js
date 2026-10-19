@@ -6,7 +6,12 @@ const errorHandler = (err, req, res, next) => {
   const code = parserError ? (statusCode === 413 ? "REQUEST_TOO_LARGE" : "INVALID_JSON") : err.code || "INTERNAL_SERVER_ERROR";
 
   // Parser errors can echo input, and upstream errors may contain credentials.
-  logger.error(`${code} status=${statusCode} requestId=${req.requestId || "unknown"}`);
+  const diagnostic = parserError
+    ? ""
+    : ` cause=${err.name || "Error"} code=${err.code || "unknown"} message=${String(err.message || "unknown")
+        .replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[redacted MongoDB URI]")
+        .slice(0, 240)}`;
+  logger.error(`${code} status=${statusCode} requestId=${req.requestId || "unknown"}${diagnostic}`);
 
   res.status(statusCode).json({
     success: false,
