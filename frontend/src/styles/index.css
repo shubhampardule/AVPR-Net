@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #08090B;
+  --bg-secondary: #0D0F12;
+  --bg-elevated: #111419;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text-primary: #F5F7FA;
+  --text-secondary: rgba(245, 247, 250, 0.62);
+  --text-muted: rgba(245, 247, 250, 0.42);
+  --accent-security: #4ADE80;
+  --accent-blue: #60A5FA;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #08090B;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Fine technical grid background pattern */
+.tech-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+
+.tech-dots {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Monospace code styling */
+.font-mono-code {
+  font-family: 'JetBrains Mono', SFMono-Regular, Consolas, Menlo, monospace;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+/* Accessibility: respect user prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
