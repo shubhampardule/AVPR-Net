@@ -1,0 +1,195 @@
+import React, { useState } from "react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  FileCode,
+  ShieldAlert,
+  Terminal,
+  ExternalLink,
+} from "lucide-react";
+import { RiskScoreBar } from "./RiskScoreBar";
+import { Link } from "react-router-dom";
+
+export function FindingCard({ finding }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const severityBadges = {
+    critical: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+    high: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    low: "bg-[#4ADE80]/10 text-[#4ADE80] border-[#4ADE80]/20",
+    info: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  };
+
+  const badgeClass =
+    severityBadges[finding.severity?.toLowerCase()] ||
+    "bg-white/[0.05] text-text-muted border-white/[0.1]";
+  const riskCategoryClass =
+    severityBadges[finding.riskCategory?.toLowerCase()] ||
+    "bg-white/[0.05] text-text-muted border-white/[0.1]";
+
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-[#0D0F12] overflow-hidden transition hover:border-white/[0.16]">
+      {/* Header Row */}
+      <div
+        onClick={() => setExpanded(!expanded)}
+        className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none hover:bg-white/[0.01]"
+      >
+        <div className="flex items-start gap-3.5">
+          <div className="mt-0.5 p-2 rounded-lg bg-[#111419] border border-white/[0.08] text-rose-400">
+            <ShieldAlert className="w-4 h-4" />
+          </div>
+
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-1.5">
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border ${badgeClass}`}
+                title={`Scanner severity: ${finding.severity}`}
+              >
+                {finding.severity}
+              </span>
+
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border ${riskCategoryClass}`}
+                title="SecurePatch calculated risk category"
+              >
+                {finding.riskCategory} Risk
+              </span>
+
+              {finding.cwe && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono text-text-muted bg-white/[0.04] border border-white/[0.06]">
+                  {finding.cwe}
+                </span>
+              )}
+
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono text-text-muted bg-white/[0.04] border border-white/[0.06]">
+                {finding.scanner}
+              </span>
+            </div>
+
+            <h3 className="text-sm font-semibold text-text-primary tracking-tight">
+              {finding.title}
+            </h3>
+            {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}`}
+              onClick={(event) => event.stopPropagation()} className="text-xs text-green-300 hover:underline">Explain with Nemotron →</Link>}
+
+            <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">
+              <FileCode className="w-3.5 h-3.5 text-text-muted" />
+              <span>
+                {finding.filePath}
+                {finding.startLine ? `:${finding.startLine}` : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Risk Score and Accordion Toggle */}
+        <div className="flex items-center justify-between md:justify-end gap-6 pt-2 md:pt-0 border-t md:border-t-0 border-white/[0.06]">
+          <div className="flex flex-col items-start md:items-end">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted mb-1">
+              Risk Score
+            </span>
+            <RiskScoreBar
+              score={finding.riskScore}
+              category={finding.riskCategory}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-text-muted hover:text-white"
+          >
+            {expanded ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="px-4 pb-5 pt-2 sm:px-5 border-t border-white/[0.06] bg-[#0A0B0E]/60 space-y-4">
+          {/* Description */}
+          {finding.description && (
+            <div>
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1">
+                Description
+              </h4>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                {finding.description}
+              </p>
+            </div>
+          )}
+
+          {/* Code Snippet */}
+          {finding.evidenceSnippet && (
+            <div>
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1.5 flex items-center gap-1.5">
+                <Terminal className="w-3 h-3 text-[#4ADE80]" />
+                Vulnerable Code Evidence
+              </h4>
+              <div className="p-3 rounded-lg bg-[#050607] border border-white/[0.08] overflow-x-auto font-mono text-xs text-text-primary">
+                <pre>{finding.evidenceSnippet}</pre>
+              </div>
+            </div>
+          )}
+
+          {/* Risk Factors Breakdown */}
+          {finding.riskFactors && (
+            <div className="p-3 rounded-lg bg-[#111419] border border-white/[0.06]">
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-2">
+                Deterministic Risk Factors
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                <div>
+                  <span className="text-[10px] text-text-muted block">Severity</span>
+                  <span className="font-semibold text-text-primary">
+                    {finding.riskFactors.severity} / 10
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Exploitability</span>
+                  <span className="font-semibold text-text-primary">
+                    {finding.riskFactors.exploitability} / 10
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Occurrence</span>
+                  <span className="font-semibold text-text-primary">
+                    {finding.riskFactors.occurrence} / 10
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Business Impact</span>
+                  <span className="font-semibold text-text-primary">
+                    {finding.riskFactors.businessImpact} / 10
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Remediation Guidance */}
+          {finding.remediation && (
+            <div>
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-[#4ADE80] mb-1">
+                Suggested Remediation
+              </h4>
+              <a
+                href={finding.remediation}
+                className="text-xs text-text-secondary leading-relaxed hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {finding.remediation}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
