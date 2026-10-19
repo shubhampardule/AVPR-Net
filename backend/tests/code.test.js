@@ -74,6 +74,25 @@ test("nested metadata objects remain invalid", async () => {
   expect((await service.generateCode({ language: "javascript", mode: "generate", request: "Validate a port" })).error.code).toBe("AI_INVALID_OUTPUT");
 });
 
+test("one malformed hosted response is retried without weakening validation", async () => {
+  const { service, provider, validator } = setup();
+  provider.chat.mockResolvedValueOnce({ text: "not JSON" });
+  const result = await service.generateCode({ language: "javascript", mode: "generate", request: "Validate a port" });
+  expect(result.status).toBe("complete");
+  expect(provider.chat).toHaveBeenCalledTimes(2);
+  expect(provider.chat.mock.calls[1][0][1].content).toContain("A previous response failed validation");
+  expect(validator).toHaveBeenCalledTimes(1);
+});
+
+test("persistent invalid output is bounded to two attempts and never validated or applied", async () => {
+  const { service, provider, validator } = setup();
+  provider.chat.mockResolvedValue({ text: "not JSON" });
+  const result = await service.generateCode({ language: "javascript", mode: "generate", request: "Validate a port" });
+  expect(result).toMatchObject({ status: "unavailable", proposal: null, applied: false });
+  expect(provider.chat).toHaveBeenCalledTimes(2);
+  expect(validator).not.toHaveBeenCalled();
+});
+
 test.each(["javascript", "typescript"])("%s parser validates syntax but never runs the program", async (language) => {
   const result = await validateCode(language, "throw new Error('would execute if evaluated');");
   expect(result).toMatchObject({ status: "passed", executed: false });

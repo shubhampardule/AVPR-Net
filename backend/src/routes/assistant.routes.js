@@ -10,6 +10,7 @@ function createAssistantRouter(options = {}) {
   const service = options.service || new AssistantService({ provider, rag });
   const router = express.Router({ mergeParams: true });
   const origins = new Set(["http://localhost:5174", "http://127.0.0.1:5174"]);
+  if (!demo && process.env.FRONTEND_URL) origins.add(new URL(process.env.FRONTEND_URL).origin);
   const counters = new Map();
   let inFlight = 0;
 

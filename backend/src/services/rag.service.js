@@ -48,8 +48,8 @@ function cosine(a, b) {
 }
 
 class RagService {
-  constructor({ provider, root = path.resolve(__dirname, "../../.."),
-    indexPath = path.resolve(__dirname, "../../.local/knowledge.json"), env = process.env } = {}) {
+  constructor({ provider, root = path.resolve(process.cwd(), ".."),
+    indexPath = path.resolve(process.cwd(), ".local/knowledge.json"), env = process.env } = {}) {
     this.provider = provider;
     this.root = root;
     this.indexPath = indexPath;
@@ -64,12 +64,20 @@ class RagService {
 
   async read({ allowStale = false } = {}) {
     let stat;
-    try { stat = await fs.stat(this.indexPath); }
-    catch (error) { if (error.code === "ENOENT") return null; throw error; }
-    if (stat.size > 64 * 1024 * 1024) throw fail("RAG_INVALID_INDEX", "Index exceeds the size limit");
     let index;
-    try { index = JSON.parse(await fs.readFile(this.indexPath, "utf8")); }
-    catch (_) { throw fail("RAG_INVALID_INDEX", "Index is unreadable; rebuild the approved corpus"); }
+    try { stat = await fs.stat(this.indexPath); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      if (this.env.VERCEL !== "1") return null;
+      // The immutable, approved shared corpus is bundled by esbuild so a fresh
+      // serverless instance does not depend on a writable/local indexing cache.
+      index = require("../../knowledge/index.json");
+    }
+    if (!index) {
+      if (stat.size > 64 * 1024 * 1024) throw fail("RAG_INVALID_INDEX", "Index exceeds the size limit");
+      try { index = JSON.parse(await fs.readFile(this.indexPath, "utf8")); }
+      catch (_) { throw fail("RAG_INVALID_INDEX", "Index is unreadable; rebuild the approved corpus"); }
+    }
     const signature = this.signature();
     if (!allowStale && JSON.stringify(index.signature) !== JSON.stringify(signature)) {
       throw fail("RAG_STALE_INDEX", "Embedding model, endpoint or chunker changed; rebuild the index");

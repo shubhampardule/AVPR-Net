@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import { Navbar } from './components/navbar/Navbar';
 import { HeroSection } from './components/hero/HeroSection';
@@ -68,7 +68,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/assistant-demo" element={<Assistant demo />} />
+        <Route path="/assistant-demo" element={import.meta.env.PROD ? <Navigate to="/assistant" replace /> : <Assistant demo />} />
 
         <Route element={<DashboardLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />

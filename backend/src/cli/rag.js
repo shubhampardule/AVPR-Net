@@ -8,12 +8,16 @@ async function main() {
   const rag = new RagService({ provider: new NvidiaService({ logger: require("../config/logger") }) });
   const [command, ...args] = process.argv.slice(2);
   let result;
-  if (command === "index") {
+  if (command === "index" || command === "bundle") {
     const sources = JSON.parse(await fs.readFile(path.resolve(__dirname, "../../knowledge/sources.json"), "utf8"));
     result = await rag.ingest(sources, { rebuild: args.includes("--rebuild") });
+    if (command === "bundle") {
+      await fs.copyFile(rag.indexPath, path.resolve(__dirname, "../../knowledge/index.json"));
+      result.bundled = true;
+    }
   } else if (command === "query") result = await rag.retrieve(args.join(" "));
   else if (command === "status") result = await rag.diagnostics();
-  else throw new Error("Usage: rag.js index [--rebuild] | query <text> | status");
+  else throw new Error("Usage: rag.js index [--rebuild] | bundle | query <text> | status");
   console.log(JSON.stringify(result, null, 2));
 }
 main().catch((error) => {

@@ -59,6 +59,19 @@ test("empty index does not call embedding API", async () => {
   expect(provider.embed).not.toHaveBeenCalled();
 });
 
+test("a fresh Vercel instance can read the bundled approved corpus without a local file", async () => {
+  const bundled = require("../knowledge/index.json");
+  const hosted = new RagService({ root, indexPath: path.join(root, "missing.json"), provider,
+    env: { VERCEL: "1", NVIDIA_BASE_URL: bundled.signature.endpoint,
+      NVIDIA_EMBEDDING_MODEL: bundled.signature.model,
+      NVIDIA_EMBEDDING_DIMENSIONS: String(bundled.signature.dimensions) } });
+  const status = await hosted.diagnostics();
+  expect(status.status).toBe("ready");
+  expect(status.chunks).toBeGreaterThan(0);
+  expect(status.sources).toContain("backend/knowledge/secure-coding.md");
+  expect(provider.embed).not.toHaveBeenCalled();
+});
+
 test("stale signature requires rebuild; explicit rebuild works", async () => {
   await write("auth.md", "SSH authentication");
   await rag.ingest(sources.slice(0, 1));

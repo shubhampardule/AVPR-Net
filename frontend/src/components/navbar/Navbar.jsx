@@ -20,7 +20,7 @@ export function Navbar({ onOpenAuthModal }) {
     { label: 'Security', href: '#security' },
     { label: 'Playground', href: '#playground' },
     { label: 'Capabilities', href: '#capabilities' },
-    { label: 'AI assistant', href: '/assistant-demo' },
+    { label: 'AI assistant', href: import.meta.env.DEV ? '/assistant-demo' : '/assistant' },
   ];
 
   return (

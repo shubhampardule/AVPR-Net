@@ -55,9 +55,12 @@ class NvidiaService {
     for (let attempt = 0; attempt <= config.retries; attempt++) {
       const controller = new AbortController();
       let timer;
-      let phase = "connection";
+      // Non-streaming chat sends headers only after inference has completed.
+      // Its first-byte wait belongs to the response budget, not a short connect budget.
+      const inference = endpoint === "chat/completions";
+      let phase = inference ? "response" : "connection";
       try {
-        timer = setTimeout(() => controller.abort(), config.connectionTimeoutMs);
+        timer = setTimeout(() => controller.abort(), inference ? config.responseTimeoutMs : config.connectionTimeoutMs);
         const response = await this.fetch(`${config.baseUrl}/${endpoint}`, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { "Content-Type": "application/json",
@@ -122,7 +125,7 @@ class NvidiaService {
     this.logger?.info(JSON.stringify({ service: "nvidia", ...metadata }));
   }
 
-  async chat(messages) {
+  async chat(messages, { json = false } = {}) {
     if (!Array.isArray(messages) || !messages.length || messages.length > 20 ||
       messages.some((m) => !m || !["system", "user", "assistant"].includes(m.role) ||
         typeof m.content !== "string" || !m.content.trim()) ||
@@ -134,6 +137,7 @@ class NvidiaService {
       model: config.chatModel, messages, temperature: 0.2, top_p: 0.95,
       max_tokens: config.maxTokens, stream: false,
       chat_template_kwargs: { enable_thinking: false },
+      ...(json ? { response_format: { type: "json_object" } } : {}),
     }, config);
     const choice = data?.choices?.[0];
     if (choice?.finish_reason !== "stop" || typeof choice?.message?.content !== "string" ||

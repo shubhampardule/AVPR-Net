@@ -62,7 +62,7 @@ class AssistantService {
       .map((s) => s.trim()).filter((s, i, all) => ALL_LANGUAGES.includes(s) && all.indexOf(s) === i);
   }
 
-  async generateCode(input) {
+  async generateCode(input, retryInvalid = true) {
     bounded(input);
     if (!input || typeof input !== "object" || Array.isArray(input) ||
       Object.keys(input).some((key) => !["request", "language", "mode", "originalCode"].includes(key)) ||
@@ -81,17 +81,20 @@ class AssistantService {
         { role: "system", content: SYSTEM_POLICY },
         { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
 Keep the entire response concise, preferably under 1000 tokens; suggest at most five tests.
-Return exactly these JSON keys: ${CODE_FIELDS.join(", ")}.
+Return one JSON object, without markdown fences or surrounding text, with exactly these keys: ${CODE_FIELDS.join(", ")}.
 language must match the request. format is code or diff. For review mode return a
-unified diff in code; for generate mode return standalone source code. code and tests
+unified diff in code beginning with --- a/source and +++ b/source, followed by an
+@@ hunk header and lines prefixed with space, + or -; never standalone source for reviews.
+For generate mode return standalone source code. code and tests
 are plain strings (no markdown fences). explanation is a short string. assumptions,
 dependencies, security_considerations, validation_instructions are arrays of short
 strings, or one short string when there is only one item. tests is a plain string or array of short strings containing a focused suggested test or regression test procedure, never a
 claim of test execution. Include expected inputs/outputs and compatibility limits.
 sources is an array of IDs found in retrieved_context. Do not invent sources or
-dependencies. UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
+dependencies. ${retryInvalid ? "" : "A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs, and ensure reviews contain actual unified diff headers and hunks."}
+UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
             retrieval_status: retrieval.status, retrieved_context: retrieval.sources })}` },
-      ]);
+      ], { json: true });
       const proposal = parseObject(response.text, CODE_FIELDS);
       // Hosted responses sometimes encode a single textual item as a string.
       // Normalize only these known text-list fields; objects and oversized items still fail.
@@ -117,6 +120,9 @@ dependencies. UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
           "Generated code and tests require independent review; no changes were applied.",
           ...(!retrieval.sources.length ? ["Retrieved context is insufficient; proposal is not source-grounded."] : [])] };
     } catch (error) {
+      // A hosted model may occasionally violate the output contract. Retry
+      // once with the same bounded request; never relax schema/citation checks.
+      if (retryInvalid && error.code === "AI_INVALID_OUTPUT") return this.generateCode(input, false);
       return { status: "unavailable", advisory: true, proposal: null, applied: false,
         retrieved_sources: retrieval?.sources || [],
         error: { code: /^(?:NVIDIA_|RAG_|AI_)/.test(error.code || "") ? error.code : "AI_UNAVAILABLE",
@@ -146,7 +152,7 @@ least one limitation. Clearly acknowledge synthetic/manual event provenance and
 lack of a network detector when applicable. Do not imply observed_evidence is
 independently verified. UNTRUSTED_DATA_JSON:\n${JSON.stringify({ evidence: clean,
             retrieval_status: retrieval.status, retrieved_context: context })}` },
-      ]);
+      ], { json: true });
       const analysis = parseObject(response.text, FIELDS);
       if (!isText(analysis.summary) || !["unknown", "low", "medium", "high", "critical"].includes(analysis.severity_assessment) ||
         LIST_FIELDS.some((f) => !isList(analysis[f])) || !analysis.limitations.length) throw invalid();

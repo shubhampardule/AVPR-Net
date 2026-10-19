@@ -29,7 +29,7 @@ async function validateCode(language, code, format = "code") {
     });
   }
   return new Promise((resolve) => {
-    const worker = new Worker(path.join(__dirname, "syntax-worker.js"), {
+    const worker = new Worker(path.resolve(process.cwd(), "src/services/syntax-worker.js"), {
       workerData: { language, code }, resourceLimits: { maxOldGenerationSizeMb: 64 },
       // Do not inherit loader/preload flags into the parser worker.
       execArgv: [],

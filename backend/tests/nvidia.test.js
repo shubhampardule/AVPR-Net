@@ -83,10 +83,18 @@ describe("optional NVIDIA provider", () => {
     expect(options.headers.Authorization).toBe(`Bearer ${env.NVIDIA_API_KEY}`);
     expect(JSON.parse(options.body)).toMatchObject({ max_tokens: 2048,
       stream: false, temperature: 0.2, chat_template_kwargs: { enable_thinking: false } });
+    expect(JSON.parse(options.body)).not.toHaveProperty("response_format");
     const logs = JSON.stringify(logger.info.mock.calls);
     expect(logs).not.toContain(env.NVIDIA_API_KEY);
     expect(logs).not.toContain(messages[0].content);
     expect(logs).not.toContain("READY");
+  });
+
+  test("structured output explicitly requests provider JSON mode", async () => {
+    const { provider, fetchImpl } = setup();
+    await provider.chat(messages, { json: true });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).response_format)
+      .toEqual({ type: "json_object" });
   });
 
   test.each([[], [{ role: "tool", content: "x" }], [{ role: "user", content: "" }],
@@ -128,8 +136,19 @@ describe("optional NVIDIA provider", () => {
     }));
     const { provider } = setup({ fetchImpl, env: { ...env,
       NVIDIA_CONNECTION_TIMEOUT_MS: "5", NVIDIA_MAX_RETRIES: "0" } });
-    await expect(provider.chat(messages)).rejects.toMatchObject({ code: "NVIDIA_TIMEOUT",
+    await expect(provider.embed(["query"], "query")).rejects.toMatchObject({ code: "NVIDIA_TIMEOUT",
       message: "NVIDIA connection deadline exceeded" });
+  });
+
+  test("non-streaming inference can wait beyond the connection budget", async () => {
+    const { provider } = setup({ env: { ...env, NVIDIA_CONNECTION_TIMEOUT_MS: "5",
+      NVIDIA_RESPONSE_TIMEOUT_MS: "1000", NVIDIA_MAX_RETRIES: "0" },
+      fetchImpl: async (_, { signal }) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        if (signal.aborted) throw new Error("aborted");
+        return response(reply());
+      } });
+    await expect(provider.chat(messages)).resolves.toMatchObject({ text: "READY" });
   });
 
   test("response-body timeout aborts a stalled stream", async () => {

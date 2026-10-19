@@ -18,6 +18,24 @@ function app(options = {}) {
 const auth = (req, res, next) => { req.user = { _id: "user-1", status: "active" }; next(); };
 const member = (req, res, next) => next();
 
+test("production accepts the configured site origin while rejecting other origins", async () => {
+  const saved = process.env.FRONTEND_URL;
+  process.env.FRONTEND_URL = "https://avpr-psi.vercel.app";
+  try {
+    const instance = app({ requireAuth: auth, requireMembership: member });
+    const accepted = await request(instance).post("/org/org-1/ai/analyze")
+      .set("Origin", "https://avpr-psi.vercel.app").send({ event });
+    expect(accepted.status).toBe(200);
+    const rejected = await request(instance).post("/org/org-1/ai/analyze")
+      .set("Origin", "https://evil.example").send({ event });
+    expect(rejected.status).toBe(403);
+    expect(service.analyzeEvent).toHaveBeenCalledTimes(1);
+  } finally {
+    if (saved === undefined) delete process.env.FRONTEND_URL;
+    else process.env.FRONTEND_URL = saved;
+  }
+});
+
 test("production routes require authentication before any AI call", async () => {
   const response = await request(app()).post("/org/org-1/ai/code").send({});
   expect(response.status).toBe(401); expect(service.generateCode).not.toHaveBeenCalled();
