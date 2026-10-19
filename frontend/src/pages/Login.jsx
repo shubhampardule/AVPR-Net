@@ -3,9 +3,19 @@ import { ArrowLeft, ShieldCheck, LockKeyhole, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 import { API_BASE_URL } from '../config/api';
+import { GithubIcon } from '../components/ui/GithubIcon';
 
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
+  const errorCode = new URLSearchParams(window.location.search).get('error');
+  const errors = {
+    github_unavailable: 'GitHub sign-in is not configured yet.',
+    github_state: 'The sign-in request expired. Please try again.',
+    github_denied: 'GitHub sign-in was not completed. Please try again.',
+    github_email: 'Add a verified email address to your GitHub account, then try again.',
+    github_conflict: 'This GitHub account is already linked to another account. Sign in to that account first.',
+    account_inactive: 'Your account is inactive.',
+  };
 
   const handleGoogleLogin = () => {
     setIsLoading(true);
@@ -92,6 +102,14 @@ export default function Login() {
 
             {/* Card body */}
             <div className="px-6 sm:px-8 py-7">
+              {errorCode && <p role="alert" className="mb-4 rounded-lg border border-red-400/20 bg-red-400/5 p-3 text-sm text-red-300">{errors[errorCode] || 'Sign-in failed. Please try again.'}</p>}
+
+              <button type="button" disabled={isLoading} onClick={() => {
+                setIsLoading(true);
+                window.location.href = `${API_BASE_URL}/auth/github`;
+              }} className="mb-3 flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-white/15 bg-[#181B20] text-sm font-medium transition hover:bg-[#242830] disabled:opacity-60">
+                <GithubIcon className="h-4 w-4" /> Continue with GitHub
+              </button>
 
               <button
                 type="button"
@@ -145,7 +163,7 @@ export default function Login() {
                     </span>
                   </div>
                   <p className="mt-1.5 text-[10px] leading-relaxed text-text-muted">
-                    Google identity verification
+                    GitHub or Google sign-in
                   </p>
                 </div>
 
@@ -164,9 +182,9 @@ export default function Login() {
 
               <div className="mt-6 pt-5 border-t border-white/[0.06] text-center">
                 <p className="text-[10px] font-mono text-text-muted leading-relaxed">
-                  By continuing, you authenticate through Google OAuth.
+                  Sign in securely with GitHub or Google.
                   <br />
-                  SecurePatch does not store your Google password.
+                  SecurePatch does not store your password.
                 </p>
               </div>
             </div>

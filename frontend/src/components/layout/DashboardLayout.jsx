@@ -12,8 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { GithubIcon } from "../ui/GithubIcon";
-
-const API_BASE_URL = "http://localhost:5000/api/v1";
+import { API_BASE_URL } from "../../config/api";
 
 export default function DashboardLayout() {
   const location = useLocation();
@@ -23,6 +22,30 @@ export default function DashboardLayout() {
   const [selectedOrg, setSelectedOrg] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [organizationName, setOrganizationName] = useState("");
+  const [creatingOrg, setCreatingOrg] = useState(false);
+  const [orgError, setOrgError] = useState("");
+  const [showOrgForm, setShowOrgForm] = useState(false);
+
+  const createOrganization = async (event) => {
+    event.preventDefault();
+    setCreatingOrg(true);
+    setOrgError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/organizations`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: organizationName.trim() }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "Unable to create organization.");
+      const organization = { ...body.data.organization, role: body.data.role };
+      setOrganizations((items) => [...items, organization]);
+      setSelectedOrg(organization);
+      setShowOrgForm(false);
+      setOrganizationName("");
+    } catch (error) { setOrgError(error.message); }
+    finally { setCreatingOrg(false); }
+  };
 
   useEffect(() => {
     loadDashboardContext();
@@ -52,6 +75,7 @@ export default function DashboardLayout() {
 
       const userData = await userResponse.json();
       const orgData = await orgResponse.json();
+      if (!orgResponse.ok) throw new Error(orgData.error?.message || "Unable to load organizations.");
 
       const currentUser =
         userData.data?.user ||
@@ -281,6 +305,16 @@ export default function DashboardLayout() {
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
 
             </div>
+
+            {organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-xs text-[#4ADE80] hover:underline">{showOrgForm ? "Cancel" : "Create organization"}</button>}
+            {(showOrgForm || (!loading && organizations.length === 0)) && (
+              <form onSubmit={createOrganization} className="mt-3 space-y-2">
+                <label htmlFor="organization-name" className="block text-xs text-text-secondary">Organization name</label>
+                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-white/10 bg-[#111419] px-3 py-2 text-xs focus:border-[#4ADE80] focus:outline-none" />
+                {orgError && <p role="alert" className="text-xs text-red-300">{orgError}</p>}
+                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-[#4ADE80] px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
+              </form>
+            )}
 
           </div>
 

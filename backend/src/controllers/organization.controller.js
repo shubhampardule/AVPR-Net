@@ -6,7 +6,7 @@ const createOrganization = async (req, res, next) => {
   try {
     const { name } = req.body;
 
-    if (!name || !name.trim()) {
+    if (typeof name !== "string" || !name.trim() || name.trim().length > 150) {
       return res.status(400).json({
         success: false,
         error: {

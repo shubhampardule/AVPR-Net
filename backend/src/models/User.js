@@ -28,6 +28,9 @@ const userSchema = new mongoose.Schema(
       sparse: true,
     },
 
+    githubId: { type: String, unique: true, sparse: true },
+    githubUsername: { type: String, trim: true },
+
     status: {
       type: String,
       enum: ["active", "suspended"],
@@ -39,4 +42,4 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.models.User || mongoose.model("User", userSchema);

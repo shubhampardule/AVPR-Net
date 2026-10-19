@@ -1,5 +1,6 @@
 const Organization = require("../models/Organization");
 const { githubApp } = require("../config/github");
+const { authorizedInstallations } = require("./githubAuth.controller");
 
 const connectGitHubInstallation = async (req, res, next) => {
   try {
@@ -14,6 +15,13 @@ const connectGitHubInstallation = async (req, res, next) => {
           message: "GitHub installation ID is required",
         },
       });
+    }
+
+    if (!authorizedInstallations(req).some((item) => String(item.id) === String(installationId))) {
+      return res.status(403).json({ success: false, error: {
+        code: "GITHUB_AUTHORIZATION_REQUIRED",
+        message: "Sign in with the GitHub account that manages this installation before connecting it.",
+      } });
     }
 
     const organization = await Organization.findById(organizationId);

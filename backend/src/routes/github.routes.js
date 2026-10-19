@@ -12,9 +12,13 @@ const { getRepositories, getRepositoryFiles, getFileContent } = require("../serv
 const Organization = require("../models/Organization");
 
 const router = express.Router();
+const { authorizedInstallations, finishGitHubLogin } = require("../controllers/githubAuth.controller");
+
+// Keep the registered GitHub App callback URL compatible with existing settings.
+router.get("/callback", finishGitHubLogin);
 
 // GitHub App authentication test
-router.get("/test", async (req, res, next) => {
+router.get("/test", requireAuth, async (req, res, next) => {
     try {
         const { data } = await githubApp.octokit.request("GET /app");
 
@@ -33,18 +37,11 @@ router.get("/test", async (req, res, next) => {
 });
 
 // Get GitHub App installations
-router.get("/installations", async (req, res, next) => {
+router.get("/installations", requireAuth, async (req, res, next) => {
     try {
-        const { data } = await githubApp.octokit.request("GET /app/installations");
-
         return res.status(200).json({
             success: true,
-            data: data.map((installation) => ({
-                id: installation.id,
-                account: installation.account?.login,
-                accountType: installation.account?.type,
-                htmlUrl: installation.html_url || null,
-            })),
+            data: authorizedInstallations(req),
             message: "GitHub App installations fetched successfully",
         });
     } catch (error) {

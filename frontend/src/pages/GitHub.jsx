@@ -16,6 +16,11 @@ export default function GitHub() {
   const [error, setError] = useState(null);
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [installationUrl, setInstallationUrl] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [installations, setInstallations] = useState([]);
+  const [selectedInstallation, setSelectedInstallation] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [installAppUrl, setInstallAppUrl] = useState(null);
 
   const organizationId =
     selectedOrg?._id ||
@@ -42,10 +47,30 @@ const fetchGitHubStatus = async () => {
       throw new Error(data.error?.message || "Failed to load GitHub status");
     }
 
+    setConnected(Boolean(data.data?.connected));
     setInstallationUrl(data.data?.installation?.htmlUrl || null);
+    if (data.data?.connected) {
+      await fetchRepositories();
+    } else {
+      setRepositories([]);
+      const [installResponse, appResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/github/installations`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/github/test`, { credentials: "include" }),
+      ]);
+      const installData = await installResponse.json();
+      const appData = await appResponse.json();
+      if (!installResponse.ok || !appResponse.ok) throw new Error("Unable to load GitHub App access.");
+      setInstallations(installData.data || []);
+      setSelectedInstallation(installData.data?.[0]?.id?.toString() || "");
+      setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
+    }
   } catch (err) {
     console.error("Failed to load GitHub status:", err);
+    setError(err.message);
     setInstallationUrl(null);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
   }
 };
 
@@ -83,10 +108,26 @@ const fetchRepositories = async (isRefresh = false) => {
 
 useEffect(() => {
   if (!contextLoading && organizationId) {
+    setLoading(true);
+    setError(null);
     fetchGitHubStatus();
-    fetchRepositories();
   }
 }, [contextLoading, organizationId]);
+
+const connectInstallation = async () => {
+  setConnecting(true);
+  setError(null);
+  try {
+    const response = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/connect`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ installationId: selectedInstallation }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || "Unable to connect GitHub.");
+    await fetchGitHubStatus();
+  } catch (err) { setError(err.message); }
+  finally { setConnecting(false); }
+};
 
 
   const handleOpenRepository = (repo) => {
@@ -112,8 +153,8 @@ const handleManageGitHubAccess = () => {
           </div>
 
           <button onClick={async () => {
+  setRefreshing(true);
   await fetchGitHubStatus();
-  await fetchRepositories(true);
 }} disabled={refreshing || loading || !organizationId} className="flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-secondary transition hover:border-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Refresh
@@ -133,9 +174,9 @@ const handleManageGitHubAccess = () => {
                 <div className="flex items-center gap-2">
                   <h2 className="font-medium">GitHub App</h2>
 
-                  <span className="flex items-center gap-1 rounded-full border border-accent-security/20 bg-accent-security/10 px-2 py-0.5 text-xs text-accent-security">
-                    <span className="h-1.5 w-1.5 rounded-full bg-accent-security" />
-                    Connected
+                  <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${connected ? "border-accent-security/20 bg-accent-security/10 text-accent-security" : "border-white/10 bg-white/5 text-text-muted"}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-accent-security" : "bg-text-muted"}`} />
+                    {connected ? "Connected" : "Not connected"}
                   </span>
                 </div>
 
@@ -170,7 +211,23 @@ const handleManageGitHubAccess = () => {
           </div>
         )}
 
-        {organizationId && (
+        {organizationId && !connected && !loading && (
+          <section className="mb-6 rounded-xl border border-border-subtle bg-bg-secondary p-6">
+            <h2 className="font-semibold">Connect your GitHub account</h2>
+            <p className="mt-2 text-sm text-text-secondary">Authorize your GitHub account, then choose the installation for this workspace.</p>
+            <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-black"><GithubIcon className="h-4 w-4" /> Sign in with GitHub</a>
+            {installAppUrl && <a href={installAppUrl} className="ml-4 inline-flex items-center gap-2 text-sm text-accent-blue">Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
+            {installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">
+              <label htmlFor="github-installation" className="text-sm">GitHub installation</label>
+              <select id="github-installation" value={selectedInstallation} onChange={(event) => setSelectedInstallation(event.target.value)} className="rounded-lg border border-white/10 bg-bg-elevated px-3 py-2 text-sm">
+                {installations.map((item) => <option key={item.id} value={item.id}>{item.account}</option>)}
+              </select>
+              <button disabled={connecting || !selectedInstallation} onClick={connectInstallation} className="rounded-lg bg-[#4ADE80] px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">{connecting ? "Connecting..." : "Connect installation"}</button>
+            </div>}
+          </section>
+        )}
+
+        {organizationId && connected && (
           <section>
             <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div>

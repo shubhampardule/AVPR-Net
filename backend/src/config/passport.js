@@ -10,14 +10,15 @@ passport.use(
       clientID: env.google.clientId,
       clientSecret: env.google.clientSecret,
       callbackURL: env.google.callbackUrl,
+      state: true,
     },
 
     async (accessToken, refreshToken, profile, done) => {
       try {
-        const email = profile.emails?.[0]?.value;
+        const email = profile.emails?.find((item) => item.verified === true)?.value;
 
         if (!email) {
-          return done(new Error("Google account email not available"));
+          return done(new Error("A verified Google account email is required"));
         }
 
         let user = await User.findOne({

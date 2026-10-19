@@ -1,7 +1,7 @@
 const ApiResponse = require("../utils/ApiResponse");
 
 const googleCallback = (req, res) => {
-  return res.redirect("http://localhost:5174/dashboard");
+  return res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5174"}/dashboard`);
 };
 
 const getCurrentUser = (req, res) => {
@@ -13,6 +13,7 @@ const getCurrentUser = (req, res) => {
         name: req.user.name,
         email: req.user.email,
         profileImage: req.user.profileImage,
+        githubUsername: req.user.githubUsername || null,
       },
     },
     "Authenticated user"
@@ -30,7 +31,11 @@ const logout = (req, res, next) => {
         return next(sessionError);
       }
 
-      res.clearCookie("connect.sid");
+      res.clearCookie("securepatch.sid", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
 
       return ApiResponse.success(
         res,

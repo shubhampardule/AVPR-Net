@@ -4,11 +4,16 @@ const { googleCallback, getCurrentUser, logout, } = require("../controllers/auth
 const { requireAuth, } = require("../middleware/auth.middleware");
 
 const router = express.Router();
+const { startGitHubLogin, finishGitHubLogin } = require("../controllers/githubAuth.controller");
+
+router.get("/github", startGitHubLogin);
+router.get("/github/callback", finishGitHubLogin);
 
 router.get(
     "/google",
     passport.authenticate("google", {
         scope: ["profile", "email"],
+        state: true,
     })
 );
 
