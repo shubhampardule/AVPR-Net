@@ -2,15 +2,17 @@ const Scan = require("../models/Scan");
 const Finding = require("../models/Finding");
 const Organization = require("../models/Organization");
 const { scanQueue } = require("../queues/scanQueue");
+const { bad, integer, repository } = require("../utils/input");
 
 class ScanService {
   /**
    * Enqueues a new scan job asynchronously. Returns 202-ready payload immediately.
    */
-  static async enqueueScan({ organizationId, owner, repo, installationId }) {
+  static async enqueueScan({ organizationId, owner, repo, installationId, ref, includeDependencies = false }) {
+    repository(owner, repo);
     // 1. Verify organization exists and is connected to GitHub
     const org = await Organization.findById(organizationId);
-    if (!org) {
+    if (!org || org.status !== "active") {
       const err = new Error("Organization not found");
       err.statusCode = 404;
       err.code = "ORGANIZATION_NOT_FOUND";
@@ -25,13 +27,26 @@ class ScanService {
       throw err;
     }
 
-    // 2. Create Scan record in MongoDB with initial status 'queued'
+    // Resolve an authorized immutable commit before creating any scan.
+    const { resolveCommit } = require("./github.service");
+    if (ref !== undefined && !/^[a-f0-9]{40}$/.test(ref)) throw bad("Invalid commit SHA");
+    const commit = await resolveCommit(effectiveInstallationId, owner, repo, ref);
+    await Scan.init();
+    await require("./budget.service").consume(`scans:${organizationId}`, 20, 60 * 60 * 1000);
+    await Scan.updateMany({ organization: organizationId, owner, repo, status: { $in: ["queued", "running"] },
+      deadlineAt: { $lt: new Date() } }, { $set: { status: "failed", activeKey: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
+    // A unique partial index prevents concurrent enqueues for this repository.
     const scan = await Scan.create({
       organization: organizationId,
       installationId: effectiveInstallationId,
       owner,
       repo,
       status: "queued",
+      commitSha: commit.sha,
+      branch: commit.branch,
+      activeKey: `${organizationId}:${owner.toLowerCase()}/${repo.toLowerCase()}`,
+      deadlineAt: new Date(Date.now() + 15 * 60 * 1000),
+      includeDependencies: includeDependencies === true,
     });
 
     // 3. Enqueue the job through BullMQ locally or Vercel Queues in production.
@@ -50,6 +65,7 @@ class ScanService {
     } catch (queueErr) {
       scan.status = "failed";
       scan.errorMessage = `Failed to enqueue scan: ${queueErr.message}`;
+      scan.activeKey = null;
       await scan.save();
       const err = new Error(scan.errorMessage);
       err.statusCode = 503;
@@ -88,15 +104,22 @@ class ScanService {
     const { severity, riskCategory, page = 1, limit = 50 } = query;
     const filter = { scan: scanId };
 
-    if (severity) filter.severity = severity;
-    if (riskCategory) filter.riskCategory = riskCategory;
+    if (severity) {
+      if (!["critical", "high", "medium", "low", "info"].includes(severity)) throw bad("Invalid severity");
+      filter.severity = severity;
+    }
+    if (riskCategory) {
+      if (!["critical", "high", "medium", "low"].includes(riskCategory)) throw bad("Invalid risk category");
+      filter.riskCategory = riskCategory;
+    }
 
-    const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
-    const take = parseInt(limit, 10);
+    const currentPage = integer(query.page, 1, 10000);
+    const take = integer(query.limit, 50, 100);
+    const skip = (currentPage - 1) * take;
 
     const [findings, total] = await Promise.all([
       Finding.find(filter)
-        .sort({ riskScore: -1, createdAt: -1 })
+        .sort({ riskScore: -1, _id: -1 })
         .skip(skip)
         .limit(take)
         .lean(),
@@ -106,7 +129,7 @@ class ScanService {
     return {
       findings,
       pagination: {
-        page: parseInt(page, 10),
+        page: currentPage,
         limit: take,
         total,
         totalPages: Math.ceil(total / take) || 1,

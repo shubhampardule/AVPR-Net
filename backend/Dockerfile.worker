@@ -7,11 +7,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
   && rm -rf /var/lib/apt/lists/* \
   && python3 -m venv /opt/scan-tools \
-  && /opt/scan-tools/bin/pip install --no-cache-dir bandit semgrep
+  && /opt/scan-tools/bin/pip install --no-cache-dir pip==26.2.1 setuptools==84.2.0 \
+  && /opt/scan-tools/bin/pip install --no-cache-dir bandit==1.9.4 semgrep==1.181.0
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
+USER node
 
 CMD ["node", "src/workers/scanWorker.js"]

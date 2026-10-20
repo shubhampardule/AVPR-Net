@@ -1,95 +1,61 @@
-const os = require("os");
-const fs = require("fs");
-const path = require("path");
+const os = require("node:os");
+const fs = require("node:fs");
+const path = require("node:path");
 const AdmZip = require("adm-zip");
 const { getInstallationOctokit } = require("../config/github");
-
-/**
- * Creates an ephemeral temporary workspace by downloading the repository zipball
- * using installation-scoped Octokit authentication.
- *
- * @param {string} installationId - GitHub App installation ID
- * @param {string} owner - Repository owner (user or organization)
- * @param {string} repo - Repository name
- * @param {string} [ref="HEAD"] - Commit SHA or branch name
- * @returns {Promise<{ workspacePath: string, cleanup: () => void }>}
- */
-const createEphemeralWorkspace = async (installationId, owner, repo, ref = "HEAD") => {
-  const octokit = await getInstallationOctokit(installationId);
-
-  // 1. Create a secure temporary parent directory
-  const baseTempDir = fs.mkdtempSync(path.join(os.tmpdir(), `securepatch-${owner}-${repo}-`));
-  const zipFilePath = path.join(baseTempDir, "repo-archive.zip");
-  const workspacePath = path.join(baseTempDir, "workspace");
-  fs.mkdirSync(workspacePath, { recursive: true });
-
-  const cleanup = () => {
-    try {
-      if (fs.existsSync(baseTempDir)) {
-        fs.rmSync(baseTempDir, { recursive: true, force: true });
-      }
-    } catch (err) {
-      console.error(`[Workspace Cleanup Error] Failed to delete ${baseTempDir}:`, err.message);
-    }
-  };
-
-  try {
-    // 2. Download zipball from GitHub using installation authentication
-    const response = await octokit.request("GET /repos/{owner}/{repo}/zipball/{ref}", {
-      owner,
-      repo,
-      ref,
-      headers: {
-        accept: "application/vnd.github+json",
-      },
-    });
-
-    // response.data is an ArrayBuffer in modern Octokit or Buffer
-    const buffer = Buffer.isBuffer(response.data)
-      ? response.data
-      : Buffer.from(response.data);
-
-    fs.writeFileSync(zipFilePath, buffer);
-
-    // 3. Extract using AdmZip (cross-platform, zero native system dependencies)
-    const zip = new AdmZip(zipFilePath);
-    const extractTempDir = path.join(baseTempDir, "extracted");
-    fs.mkdirSync(extractTempDir, { recursive: true });
-    zip.extractAllTo(extractTempDir, true);
-
-    // GitHub zipballs nest the source under a root folder like "owner-repo-commitSha/"
-    const extractedEntries = fs.readdirSync(extractTempDir);
-    if (extractedEntries.length === 1 && fs.statSync(path.join(extractTempDir, extractedEntries[0])).isDirectory()) {
-      const innerDir = path.join(extractTempDir, extractedEntries[0]);
-      // Move all items from innerDir to workspacePath
-      const innerFiles = fs.readdirSync(innerDir);
-      for (const item of innerFiles) {
-        fs.renameSync(path.join(innerDir, item), path.join(workspacePath, item));
-      }
-      fs.rmSync(extractTempDir, { recursive: true, force: true });
-    } else {
-      // Direct move
-      for (const item of extractedEntries) {
-        fs.renameSync(path.join(extractTempDir, item), path.join(workspacePath, item));
-      }
-      fs.rmSync(extractTempDir, { recursive: true, force: true });
-    }
-
-    // Clean up the downloaded zip archive file immediately to save disk
-    if (fs.existsSync(zipFilePath)) {
-      fs.unlinkSync(zipFilePath);
-    }
-
-    return {
-      workspacePath,
-      cleanup,
-    };
-  } catch (error) {
-    cleanup();
-    throw new Error(`Failed to create repository workspace: ${error.message}`);
+const { repository, bad } = require("../utils/input");
+const context = require("./scan-context");
+const MAX_ARCHIVE = 50 * 1024 * 1024;
+const MAX_EXPANDED = 200 * 1024 * 1024;
+async function download(installationId, owner, repo, ref) {
+  const client = await getInstallationOctokit(installationId);
+  const { token } = await client.auth({ type: "installation" });
+  const signal = AbortSignal.any([AbortSignal.timeout(30000), ...(context.getStore()?.signal ? [context.getStore().signal] : [])]);
+  let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "SecurePatch" }, redirect: "manual", signal,
+  });
+  if ([301, 302, 307, 308].includes(response.status)) {
+    const url = new URL(response.headers.get("location"));
+    await response.body?.cancel();
+    if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+    response = await fetch(url, { redirect: "error", signal });
   }
-};
-
-module.exports = {
-  createEphemeralWorkspace,
-};
+  if (!response.ok || !response.body) throw bad("GitHub archive download failed", 502);
+  if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) { await response.body.cancel(); throw bad("Repository archive exceeds 50 MiB", 413); }
+  const parts = []; let bytes = 0;
+  for await (const part of response.body) {
+    bytes += part.byteLength;
+    if (bytes > MAX_ARCHIVE) { throw bad("Repository archive exceeds 50 MiB", 413); }
+    parts.push(Buffer.from(part));
+  }
+  return Buffer.concat(parts);
+}
+async function createEphemeralWorkspace(installationId, owner, repo, ref) {
+  repository(owner, repo);
+  if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
+  const workspacePath = path.join(base, "workspace");
+  const cleanup = () => {
+    const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
+    fs.rmSync(base, { recursive: true, force: true });
+  };
+  try {
+    const zip = new AdmZip(await download(installationId, owner, repo, ref));
+    const entries = zip.getEntries();
+    if (entries.length > 20000) throw bad("Repository contains too many archive entries", 413);
+    let expanded = 0;
+    for (const entry of entries) {
+      const name = entry.entryName;
+      expanded += entry.header.size;
+      if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
+      if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || ((entry.attr >>> 16) & 0xf000) === 0xa000) throw bad("Unsafe archive path or symbolic link");
+    }
+    fs.mkdirSync(workspacePath);
+    zip.extractAllTo(workspacePath, false);
+    const names = fs.readdirSync(workspacePath);
+    const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
+    return { workspacePath: nested ? path.join(workspacePath, names[0]) : workspacePath, cleanup };
+  } catch (error) { cleanup(); throw error; }
+}
+module.exports = { createEphemeralWorkspace, download };

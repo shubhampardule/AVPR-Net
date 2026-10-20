@@ -36,45 +36,45 @@ class RiskService {
    * Exploitability factor (0 - 10) derived deterministically from CWE category
    */
   static getExploitabilityScore(cwe) {
-    const norm = (cwe || "").toUpperCase();
+    const norm = (cwe || "").toUpperCase().match(/\bCWE-\d+\b/)?.[0] || "";
 
     // RCE, SQLi, Command Injection, SSRF, Deserialization
     if (
-      norm.includes("CWE-78") || // OS Command Injection
-      norm.includes("CWE-89") || // SQL Injection
-      norm.includes("CWE-94") || // Code Injection
-      norm.includes("CWE-502") || // Deserialization
-      norm.includes("CWE-918") // SSRF
+      norm === "CWE-78" || // OS Command Injection
+      norm === "CWE-89" || // SQL Injection
+      norm === "CWE-94" || // Code Injection
+      norm === "CWE-502" || // Deserialization
+      norm === "CWE-918" // SSRF
     ) {
       return 9.0;
     }
 
     // Auth bypass, hardcoded secrets, IDOR, Path traversal, XSS
     if (
-      norm.includes("CWE-79") || // XSS
-      norm.includes("CWE-22") || // Path Traversal
-      norm.includes("CWE-798") || // Hardcoded Credentials
-      norm.includes("CWE-287") || // Improper Authentication
-      norm.includes("CWE-306") // Missing Authentication
+      norm === "CWE-79" || // XSS
+      norm === "CWE-22" || // Path Traversal
+      norm === "CWE-798" || // Hardcoded Credentials
+      norm === "CWE-287" || // Improper Authentication
+      norm === "CWE-306" // Missing Authentication
     ) {
       return 7.5;
     }
 
     // Cryptographic weakness, Weak PRNG, Information disclosure
     if (
-      norm.includes("CWE-327") || // Broken Crypto
-      norm.includes("CWE-330") || // Insufficient Randomness
-      norm.includes("CWE-200") || // Exposure of Sensitive Information
-      norm.includes("CWE-312") // Cleartext Storage
+      norm === "CWE-327" || // Broken Crypto
+      norm === "CWE-330" || // Insufficient Randomness
+      norm === "CWE-200" || // Exposure of Sensitive Information
+      norm === "CWE-312" // Cleartext Storage
     ) {
       return 5.5;
     }
 
     // Denial of Service, Resource exhaustion, Unhandled exceptions
     if (
-      norm.includes("CWE-400") ||
-      norm.includes("CWE-770") ||
-      norm.includes("CWE-754")
+      norm === "CWE-400" ||
+      norm === "CWE-770" ||
+      norm === "CWE-754"
     ) {
       return 4.0;
     }
@@ -88,6 +88,19 @@ class RiskService {
    */
   static getBusinessImpactScore(filePath) {
     const p = (filePath || "").toLowerCase();
+
+    // Test files, documentation, mocks
+    if (
+      p.includes("test") ||
+      p.includes("spec") ||
+      p.includes("mock") ||
+      p.includes("fixture") ||
+      p.includes("doc") ||
+      p.endsWith(".md")
+    ) {
+      return 2.0;
+    }
+
 
     // Authentication, billing, secrets, tokens, credentials
     if (
@@ -136,17 +149,6 @@ class RiskService {
       return 4.0;
     }
 
-    // Test files, documentation, mocks
-    if (
-      p.includes("test") ||
-      p.includes("spec") ||
-      p.includes("mock") ||
-      p.includes("fixture") ||
-      p.includes("doc") ||
-      p.endsWith(".md")
-    ) {
-      return 2.0;
-    }
 
     return 5.0;
   }

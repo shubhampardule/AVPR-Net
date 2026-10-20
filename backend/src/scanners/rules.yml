@@ -1,0 +1,88 @@
+# Reviewed SecurePatch baseline v1. Bounded coverage, not a complete ruleset.
+rules:
+  - id: securepatch.js.dynamic-eval
+    languages: [javascript, typescript]
+    message: Dynamic evaluation can execute untrusted code. Use structured parsing.
+    severity: ERROR
+    metadata: {cwe: ["CWE-95"], baseline: "securepatch-v1"}
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+  - id: securepatch.js.shell-exec
+    languages: [javascript, typescript]
+    message: Review shell execution; prefer execFile with separate validated arguments.
+    severity: WARNING
+    metadata: {cwe: ["CWE-78"], baseline: "securepatch-v1"}
+    pattern-either:
+      - pattern: $CP.exec(...)
+      - pattern: $CP.execSync(...)
+  - id: securepatch.js.raw-html
+    languages: [javascript, typescript]
+    message: Raw HTML needs trusted sanitization before rendering.
+    severity: WARNING
+    metadata: {cwe: ["CWE-79"], baseline: "securepatch-v1"}
+    pattern: <$TAG dangerouslySetInnerHTML={$VALUE} ... />
+  - id: securepatch.python.pickle
+    languages: [python]
+    message: Do not deserialize untrusted pickle data.
+    severity: ERROR
+    metadata: {cwe: ["CWE-502"], baseline: "securepatch-v1"}
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+  - id: securepatch.js.weak-hash
+    languages: [javascript, typescript]
+    message: MD5 and SHA1 are unsuitable for security-sensitive hashing.
+    severity: WARNING
+    metadata: {cwe: ["CWE-327"]}
+    pattern-either:
+      - pattern: $C.createHash("md5", ...)
+      - pattern: $C.createHash("sha1", ...)
+  - id: securepatch.js.sql-concatenation
+    languages: [javascript, typescript]
+    message: Parameterize SQL queries instead of concatenating values.
+    severity: ERROR
+    metadata: {cwe: ["CWE-89"]}
+    pattern: $DB.query($A + $B, ...)
+  - id: securepatch.js.disabled-tls
+    languages: [javascript, typescript]
+    message: Do not disable TLS certificate verification.
+    severity: ERROR
+    metadata: {cwe: ["CWE-295"]}
+    pattern: "{..., rejectUnauthorized: false, ...}"
+  - id: securepatch.js.jwt-unverified
+    languages: [javascript, typescript]
+    message: Decoding a JWT does not verify its signature or claims.
+    severity: WARNING
+    metadata: {cwe: ["CWE-347"]}
+    pattern: $JWT.decode(...)
+  - id: securepatch.python.dynamic-eval
+    languages: [python]
+    message: Avoid evaluating source supplied as data.
+    severity: ERROR
+    metadata: {cwe: ["CWE-95"]}
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+  - id: securepatch.python.shell
+    languages: [python]
+    message: Avoid shell execution; use an argument list and shell=False.
+    severity: ERROR
+    metadata: {cwe: ["CWE-78"]}
+    pattern-either:
+      - pattern: os.system(...)
+      - pattern: subprocess.$F(..., shell=True, ...)
+  - id: securepatch.python.sql-formatting
+    languages: [python]
+    message: SQL string formatting may permit injection. Bind parameters.
+    severity: ERROR
+    metadata: {cwe: ["CWE-89"]}
+    pattern-either:
+      - pattern: $DB.execute($S % $ARGS, ...)
+      - pattern: $DB.execute($A + $B, ...)
+  - id: securepatch.python.insecure-yaml
+    languages: [python]
+    message: Use safe_load for untrusted YAML.
+    severity: ERROR
+    metadata: {cwe: ["CWE-502"]}
+    pattern: yaml.load($DATA)

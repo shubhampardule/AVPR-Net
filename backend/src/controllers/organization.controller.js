@@ -47,16 +47,11 @@ const createOrganization = async (req, res, next) => {
       });
     }
 
-    const organization = await Organization.create({
-      name: trimmedName,
-      slug,
-    });
-
-    await OrganizationMember.create({
-      user: req.user._id,
-      organization: organization._id,
-      role: "owner",
-      status: "active",
+    let organization;
+    await require("mongoose").connection.transaction(async (session) => {
+      [organization] = await Organization.create([{ name: trimmedName, slug }], { session });
+      await OrganizationMember.create([{ user: req.user._id, organization: organization._id,
+        role: "owner", status: "active" }], { session });
     });
 
     return ApiResponse.success(
@@ -86,7 +81,7 @@ const getMyOrganizations = async (req, res, next) => {
     }).populate("organization");
 
     const organizations = memberships
-      .filter((membership) => membership.organization)
+      .filter((membership) => membership.organization?.status === "active")
       .map((membership) => ({
         id: membership.organization._id,
         name: membership.organization.name,

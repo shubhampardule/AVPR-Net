@@ -19,6 +19,7 @@ class NormalizerService {
     } else if (scanner === "bandit") {
       return this.normalizeBandit(rawResults, workspacePath);
     }
+    if (["secrets", "dependency"].includes(scanner)) return rawResults;
     return [];
   }
 

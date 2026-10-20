@@ -1,5 +1,6 @@
 jest.mock("../src/models/Scan", () => ({ findById: jest.fn() }));
 jest.mock("../src/models/OrganizationMember", () => ({ findOne: jest.fn() }));
+jest.mock("../src/models/Organization", () => ({ exists: jest.fn(async () => true) }));
 const express = require("express");
 const request = require("supertest");
 const Scan = require("../src/models/Scan");

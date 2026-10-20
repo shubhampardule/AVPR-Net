@@ -2,6 +2,15 @@ const mongoose = require("mongoose");
 
 const scanSchema = new mongoose.Schema(
   {
+    commitSha: { type: String, default: null },
+    includeDependencies: { type: Boolean, default: false },
+    branch: { type: String, default: null },
+    activeKey: { type: String, default: null },
+    deadlineAt: { type: Date, default: null },
+    leaseUntil: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    coverage: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    rulesHash: { type: String, default: null },
     organization: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
@@ -71,5 +80,6 @@ const scanSchema = new mongoose.Schema(
 );
 
 scanSchema.index({ organization: 1, owner: 1, repo: 1, createdAt: -1 });
+scanSchema.index({ activeKey: 1 }, { unique: true, partialFilterExpression: { activeKey: { $type: "string" } } });
 
 module.exports = mongoose.models.Scan || mongoose.model("Scan", scanSchema);

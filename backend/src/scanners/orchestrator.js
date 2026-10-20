@@ -2,10 +2,12 @@ const SemgrepAdapter = require("./semgrep.adapter");
 const BanditAdapter = require("./bandit.adapter");
 
 class ScannerOrchestrator {
-  constructor(adapters = null) {
+  constructor(adapters = null, { includeDependencies = false } = {}) {
     this.adapters = adapters || [
       new SemgrepAdapter(),
       new BanditAdapter(),
+      new (require("./repository-data.adapter").SecretsAdapter)(),
+      ...(includeDependencies ? [new (require("./repository-data.adapter").DependencyAdapter)()] : []),
     ];
   }
 
@@ -18,6 +20,7 @@ class ScannerOrchestrator {
     const results = [];
     const scannersRun = [];
     const scannerErrors = [];
+    const coverage = [];
     let anyAvailable = false;
 
     for (const adapter of this.adapters) {
@@ -31,6 +34,7 @@ class ScannerOrchestrator {
             findings: rawFindings,
           });
           scannersRun.push(adapter.name);
+          coverage.push({ scanner: adapter.name, version: adapter.version || "unknown", ...adapter.coverage });
         } catch (scanErr) {
           scannerErrors.push({
             scanner: adapter.name,
@@ -55,10 +59,15 @@ class ScannerOrchestrator {
       throw err;
     }
 
+    if (!scannersRun.length) {
+      throw Object.assign(new Error("Every available scanner failed; no valid analysis was produced."),
+        { code: "ALL_SCANNERS_FAILED", scannerErrors });
+    }
     return {
       results,
       scannersRun,
       scannerErrors,
+      coverage,
     };
   }
 }

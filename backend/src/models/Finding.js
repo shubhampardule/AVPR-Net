@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const findingSchema = new mongoose.Schema(
   {
+    statusReason: { type: String, maxlength: 1000, default: "" },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    reviewedAt: { type: Date, default: null },
+    correlationKey: { type: String, default: null, index: true },
+    provenance: { type: [mongoose.Schema.Types.Mixed], default: [] },
     scan: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Scan",
@@ -49,7 +54,7 @@ const findingSchema = new mongoose.Schema(
     },
     scanner: {
       type: String,
-      enum: ["semgrep", "bandit", "trivy"],
+      enum: ["semgrep", "bandit", "trivy", "secrets", "dependency"],
       required: true,
     },
     severity: {
@@ -98,7 +103,7 @@ const findingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["open", "acknowledged", "resolved"],
+      enum: ["open", "acknowledged", "dismissed", "resolved"],
       default: "open",
     },
   },
@@ -108,6 +113,7 @@ const findingSchema = new mongoose.Schema(
 );
 
 findingSchema.index({ scan: 1, fingerprint: 1 });
+findingSchema.index({ scan: 1, fingerprint: 1 }, { unique: true, name: "scan_fingerprint_unique" });
 findingSchema.index({ organization: 1, owner: 1, repo: 1 });
 
 module.exports = mongoose.models.Finding || mongoose.model("Finding", findingSchema);

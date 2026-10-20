@@ -34,7 +34,7 @@ const addMember = async (req, res, next) => {
     try {
         const { email, role } = req.body;
 
-        if (!email || !email.trim()) {
+        if (typeof email !== "string" || !email.trim()) {
             return res.status(400).json({
                 success: false,
                 error: {
@@ -75,7 +75,7 @@ const addMember = async (req, res, next) => {
             organization: req.params.organizationId,
         });
 
-        if (existingMembership) {
+        if (existingMembership?.status === "active") {
             return res.status(409).json({
                 success: false,
                 error: {
@@ -85,12 +85,15 @@ const addMember = async (req, res, next) => {
             });
         }
 
-        const membership = await OrganizationMember.create({
+        const membership = existingMembership || new OrganizationMember({
             user: user._id,
             organization: req.params.organizationId,
             role,
             status: "active",
         });
+        membership.role = role;
+        membership.status = "active";
+        await membership.save();
 
         return ApiResponse.success(
             res,
@@ -206,7 +209,7 @@ const removeMember = async (req, res, next) => {
             });
         }
 
-        membership.status = "inactive";
+        membership.status = "suspended";
         await membership.save();
 
         return ApiResponse.success(

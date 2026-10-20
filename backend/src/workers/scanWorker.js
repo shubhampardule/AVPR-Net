@@ -15,6 +15,8 @@ const NormalizerService = require("../services/normalizer.service");
 const DeduplicatorService = require("../services/deduplicator.service");
 const OccurrenceService = require("../services/occurrence.service");
 const RiskService = require("../services/risk.service");
+const heartbeatWorker = () => require("../models/UsageBucket").updateOne({ _id: "worker:bom1" },
+  { $set: { count: 1, expires: new Date(Date.now() + 90000) } }, { upsert: true });
 
 // Connect to MongoDB if running standalone
 const ensureDatabase = async () => {
@@ -39,15 +41,19 @@ const ensureDatabase = async () => {
  * 10. Update Scan summary with status 'completed' and counts
  * 11. Ephemeral workspace cleanup (guaranteed in finally block)
  */
-const processScanJob = async (job) => {
+const processScanJobInternal = async (job, controller) => {
   const { scanId, organizationId, installationId, owner, repo } = job.data;
   console.info(`[ScanWorker] Processing job ${job.id} for scan ${scanId} (${owner}/${repo})...`);
 
   await ensureDatabase();
 
-  const scan = await Scan.findById(scanId);
+  const now = new Date();
+  const scan = await Scan.findOneAndUpdate({ _id: scanId, cancelledAt: null,
+    $and: [{ $or: [{ deadlineAt: null }, { deadlineAt: { $gt: now } }] },
+      { $or: [{ status: "queued" }, { status: "failed" }, { status: "running", leaseUntil: { $lt: now } }] }] },
+    { $set: { status: "running", startedAt: now, leaseUntil: new Date(Date.now() + 60000), errorMessage: null } }, { returnDocument: "after" });
   if (!scan) {
-    throw new Error(`Scan ${scanId} not found in database.`);
+    return { success: true, skipped: true };
   }
 
   if (scan.status === "completed") {
@@ -60,17 +66,32 @@ const processScanJob = async (job) => {
   await scan.save();
 
   let workspaceHandle = null;
+  const deadline = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+  const heartbeat = setInterval(async () => {
+    try {
+      await heartbeatWorker();
+      const renewed = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null },
+        { $set: { leaseUntil: new Date(Date.now() + 60000) } });
+      if (!renewed) controller.abort();
+    } catch { controller.abort(); }
+  }, 15000);
 
   try {
     // Step 1 & 2: Ephemeral workspace from authorized GitHub App installation zipball
-    workspaceHandle = await createEphemeralWorkspace(installationId, owner, repo);
+    if (!scan.commitSha) {
+      scan.commitSha = (await require("../services/github.service").resolveCommit(installationId, owner, repo)).sha;
+    }
+    workspaceHandle = await createEphemeralWorkspace(installationId, owner, repo, scan.commitSha);
     const { workspacePath } = workspaceHandle;
 
     // Step 3: Run Scanner Orchestration layer
-    const orchestrator = new ScannerOrchestrator();
-    const { results, scannersRun, scannerErrors } = await orchestrator.runAll(workspacePath);
+    const orchestrator = new ScannerOrchestrator(null, { includeDependencies: scan.includeDependencies });
+    const { results, scannersRun, scannerErrors, coverage } = await orchestrator.runAll(workspacePath);
+    controller.signal.throwIfAborted();
     scan.scannersUsed = scannersRun;
     scan.scannerErrors = scannerErrors;
+    scan.coverage = coverage;
+    scan.rulesHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../scanners/rules.yml"))).digest("hex");
 
     // Step 4: Normalize raw findings from all scanners
     let allNormalized = [];
@@ -119,6 +140,8 @@ const processScanJob = async (job) => {
         evidenceSnippet: item.evidenceSnippet,
         remediation: item.remediation,
         fingerprint: item.fingerprint,
+        correlationKey: item.correlationKey,
+        provenance: item.provenance,
         riskScore,
         riskFactors,
         riskCategory,
@@ -126,9 +149,23 @@ const processScanJob = async (job) => {
       };
     });
     console.info(`[ScanWorker] Risk calculation completed for ${findingsToInsert.length} findings.`);
+    if (findingsToInsert.length) {
+      const reviews = await Finding.aggregate([
+        { $match: { organization: scan.organization, correlationKey: { $in: findingsToInsert.map(f => f.correlationKey) }, reviewedAt: { $ne: null } } },
+        { $sort: { reviewedAt: -1 } }, { $group: { _id: "$correlationKey", review: { $first: "$$ROOT" } } }, { $limit: 20000 },
+      ]);
+      const previous = new Map(reviews.map(item => [item._id, item.review]));
+      for (const finding of findingsToInsert) {
+        const review = previous.get(finding.correlationKey);
+        if (review && ["acknowledged", "dismissed"].includes(review.status)) {
+          Object.assign(finding, { status: review.status, statusReason: review.statusReason, reviewedBy: review.reviewedBy, reviewedAt: review.reviewedAt });
+        }
+      }
+    }
 
     // Step 9: Persist findings to MongoDB
     if (findingsToInsert.length > 0) {
+      await Finding.init();
       await Finding.bulkWrite(findingsToInsert.map((finding) => ({
         updateOne: {
           filter: { scan: scan._id, fingerprint: finding.fingerprint },
@@ -149,26 +186,42 @@ const processScanJob = async (job) => {
     };
 
     scan.status = "completed";
+    scan.activeKey = null;
+    scan.leaseUntil = null;
     scan.completedAt = new Date();
     scan.summary = summary;
-    await scan.save();
+    const finalized = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null },
+      { $set: { status: scan.status, completedAt: scan.completedAt, summary, coverage: scan.coverage,
+        scannersUsed: scan.scannersUsed, scannerErrors: scan.scannerErrors, rulesHash: scan.rulesHash,
+        commitSha: scan.commitSha, activeKey: null, leaseUntil: null } });
+    if (!finalized) throw new Error("Scan was cancelled before completion");
 
     console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
     return { success: true, summary };
   } catch (error) {
     console.error(`[ScanWorker] Scan ${scanId} failed:`, error.message);
     scan.status = "failed";
+    scan.activeKey = null;
+    scan.leaseUntil = null;
+    scan.scannerErrors = error.scannerErrors || scan.scannerErrors;
     scan.completedAt = new Date();
     scan.errorMessage = error.message;
     await scan.save();
     throw error;
   } finally {
+    clearTimeout(deadline);
+    clearInterval(heartbeat);
     // Step 11: Cleanup workspace ephemeral directory guaranteed in finally
     if (workspaceHandle && typeof workspaceHandle.cleanup === "function") {
       workspaceHandle.cleanup();
       console.info(`[ScanWorker] Ephemeral workspace cleaned up for scan ${scanId}.`);
     }
   }
+};
+
+const processScanJob = (job) => {
+  const controller = new AbortController();
+  return require("../services/scan-context").run({ signal: controller.signal }, () => processScanJobInternal(job, controller));
 };
 
 const createBullMqWorker = () => {
@@ -186,6 +239,11 @@ const createBullMqWorker = () => {
   worker.on("error", (err) => {
     console.error("[ScanWorker] Worker error:", err.message);
   });
+  const schedules = setInterval(() => require("../services/automation.service").runDueSchedules().catch(() => {}), 60000);
+  schedules.unref();
+  worker.on("closed", () => clearInterval(schedules));
+  const pulse = setInterval(() => heartbeatWorker().catch(() => {}), 30000);
+  pulse.unref(); worker.on("closed", () => clearInterval(pulse));
   return worker;
 };
 
@@ -204,8 +262,17 @@ const startVercelQueueWorker = async () => {
 
   console.info(`[ScanWorker] Polling Vercel Queue '${SCAN_QUEUE_NAME}' in ${SCAN_QUEUE_REGION}...`);
   let pollDelayMs = 5000;
+  let lastScheduleCheck = 0;
   while (!shuttingDown) {
     try {
+      await ensureDatabase();
+      await heartbeatWorker();
+      await Scan.updateMany({ status: { $in: ["queued", "running"] }, deadlineAt: { $lt: new Date() } },
+        { $set: { status: "failed", activeKey: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
+      if (Date.now() - lastScheduleCheck > 60000) {
+        await require("../services/automation.service").runDueSchedules();
+        lastScheduleCheck = Date.now();
+      }
       const token = await getVercelOidcToken();
       const queue = new PollingQueueClient({
         region: SCAN_QUEUE_REGION,

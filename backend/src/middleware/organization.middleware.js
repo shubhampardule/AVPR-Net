@@ -20,7 +20,8 @@ const requireOrganizationMember = async (req, res, next) => {
             status: "active",
         });
 
-        if (!membership) {
+        const activeOrganization = membership && await require("../models/Organization").exists({ _id: organizationId, status: "active" });
+        if (!membership || !activeOrganization) {
             return res.status(403).json({
                 success: false,
                 error: {

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "node --watch src/server.js",
     "worker": "node src/workers/scanWorker.js",
     "test": "jest --runInBand",
     "nvidia:health": "node src/cli/nvidia-health.js",
@@ -33,6 +33,7 @@
     "adm-zip": "^0.6.1",
     "bullmq": "^6.3.11",
     "cors": "^2.8.6",
+    "diff": "^9.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
@@ -48,7 +49,6 @@
   "devDependencies": {
     "esbuild": "^0.28.2",
     "jest": "^30.4.2",
-    "nodemon": "^3.1.14",
     "supertest": "^7.2.2"
   }
 }

@@ -9,7 +9,8 @@ async function requireScanMember(req, res, next) {
     const membership = scan && await OrganizationMember.findOne({
       user: req.user._id, organization: scan.organization, status: "active",
     });
-    if (!membership) return res.status(404).json({ success: false, error: {
+    const active = membership && await require("../models/Organization").exists({ _id: scan.organization, status: "active" });
+    if (!membership || !active) return res.status(404).json({ success: false, error: {
       code: "SCAN_NOT_FOUND", message: "Scan not found in your organizations",
     } });
     req.organizationMembership = membership;
