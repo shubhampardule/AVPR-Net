@@ -7,6 +7,24 @@ const field = "w-full rounded-lg border border-white/15 bg-[#08090B] px-3 py-2 t
 const button = "rounded-lg bg-[#4ADE80] px-4 py-2 text-sm font-semibold text-[#08090B] disabled:opacity-40 hover:bg-green-300";
 const labels = { python: "Python", javascript: "JavaScript", typescript: "TypeScript", c: "C", cpp: "C++", bash: "Bash" };
 
+function sanitizePreview(value, depth = 0) {
+  if (depth > 8) return "[CONTENT TOO DEEP]";
+  if (typeof value === "string") return value
+    .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/g,
+      match => "[REDACTED PRIVATE KEY]" + "\n".repeat((match.match(/\n/g) || []).length))
+    .replace(/\b(?:nvapi-[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,}|AKIA[A-Z0-9]{16})\b/g, "[REDACTED TOKEN]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [REDACTED]")
+    .replace(/((?:["']?)(?:api[_-]?key|password|passwd|secret|access[_-]?token|authorization|cookie)(?:["']?)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)/gi, "$1[REDACTED]")
+    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED EMAIL]");
+  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
+  if (Array.isArray(value)) return value.map(item => sanitizePreview(item, depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) =>
+    [key, /(?:password|secret|token|api.?key|authorization|cookie|email|user_?name|ip_?address|source_ip|destination_ip)/i.test(key)
+      ? "[REDACTED]" : sanitizePreview(item, depth + 1)]));
+  return "[UNSUPPORTED CONTENT]";
+}
+
 function TextList({ title, items }) {
   if (!items?.length) return null;
   return <div className="space-y-2"><h3 className="text-xs font-mono uppercase tracking-wider text-green-300">{title}</h3>
@@ -34,6 +52,10 @@ export default function Assistant({ demo = false }) {
   const base = demo ? `${API_BASE_URL}/ai/demo` : organizationId ? `${API_BASE_URL}/organizations/${organizationId}/ai` : null;
   const [tab, setTab] = useState("investigate");
   const [health, setHealth] = useState(null);
+  const [policy, setPolicy] = useState(null);
+  const [consentFor, setConsentFor] = useState(null);
+  const [findingPreview, setFindingPreview] = useState(null);
+  const [findingPreviewError, setFindingPreviewError] = useState("");
   const [knowledge, setKnowledge] = useState(null);
   const [fixtures, setFixtures] = useState(null);
   const [eventText, setEventText] = useState("");
@@ -53,10 +75,36 @@ export default function Assistant({ demo = false }) {
   const activeBase = useRef(base);
   const pendingRequest = useRef(null);
   activeBase.current = base;
+  const requestFingerprint = JSON.stringify({ organizationId, tab, findingId: demo ? "" : findingId,
+    eventText: tab === "investigate" ? eventText : "", language: tab === "code" ? language : "",
+    mode: tab === "code" ? mode : "", request: tab === "code" ? request : "",
+    originalCode: tab === "code" && mode === "review" ? originalCode : "", query: tab === "sources" ? query : "" });
+  let previewValue, embeddingQuery;
+  if (tab === "investigate") {
+    if (findingId.trim() && !demo) {
+      previewValue = findingPreview;
+      if (findingPreview?.original) {
+        const original = findingPreview.original;
+        embeddingQuery = sanitizePreview(`${original.scanner} ${original.cwe || ""} ${original.title || ""}`.slice(0, 1500));
+      }
+    } else {
+      try {
+        const event = sanitizePreview(JSON.parse(eventText)); previewValue = event;
+        embeddingQuery = sanitizePreview(`${event.category || ""} ${event.protocol || ""} ${event.description || ""}`.slice(0, 1500));
+      } catch { previewValue = sanitizePreview(eventText); }
+    }
+  } else if (tab === "code") {
+    previewValue = sanitizePreview({ language, mode, request, ...(mode === "review" ? { originalCode } : {}) });
+    embeddingQuery = sanitizePreview(`${language} secure coding guidance ${sanitizePreview(request)}`.slice(0, 1500));
+  } else { previewValue = sanitizePreview({ query }); embeddingQuery = sanitizePreview(query).slice(0, 1500); }
+  const findingIdFormatInvalid = !demo && Boolean(findingId.trim()) && !/^[a-f0-9]{24}$/i.test(findingId.trim());
+  const findingPreviewPending = !demo && tab === "investigate" && Boolean(findingId.trim()) && !findingIdFormatInvalid && !findingPreview;
+  const hostedAiBlocked = !demo && policy?.hostedAiEnabled !== true;
 
   async function api(route, body, signal) {
     const response = await fetch(`${base}/${route}`, { method: body === undefined ? "GET" : "POST",
-      credentials: "include", signal, headers: { "Content-Type": "application/json", ...(demo ? { "X-SecurePatch-Demo": "1" } : {}) },
+      credentials: "include", signal, headers: { "Content-Type": "application/json", ...(demo ? { "X-SecurePatch-Demo": "1" } : {}),
+        ...(body === undefined ? {} : { "X-SecurePatch-AI-Consent": "1" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const payload = await response.json();
     if (!response.ok && !payload.data) throw new Error(payload.error?.message || "Assistant request failed");
@@ -67,11 +115,11 @@ export default function Assistant({ demo = false }) {
     if (!base) return;
     let live = true;
     const controller = new AbortController();
-    setResult(null); setError(""); setHealth(null); setKnowledge(null); setBusy(false);
+    setResult(null); setError(""); setHealth(null); setPolicy(null); setKnowledge(null); setBusy(false);
     Promise.all([api("health", undefined, controller.signal), api("knowledge", undefined, controller.signal),
-      api("fixtures", undefined, controller.signal)]).then(async ([h, k, f]) => {
+      api("fixtures", undefined, controller.signal), demo ? Promise.resolve({ hostedAiEnabled: true }) : api("policy", undefined, controller.signal)]).then(async ([h, k, f, p]) => {
       if (!live) return;
-      setHealth(h); setKnowledge(k); setFixtures(f);
+      setHealth(h); setPolicy(p); setKnowledge(k); setFixtures(f);
       setEventText(JSON.stringify(f.events.suspicious, null, 2));
       setRequest(f.code.javascript.request);
       if (!demo && params.get("mode") === "review" && params.get("findingId")) {
@@ -84,6 +132,20 @@ export default function Assistant({ demo = false }) {
     return () => { live = false; controller.abort(); pendingRequest.current?.abort(); };
   }, [base]);
 
+  useEffect(() => {
+    if (demo || !base || !/^[a-f0-9]{24}$/i.test(findingId.trim())) {
+      setFindingPreview(null); setFindingPreviewError("");
+      return;
+    }
+    let live = true;
+    const controller = new AbortController();
+    setFindingPreview(null); setFindingPreviewError("");
+    const timer = setTimeout(() => api(`preview/finding/${findingId.trim()}`, undefined, controller.signal)
+      .then(value => { if (live) setFindingPreview(value); })
+      .catch(e => { if (live && e.name !== "AbortError") setFindingPreviewError(e.message); }), 250);
+    return () => { live = false; clearTimeout(timer); controller.abort(); };
+  }, [base, findingId, demo]);
+
   function loadCode(name) {
     const fixture = fixtures?.code[name];
     if (!fixture) return;
@@ -91,8 +153,21 @@ export default function Assistant({ demo = false }) {
     setOriginalCode(fixture.originalCode || "");
   }
 
+  function changeLanguage(name) {
+    setLanguage(name);
+    const fixture = fixtures?.code[name];
+    if (fixture) {
+      setMode(fixture.mode);
+      setRequest(fixture.request);
+      setOriginalCode(fixture.originalCode || "");
+    }
+  }
+
   async function run(event) {
-    event.preventDefault(); setBusy(true); setError(""); setResult(null); setPatchCheck(null); setPullRequest(null); setAcknowledged(false);
+    event.preventDefault(); setError("");
+    if (consentFor !== requestFingerprint) { setError("Review the data preview and confirm sharing it for this request."); return; }
+    setConsentFor(null);
+    setBusy(true); setResult(null); setPatchCheck(null); setPullRequest(null); setAcknowledged(false);
     const startedFor = base;
     const controller = new AbortController();
     pendingRequest.current = controller;
@@ -144,7 +219,7 @@ export default function Assistant({ demo = false }) {
         </div>
       </header>
       <div className="rounded-xl border border-amber-300/15 bg-amber-300/5 p-4 text-xs text-amber-100/80 leading-relaxed">
-        Requests send sanitized excerpts to NVIDIA-hosted inference. Use approved, nonsensitive material; redaction is best effort.
+        After you approve a request, its sanitized evidence and up to four excerpts from the approved shared security index are sent to NVIDIA for embeddings and hosted inference. Redaction is best effort.
         {demo && " Demo events are synthetic. This application has no network detection engine."}
         {" "}Advice, code and suggested tests require review. No proposed action is executed.
       </div>
@@ -155,6 +230,7 @@ export default function Assistant({ demo = false }) {
       </nav>
       {error && <p role="alert" className="p-4 rounded-xl border border-rose-400/30 bg-rose-400/10 text-sm text-rose-200">{error}</p>}
       {!demo && !organizationId && <p className="text-sm text-amber-200">Select an organization to use the assistant.</p>}
+      {!demo && organizationId && policy && hostedAiBlocked && <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100">Hosted AI is disabled for this organization. An owner or admin can enable it in <Link className="underline" to="/settings">Workspace settings</Link>.</p>}
       <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-6 items-start">
         <form onSubmit={run} className={`${box} space-y-4`}>
           {tab === "investigate" && <>
@@ -162,6 +238,9 @@ export default function Assistant({ demo = false }) {
             {!demo && <label className="block text-sm text-slate-300">Existing finding ID (optional)
               <input aria-label="Finding ID" className={`${field} mt-2`} value={findingId} onChange={(e) => setFindingId(e.target.value)} maxLength={24} />
             </label>}
+            {findingIdFormatInvalid && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding ID must contain exactly 24 hexadecimal characters.</p>}
+            {findingId.trim() && !demo && findingPreviewPending && !findingPreviewError && <p role="status" className="text-xs text-slate-400">Loading sanitized finding preview…</p>}
+            {findingPreviewError && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding preview: {findingPreviewError}</p>}
             <div className="flex gap-2">{["suspicious", "benign"].map((name) => <button key={name} type="button" disabled={!fixtures || busy}
               onClick={() => { setEventText(JSON.stringify(fixtures.events[name], null, 2)); setFindingId(""); }}
               className="rounded-lg border border-white/15 px-3 py-1.5 text-xs capitalize">{name} fixture</button>)}</div>
@@ -173,8 +252,8 @@ export default function Assistant({ demo = false }) {
           {tab === "code" && <>
             <h2 className="font-semibold">Defensive code proposal</h2>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-slate-400">Language<select className={`${field} mt-2`} value={language} onChange={(e) => loadCode(e.target.value)}>
-                {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l]}</option>)}</select></label>
+              <label className="text-xs text-slate-400">Language<select className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
+              {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l] || l.toUpperCase()}</option>)}</select></label>
               <label className="text-xs text-slate-400">Mode<select className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="generate">Generate</option><option value="review">Review as diff</option></select></label>
             </div>
@@ -191,7 +270,17 @@ export default function Assistant({ demo = false }) {
               onChange={(e) => setQuery(e.target.value)} maxLength={1500} required /></label>
             <ul className="space-y-2 text-xs text-slate-500 break-all">{knowledge?.sources?.map((s) => <li key={s}>{s}</li>)}</ul>
           </>}
-          <button className={button} disabled={busy || !base || !health}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+          <details open className="rounded-xl border border-green-300/20 bg-green-300/5 p-4 space-y-3">
+            <summary className="cursor-pointer text-sm font-medium text-green-200">Review the data for this request</summary>
+            <p className="text-xs leading-relaxed text-slate-300">This is the supplied evidence after best-effort redaction. The search text shown below is sent to NVIDIA embeddings to select up to four excerpts from the approved shared security index; the selected excerpts are sent to NVIDIA inference and appear in the result.</p>
+            <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs text-slate-300">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
+            {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-slate-400">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs text-slate-300">{embeddingQuery}</pre></div>}
+            <label className="flex items-start gap-2 text-xs text-slate-200"><input type="checkbox" className="mt-0.5 accent-green-400" checked={consentFor === requestFingerprint}
+              disabled={busy || !health || hostedAiBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
+              onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
+              <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
+          </details>
+          <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
           <p className="text-xs text-slate-500">{busy ? "The request may retry on a temporary provider failure." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
         <section className={`${box} space-y-6`} aria-live="polite" aria-label="Assistant result">

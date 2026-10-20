@@ -49,6 +49,7 @@ describe("SecurePatch Models", () => {
 
       expect(error).toBeUndefined();
       expect(organization.status).toBe("active");
+      expect(organization.hostedAiEnabled).toBe(false);
     });
   });
 

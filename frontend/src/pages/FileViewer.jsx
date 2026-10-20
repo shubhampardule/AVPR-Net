@@ -196,7 +196,20 @@ function CodeViewer({ file, filePath }) {
     file.text ||
     "";
 
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const lines = content.split("\n");
+  const copyFile = async () => {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+      setCopyError("Clipboard unavailable. Select the file contents to copy them manually.");
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-border-subtle bg-[#0D0F12]">
@@ -211,11 +224,18 @@ function CodeViewer({ file, filePath }) {
           </span>
         </div>
 
-        <span className="font-mono-code text-[10px] text-text-muted">
-          {lines.length} lines
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono-code text-[10px] text-text-muted">
+            {lines.length} lines
+          </span>
+          <button type="button" onClick={copyFile} aria-label={copied ? "File copied to clipboard" : "Copy file to clipboard"}
+            className="rounded border border-white/10 px-2 py-1 text-[10px] text-text-secondary hover:text-white">
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
 
       </div>
+      {copyError && <p role="alert" className="border-b border-border-subtle px-4 py-2 text-xs text-amber-200">{copyError}</p>}
 
       <div className="overflow-auto">
         <pre className="min-w-max py-4 font-mono-code text-xs leading-6">

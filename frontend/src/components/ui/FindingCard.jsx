@@ -50,10 +50,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
     <div className="rounded-xl border border-white/[0.08] bg-[#0D0F12] overflow-hidden transition hover:border-white/[0.16]">
       {/* Header Row */}
       <div
-        role="button" tabIndex={0} aria-expanded={expanded}
-        onKeyDown={event => { if (event.target === event.currentTarget && ["Enter", " "].includes(event.key)) { event.preventDefault(); setExpanded(!expanded); } }}
-        onClick={() => setExpanded(!expanded)}
-        className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none hover:bg-white/[0.01]"
+        className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none"
       >
         <div className="flex items-start gap-3.5">
           <div className="mt-0.5 p-2 rounded-lg bg-[#111419] border border-white/[0.08] text-rose-400">
@@ -120,6 +117,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
           <button
             aria-label={expanded ? "Collapse finding" : "Expand finding"} aria-expanded={expanded}
             type="button"
+            onClick={() => setExpanded(!expanded)}
             className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-text-muted hover:text-white"
           >
             {expanded ? (

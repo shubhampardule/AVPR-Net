@@ -77,8 +77,13 @@ reduces exposure but cannot guarantee arbitrary source text has no secrets.
   customer code outside a private pilot.
 - State what is fetched, what is retained, retention periods, subprocessors,
   deletion behavior and what is transmitted when AI or dependency checks run.
-- Provide an organization setting to disable hosted AI, and make the data sent
-  visible before the first request.
+- **Implemented:** hosted AI is off by default for new organizations; existing
+  organizations retain their prior behavior. Owners/admins can enable or disable
+  it. Every request requires member confirmation after a
+  sanitized evidence preview and the exact derived retrieval query are shown.
+  Finding previews are organization-scoped and do not call the provider. The
+  selected excerpts come only from the approved shared corpus and are shown in
+  the result. See [AI data controls](AI_DATA_CONTROLS.md).
 - Create an incident-response runbook and a documented process for reporting a
   vulnerable finding without including private repository contents in logs.
 - Keep OAuth tokens ephemeral, restrict App permissions, and test uninstall and

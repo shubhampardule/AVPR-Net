@@ -1023,6 +1023,48 @@ var require_logger = __commonJS({
   }
 });
 
+// src/models/Organization.js
+var require_Organization = __commonJS({
+  "src/models/Organization.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var organizationSchema = new mongoose.Schema(
+      {
+        name: {
+          type: String,
+          required: true,
+          trim: true,
+          maxlength: 150
+        },
+        slug: {
+          type: String,
+          required: true,
+          unique: true,
+          lowercase: true,
+          trim: true
+        },
+        status: {
+          type: String,
+          enum: ["active", "suspended"],
+          default: "active"
+        },
+        githubInstallationId: {
+          type: String,
+          default: null,
+          index: true
+        },
+        hostedAiEnabled: {
+          type: Boolean,
+          default: false
+        }
+      },
+      {
+        timestamps: true
+      }
+    );
+    module2.exports = mongoose.models.Organization || mongoose.model("Organization", organizationSchema);
+  }
+});
+
 // src/middleware/auth.middleware.js
 var require_auth_middleware = __commonJS({
   "src/middleware/auth.middleware.js"(exports2, module2) {
@@ -1098,44 +1140,6 @@ var require_OrganizationMember = __commonJS({
       { unique: true }
     );
     module2.exports = mongoose.models.OrganizationMember || mongoose.model("OrganizationMember", organizationMemberSchema);
-  }
-});
-
-// src/models/Organization.js
-var require_Organization = __commonJS({
-  "src/models/Organization.js"(exports2, module2) {
-    var mongoose = require("mongoose");
-    var organizationSchema = new mongoose.Schema(
-      {
-        name: {
-          type: String,
-          required: true,
-          trim: true,
-          maxlength: 150
-        },
-        slug: {
-          type: String,
-          required: true,
-          unique: true,
-          lowercase: true,
-          trim: true
-        },
-        status: {
-          type: String,
-          enum: ["active", "suspended"],
-          default: "active"
-        },
-        githubInstallationId: {
-          type: String,
-          default: null,
-          index: true
-        }
-      },
-      {
-        timestamps: true
-      }
-    );
-    module2.exports = mongoose.models.Organization || mongoose.model("Organization", organizationSchema);
   }
 });
 
@@ -1752,6 +1756,7 @@ var require_assistant_routes = __commonJS({
       const provider = options.provider || new NvidiaService({ logger: require_logger() });
       const rag = options.rag || new RagService({ provider });
       const service = options.service || new AssistantService({ provider, rag });
+      const findOrganization = options.findOrganization || (async (organizationId) => require_Organization().findById(organizationId).select("hostedAiEnabled").lean());
       const router = express2.Router({ mergeParams: true });
       const origins = /* @__PURE__ */ new Set(["http://localhost:5174", "http://127.0.0.1:5174"]);
       if (!demo && process.env.FRONTEND_URL) origins.add(new URL(process.env.FRONTEND_URL).origin);
@@ -1772,6 +1777,27 @@ var require_assistant_routes = __commonJS({
       router.use((req, res, next) => {
         if (req.method === "POST" && (!req.is("application/json") || req.get("Origin") && !origins.has(req.get("Origin")))) {
           return res.status(403).json({ success: false, error: { code: "AI_REQUEST_REJECTED", message: "Use JSON from an approved application origin" } });
+        }
+        next();
+      });
+      router.use(async (req, res, next) => {
+        if (req.method !== "POST") return next();
+        if (req.get("X-SecurePatch-AI-Consent") !== "1") {
+          return res.status(428).json({ success: false, error: {
+            code: "AI_CONSENT_REQUIRED",
+            message: "Review the data preview and confirm sharing it before submitting"
+          } });
+        }
+        if (!demo) {
+          try {
+            const organization = await findOrganization(req.params.organizationId);
+            if (!organization || organization.hostedAiEnabled === false) return res.status(403).json({
+              success: false,
+              error: { code: "HOSTED_AI_DISABLED", message: "Hosted AI is disabled for this organization" }
+            });
+          } catch (error) {
+            return next(error);
+          }
         }
         next();
       });
@@ -1829,7 +1855,24 @@ var require_assistant_routes = __commonJS({
         languages: service.languages(),
         execution: "disabled"
       })));
+      router.get("/policy", handle(async (req) => {
+        const organization = await findOrganization(req.params.organizationId);
+        return {
+          hostedAiEnabled: Boolean(organization && organization.hostedAiEnabled !== false),
+          provider: "NVIDIA",
+          consentRequired: true,
+          dataHandling: "Sanitized request evidence and up to four excerpts from the approved shared knowledge index are sent for hosted inference."
+        };
+      }));
       router.get("/knowledge", handle(async () => rag.diagnostics()));
+      if (!demo) router.get("/preview/finding/:findingId", handle(async (req) => {
+        const { objectId } = require_input();
+        objectId(req.params.findingId);
+        const findFinding = options.findFinding || ((filter) => require_Finding().findOne(filter).lean());
+        const finding = await findFinding({ _id: req.params.findingId, organization: req.params.organizationId });
+        if (!finding) throw Object.assign(badInput("Finding unavailable for this organization"), { statusCode: 404 });
+        return require_ai_safety().sanitize(require_assistant_service().findingAdapter(finding));
+      }));
       if (!demo) router.get("/finding/:findingId", handle(async (req) => {
         const { objectId, bad } = require_input();
         objectId(req.params.findingId);
@@ -2454,32 +2497,47 @@ var require_organization_controller = __commonJS({
         next(error);
       }
     };
+    var getAiSettings = async (req, res, next) => {
+      try {
+        const organization = await Organization.findById(req.params.organizationId).select("hostedAiEnabled").lean();
+        if (!organization) return res.status(404).json({
+          success: false,
+          error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" }
+        });
+        return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled !== false });
+      } catch (error) {
+        next(error);
+      }
+    };
+    var updateAiSettings = async (req, res, next) => {
+      try {
+        if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.hostedAiEnabled !== "boolean") {
+          return res.status(400).json({
+            success: false,
+            error: { code: "INVALID_AI_SETTINGS", message: "Provide only a boolean hostedAiEnabled value" }
+          });
+        }
+        const organization = await Organization.findOneAndUpdate(
+          { _id: req.params.organizationId, status: "active" },
+          { $set: { hostedAiEnabled: req.body.hostedAiEnabled } },
+          { new: true, runValidators: true }
+        ).select("hostedAiEnabled");
+        if (!organization) return res.status(404).json({
+          success: false,
+          error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" }
+        });
+        return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled });
+      } catch (error) {
+        next(error);
+      }
+    };
     module2.exports = {
       createOrganization,
       getMyOrganizations,
-      getOrganization
+      getOrganization,
+      getAiSettings,
+      updateAiSettings
     };
-  }
-});
-
-// src/routes/organization.routes.js
-var require_organization_routes = __commonJS({
-  "src/routes/organization.routes.js"(exports2, module2) {
-    var express2 = require("express");
-    var {
-      createOrganization,
-      getMyOrganizations,
-      getOrganization
-    } = require_organization_controller();
-    var {
-      requireOrganizationMember
-    } = require_organization_middleware();
-    var { requireAuth } = require_auth_middleware();
-    var router = express2.Router();
-    router.post("/", requireAuth, createOrganization);
-    router.get("/", requireAuth, getMyOrganizations);
-    router.get("/:organizationId", requireAuth, requireOrganizationMember, getOrganization);
-    module2.exports = router;
   }
 });
 
@@ -2513,6 +2571,32 @@ var require_rbac_middleware = __commonJS({
     module2.exports = {
       requireRole
     };
+  }
+});
+
+// src/routes/organization.routes.js
+var require_organization_routes = __commonJS({
+  "src/routes/organization.routes.js"(exports2, module2) {
+    var express2 = require("express");
+    var {
+      createOrganization,
+      getMyOrganizations,
+      getOrganization,
+      getAiSettings,
+      updateAiSettings
+    } = require_organization_controller();
+    var {
+      requireOrganizationMember
+    } = require_organization_middleware();
+    var { requireAuth } = require_auth_middleware();
+    var { requireRole } = require_rbac_middleware();
+    var router = express2.Router();
+    router.post("/", requireAuth, createOrganization);
+    router.get("/", requireAuth, getMyOrganizations);
+    router.get("/:organizationId", requireAuth, requireOrganizationMember, getOrganization);
+    router.get("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, getAiSettings);
+    router.patch("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, requireRole("owner", "admin"), updateAiSettings);
+    module2.exports = router;
   }
 });
 

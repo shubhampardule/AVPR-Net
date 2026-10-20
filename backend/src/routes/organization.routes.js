@@ -3,18 +3,23 @@ const {
   createOrganization,
   getMyOrganizations,
   getOrganization,
+  getAiSettings,
+  updateAiSettings,
 } = require("../controllers/organization.controller");
 const {
   requireOrganizationMember,
 } = require("../middleware/organization.middleware");
 
 const { requireAuth } = require("../middleware/auth.middleware");
+const { requireRole } = require("../middleware/rbac.middleware");
 
 const router = express.Router();
 
 router.post("/", requireAuth, createOrganization);
 router.get("/", requireAuth, getMyOrganizations);
 router.get("/:organizationId", requireAuth, requireOrganizationMember, getOrganization);
+router.get("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, getAiSettings);
+router.patch("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, requireRole("owner", "admin"), updateAiSettings);
 
 
 module.exports = router;

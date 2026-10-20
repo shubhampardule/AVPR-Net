@@ -48,7 +48,8 @@ test("concurrency guard refuses a third active hosted request", async () => {
   const service = { languages: () => ["javascript"], generateCode: () => new Promise((resolve) => pending.push(resolve)) };
   const app = express(); app.use(express.json());
   app.use("/ai", createAssistantRouter({ demo: true, service, provider: {}, rag: {} }));
-  const send = () => request(app).post("/ai/code").set("X-SecurePatch-Demo", "1").send({}).then((r) => r.status);
+  const send = () => request(app).post("/ai/code").set("X-SecurePatch-Demo", "1")
+    .set("X-SecurePatch-AI-Consent", "1").send({}).then((r) => r.status);
   const one = send(), two = send();
   const deadline = Date.now() + 1000;
   while (pending.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));

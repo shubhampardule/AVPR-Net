@@ -13,6 +13,7 @@ beforeEach(() => {
 function app(options = {}) {
   const instance = express(); instance.use(express.json({ limit: "24kb" }));
   instance.use("/org/:organizationId/ai", createAssistantRouter({ service, rag, provider,
+    findOrganization: async () => ({ hostedAiEnabled: true }),
     budget: { consume: async () => {}, reserveSlots: async () => async () => {} }, ...options }));
   return instance;
 }
@@ -25,10 +26,10 @@ test("production accepts the configured site origin while rejecting other origin
   try {
     const instance = app({ requireAuth: auth, requireMembership: member });
     const accepted = await request(instance).post("/org/org-1/ai/analyze")
-      .set("Origin", "https://avpr-psi.vercel.app").send({ event });
+      .set("Origin", "https://avpr-psi.vercel.app").set("X-SecurePatch-AI-Consent", "1").send({ event });
     expect(accepted.status).toBe(200);
     const rejected = await request(instance).post("/org/org-1/ai/analyze")
-      .set("Origin", "https://evil.example").send({ event });
+      .set("Origin", "https://evil.example").set("X-SecurePatch-AI-Consent", "1").send({ event });
     expect(rejected.status).toBe(403);
     expect(service.analyzeEvent).toHaveBeenCalledTimes(1);
   } finally {
@@ -46,17 +47,54 @@ test("membership failure denies access", async () => {
     .post("/org/org-1/ai/analyze").send({ event });
   expect(response.status).toBe(403); expect(service.analyzeEvent).not.toHaveBeenCalled();
 });
+test("hosted AI requires an explicit request confirmation before any service call", async () => {
+  const instance = app({ requireAuth: auth, requireMembership: member });
+  const response = await request(instance).post("/org/org-1/ai/analyze").send({ event });
+  expect(response.status).toBe(428);
+  expect(response.body.error.code).toBe("AI_CONSENT_REQUIRED");
+  expect(service.analyzeEvent).not.toHaveBeenCalled();
+});
+test("organization AI opt-out blocks inference even if the browser confirms", async () => {
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findOrganization: async () => ({ hostedAiEnabled: false }) });
+  const response = await request(instance).post("/org/org-1/ai/analyze")
+    .set("X-SecurePatch-AI-Consent", "1").send({ event });
+  expect(response.status).toBe(403);
+  expect(response.body.error.code).toBe("HOSTED_AI_DISABLED");
+  expect(service.analyzeEvent).not.toHaveBeenCalled();
+});
+test("organizations created before the setting retain their existing hosted AI behavior", async () => {
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findOrganization: async () => ({}) });
+  const policy = await request(instance).get("/org/org-1/ai/policy");
+  expect(policy.status).toBe(200);
+  expect(policy.body.data.hostedAiEnabled).toBe(true);
+  const response = await request(instance).post("/org/org-1/ai/analyze")
+    .set("X-SecurePatch-AI-Consent", "1").send({ event });
+  expect(response.status).toBe(200);
+});
 test("persisted finding query is scoped to organization and cannot trust caller score", async () => {
   const findFinding = jest.fn(async () => ({ scanner: "bandit", riskScore: 7.35 }));
   const instance = app({ requireAuth: auth, requireMembership: member, findFinding });
   const id = "0123456789abcdef01234567";
-  expect((await request(instance).post("/org/org-1/ai/analyze").send({ findingId: id })).status).toBe(200);
+  expect((await request(instance).post("/org/org-1/ai/analyze").set("X-SecurePatch-AI-Consent", "1").send({ findingId: id })).status).toBe(200);
   expect(findFinding).toHaveBeenCalledWith({ _id: id, organization: "org-1" });
-  expect((await request(instance).post("/org/org-1/ai/analyze").send({ findingId: id, riskScore: 1 })).status).toBe(400);
+  expect((await request(instance).post("/org/org-1/ai/analyze").set("X-SecurePatch-AI-Consent", "1").send({ findingId: id, riskScore: 1 })).status).toBe(400);
+});
+test("finding preview is organization-scoped and redacts sensitive values without inference", async () => {
+  const id = "0123456789abcdef01234567";
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findFinding: async () => ({ _id: id, scanner: "bandit", ruleId: "B605", riskScore: 4, severity: "medium", riskCategory: "medium",
+      title: "Credential exposed", description: "password=private-value", evidenceSnippet: "owner@example.org" }) });
+  const result = await request(instance).get(`/org/org-1/ai/preview/finding/${id}`);
+  expect(result.status).toBe(200);
+  expect(JSON.stringify(result.body.data)).not.toContain("private-value");
+  expect(JSON.stringify(result.body.data)).not.toContain("owner@example.org");
+  expect(service.analyzeFinding).not.toHaveBeenCalled();
 });
 test("finding from another tenant is unavailable", async () => {
   const instance = app({ requireAuth: auth, requireMembership: member, findFinding: async () => null });
-  expect((await request(instance).post("/org/other/ai/analyze").send({ findingId: "0123456789abcdef01234567" })).status).toBe(404);
+  expect((await request(instance).post("/org/other/ai/analyze").set("X-SecurePatch-AI-Consent", "1").send({ findingId: "0123456789abcdef01234567" })).status).toBe(404);
 });
 test("demo requires explicit header and approved origin", async () => {
   const instance = app({ demo: true });
@@ -67,27 +105,27 @@ test("demo requires explicit header and approved origin", async () => {
 test("demo rejects real events and all persisted findings", async () => {
   const instance = app({ demo: true });
   for (const input of [{ event: { ...event, synthetic: false } }, { findingId: "0123456789abcdef01234567" }]) {
-    expect((await request(instance).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").send(input)).status).toBe(400);
+    expect((await request(instance).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").set("X-SecurePatch-AI-Consent", "1").send(input)).status).toBe(400);
   }
   expect(service.analyzeEvent).not.toHaveBeenCalled();
 });
 test("normal demo event and knowledge workflows share services", async () => {
   const instance = app({ demo: true });
-  const result = await request(instance).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").send({ event });
+  const result = await request(instance).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").set("X-SecurePatch-AI-Consent", "1").send({ event });
   expect(result.body.data.original).toEqual(event);
   expect((await request(instance).get("/org/demo/ai/fixtures").set("X-SecurePatch-Demo", "1")).body.data.events.benign.synthetic).toBe(true);
 });
 test("provider unavailable retains original evidence with 503", async () => {
   service.analyzeEvent.mockResolvedValue({ status: "unavailable", original: event, analysis: null });
-  const result = await request(app({ demo: true })).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").send({ event });
+  const result = await request(app({ demo: true })).post("/org/demo/ai/analyze").set("X-SecurePatch-Demo", "1").set("X-SecurePatch-AI-Consent", "1").send({ event });
   expect(result.status).toBe(503); expect(result.body.data.original).toEqual(event);
 });
 test("request rate limit bounds hosted costs", async () => {
   const instance = app({ demo: true });
   for (let i = 0; i < 10; i++) {
-    expect((await request(instance).post("/org/demo/ai/code").set("X-SecurePatch-Demo", "1").send({})).status).toBe(200);
+    expect((await request(instance).post("/org/demo/ai/code").set("X-SecurePatch-Demo", "1").set("X-SecurePatch-AI-Consent", "1").send({})).status).toBe(200);
   }
-  expect((await request(instance).post("/org/demo/ai/code").set("X-SecurePatch-Demo", "1").send({})).status).toBe(429);
+  expect((await request(instance).post("/org/demo/ai/code").set("X-SecurePatch-Demo", "1").set("X-SecurePatch-AI-Consent", "1").send({})).status).toBe(429);
   expect(service.generateCode).toHaveBeenCalledTimes(10);
 });
 test("demo server uses existing app without DB, OAuth, GitHub or scan routes", async () => {

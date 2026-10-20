@@ -36,7 +36,6 @@ export function HeroSection({ onOpenScanModal }) {
             <div className="flex flex-wrap items-center gap-4 pt-2">
               <Link
                 to="/login"
-                onClick={() => setMobileMenuOpen(false)}
                 className="px-5 py-3 text-xs font-mono font-semibold text-[#08090B] bg-[#4ADE80] rounded-lg shadow-subtle-glow flex items-center justify-center gap-1.5"
               >
                 <span>Start scanning</span>

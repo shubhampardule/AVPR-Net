@@ -171,12 +171,19 @@ repair; an empty index produces an explicit insufficient-context result.
 
 ## Privacy, reliability and limits
 
-Assistant requests and indexed excerpts leave the machine for NVIDIA inference.
-Use approved nonsensitive material. Redaction handles representative credential,
-email and sensitive-field patterns, but cannot guarantee removal of every secret
-or private fact. Private organization files are not indexed by this MVP. Trial
-terms may restrict confidential submissions and allow content use/monitoring;
-see the official references linked in NVIDIA_PROVIDER.md.
+Hosted AI is disabled by default for new organizations; existing organizations
+retain the hosted-AI behavior they had before this setting was added. Owners or
+admins can turn it off or on, and each member reviews a sanitized evidence preview and derived
+retrieval query before approving a request. The preview includes supplied event
+or finding fields and complete code-review input; it identifies the approved
+shared security corpus used for retrieval. NVIDIA receives the retrieval query,
+selected corpus excerpts and sanitized evidence for hosted inference. Redaction
+handles representative credential, email and sensitive-field patterns, but
+cannot guarantee removal of every secret or private fact. Private organization
+files are not indexed by this MVP. Trial terms may restrict confidential
+submissions and allow content use/monitoring; see the official references linked
+in [NVIDIA_PROVIDER.md](docs/NVIDIA_PROVIDER.md). See the complete
+[hosted AI data-control details](docs/AI_DATA_CONTROLS.md).
 
 Retrieved text, logs and code are untrusted data under a separate system policy.
 Schema/citation checks reject malformed or unsupported outputs, but cannot prove

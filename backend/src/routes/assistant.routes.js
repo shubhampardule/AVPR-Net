@@ -8,6 +8,8 @@ function createAssistantRouter(options = {}) {
   const provider = options.provider || new NvidiaService({ logger: require("../config/logger") });
   const rag = options.rag || new RagService({ provider });
   const service = options.service || new AssistantService({ provider, rag });
+  const findOrganization = options.findOrganization || (async (organizationId) =>
+    require("../models/Organization").findById(organizationId).select("hostedAiEnabled").lean());
   const router = express.Router({ mergeParams: true });
   const origins = new Set(["http://localhost:5174", "http://127.0.0.1:5174"]);
   if (!demo && process.env.FRONTEND_URL) origins.add(new URL(process.env.FRONTEND_URL).origin);
@@ -33,6 +35,22 @@ function createAssistantRouter(options = {}) {
     if (req.method === "POST" && (!req.is("application/json") ||
       (req.get("Origin") && !origins.has(req.get("Origin"))))) {
       return res.status(403).json({ success: false, error: { code: "AI_REQUEST_REJECTED", message: "Use JSON from an approved application origin" } });
+    }
+    next();
+  });
+
+  router.use(async (req, res, next) => {
+    if (req.method !== "POST") return next();
+    if (req.get("X-SecurePatch-AI-Consent") !== "1") {
+      return res.status(428).json({ success: false, error: { code: "AI_CONSENT_REQUIRED",
+        message: "Review the data preview and confirm sharing it before submitting" } });
+    }
+    if (!demo) {
+      try {
+        const organization = await findOrganization(req.params.organizationId);
+        if (!organization || organization.hostedAiEnabled === false) return res.status(403).json({ success: false,
+          error: { code: "HOSTED_AI_DISABLED", message: "Hosted AI is disabled for this organization" } });
+      } catch (error) { return next(error); }
     }
     next();
   });
@@ -77,7 +95,20 @@ function createAssistantRouter(options = {}) {
 
   router.get("/health", handle(async () => ({ ...provider.health(), demo,
     languages: service.languages(), execution: "disabled" })));
+  router.get("/policy", handle(async (req) => {
+    const organization = await findOrganization(req.params.organizationId);
+    return { hostedAiEnabled: Boolean(organization && organization.hostedAiEnabled !== false), provider: "NVIDIA",
+      consentRequired: true, dataHandling: "Sanitized request evidence and up to four excerpts from the approved shared knowledge index are sent for hosted inference." };
+  }));
   router.get("/knowledge", handle(async () => rag.diagnostics()));
+  if (!demo) router.get("/preview/finding/:findingId", handle(async (req) => {
+    const { objectId } = require("../utils/input");
+    objectId(req.params.findingId);
+    const findFinding = options.findFinding || ((filter) => require("../models/Finding").findOne(filter).lean());
+    const finding = await findFinding({ _id: req.params.findingId, organization: req.params.organizationId });
+    if (!finding) throw Object.assign(badInput("Finding unavailable for this organization"), { statusCode: 404 });
+    return require("../services/ai-safety").sanitize(require("../services/assistant.service").findingAdapter(finding));
+  }));
   if (!demo) router.get("/finding/:findingId", handle(async req => {
     const { objectId, bad } = require("../utils/input");
     objectId(req.params.findingId);

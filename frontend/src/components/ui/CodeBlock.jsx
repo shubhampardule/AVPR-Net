@@ -10,11 +10,18 @@ export function CodeBlock({
   maxHeight = 'none'
 }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+      setCopyError("Clipboard unavailable. Select the code to copy it manually.");
+    }
   };
 
   const lines = code.trim().split('\n');
@@ -30,16 +37,18 @@ export function CodeBlock({
           <div className="flex items-center gap-3">
             <span className="text-[10px] uppercase tracking-wider text-text-muted">{language}</span>
             <button
+              type="button"
               onClick={handleCopy}
               className="p-1 rounded hover:bg-white/[0.06] text-text-muted hover:text-text-primary transition-colors"
               title="Copy code"
-              aria-label="Copy code to clipboard"
+              aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
             >
               {copied ? <Check className="w-3.5 h-3.5 text-[#4ADE80]" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
       )}
+      {copyError && <p role="alert" className="border-b border-white/[0.06] px-4 py-2 text-[11px] text-amber-200">{copyError}</p>}
 
       <div
         className="p-4 overflow-x-auto text-[12px] leading-relaxed select-text"

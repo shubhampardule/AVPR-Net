@@ -136,8 +136,38 @@ const getOrganization = async (req, res, next) => {
   }
 };
 
+const getAiSettings = async (req, res, next) => {
+  try {
+    const organization = await Organization.findById(req.params.organizationId).select("hostedAiEnabled").lean();
+    if (!organization) return res.status(404).json({ success: false,
+      error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+    // A missing field means this organization predates the explicit opt-in.
+    // Preserve its existing hosted-AI behavior; newly created orgs store false.
+    return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled !== false });
+  } catch (error) { next(error); }
+};
+
+const updateAiSettings = async (req, res, next) => {
+  try {
+    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.hostedAiEnabled !== "boolean") {
+      return res.status(400).json({ success: false,
+        error: { code: "INVALID_AI_SETTINGS", message: "Provide only a boolean hostedAiEnabled value" } });
+    }
+    const organization = await Organization.findOneAndUpdate(
+      { _id: req.params.organizationId, status: "active" },
+      { $set: { hostedAiEnabled: req.body.hostedAiEnabled } },
+      { new: true, runValidators: true }
+    ).select("hostedAiEnabled");
+    if (!organization) return res.status(404).json({ success: false,
+      error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+    return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled });
+  } catch (error) { next(error); }
+};
+
 module.exports = {
   createOrganization,
   getMyOrganizations,
   getOrganization,
+  getAiSettings,
+  updateAiSettings,
 };

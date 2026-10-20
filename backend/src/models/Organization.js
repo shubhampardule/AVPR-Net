@@ -28,6 +28,11 @@ const organizationSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
+    hostedAiEnabled: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

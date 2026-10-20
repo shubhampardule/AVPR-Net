@@ -7,6 +7,7 @@ export default function Settings() {
   const [members, setMembers] = useState([]), [invitations, setInvitations] = useState([]), [email, setEmail] = useState("");
   const [role, setRole] = useState("developer"), [error, setError] = useState(""), [inviteUrl, setInviteUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hostedAiEnabled, setHostedAiEnabled] = useState(false);
   const canManage = ["owner", "admin"].includes(selectedOrg?.role);
   async function request(suffix = "", options = {}) {
     const response = await fetch(`${API_BASE_URL}/organizations/${org}/members${suffix}`, {
@@ -24,10 +25,19 @@ export default function Settings() {
     if (!response.ok) throw new Error(data.error?.message || "Invitation request failed");
     return data.data;
   }
+  async function aiSettingsRequest(options = {}) {
+    const response = await fetch(`${API_BASE_URL}/organizations/${org}/ai-settings`, {
+      credentials: "include", headers: { "Content-Type": "application/json" }, ...options,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || "AI settings request failed");
+    return data.data;
+  }
   async function load() {
     try {
-      const [memberResult, invitationResult] = await Promise.allSettled([
+      const [memberResult, invitationResult, aiSettingsResult] = await Promise.allSettled([
         request(), canManage ? invitationRequest() : Promise.resolve({ invitations: [] }),
+        aiSettingsRequest(),
       ]);
       if (memberResult.status === "rejected") throw memberResult.reason;
       setMembers(memberResult.value.members || []);
@@ -35,6 +45,11 @@ export default function Settings() {
         setInvitations(invitationResult.value.invitations || []);
       } else {
         setError(invitationResult.reason.message || "Invitations could not be loaded");
+      }
+      if (aiSettingsResult.status === "fulfilled") {
+        setHostedAiEnabled(aiSettingsResult.value.hostedAiEnabled === true);
+      } else {
+        setError(aiSettingsResult.reason.message || "AI settings could not be loaded");
       }
     } catch (e) { setError(e.message); }
   }
@@ -71,6 +86,13 @@ export default function Settings() {
         {inviteUrl && <div className="space-y-2" role="status"><p className="text-sm text-green-200">Invite link created. Anyone with this link can use it once before it expires.</p><div className="flex flex-wrap gap-2"><input readOnly aria-label="Invitation link" value={inviteUrl} className="min-w-0 flex-1 rounded bg-[#151820] p-2 text-xs text-slate-200" /><button type="button" className="rounded border border-white/15 px-3 py-2 text-sm" onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl); } catch { setError("Copy was unavailable; select and copy the invitation link."); } }}>Copy link</button></div></div>}
         {invitations.length > 0 && <div className="space-y-2 border-t border-white/10 pt-3"><h3 className="text-sm font-medium">Open invitations</h3>{invitations.map(invitation => <div key={invitation.id} className="flex flex-wrap items-center justify-between gap-3 text-sm"><div><p>{invitation.email} · {invitation.role}</p><p className="text-xs text-slate-400">Expires {new Date(invitation.expiresAt).toLocaleDateString()} · {invitation.status}</p></div><button disabled={busy} className="text-xs text-red-200 underline" onClick={() => mutate(() => invitationRequest(`/${invitation.id}`, { method: "DELETE" }))}>Revoke</button></div>)}</div>}
       </section>}
+      <section className="border border-white/10 bg-[#0D0F12] rounded-xl p-5 space-y-3"><h2 className="font-semibold">Hosted AI privacy</h2>
+        <p className="text-sm text-slate-400">Hosted AI is off for new organizations. When enabled, a member must approve each request after reviewing its sanitized evidence preview. NVIDIA receives that evidence and up to four excerpts from the approved shared security index.</p>
+        {canManage ? <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 accent-green-400" checked={hostedAiEnabled} disabled={busy}
+          onChange={e => mutate(async () => { await aiSettingsRequest({ method: "PATCH", body: JSON.stringify({ hostedAiEnabled: e.target.checked }) }); })} />
+          <span><span className="font-medium text-white">Allow hosted AI for this organization</span><span className="block mt-1 text-xs text-slate-400">Owners and admins can change this at any time. Turning it off blocks new hosted inference requests.</span></span></label>
+          : <p className="text-sm">Hosted AI is <strong className={hostedAiEnabled ? "text-green-300" : "text-amber-200"}>{hostedAiEnabled ? "enabled" : "disabled"}</strong> for this organization. Ask an owner or admin to change it.</p>}
+      </section>
       <section className="border border-white/10 rounded-xl p-5 text-sm text-slate-400 space-y-2"><h2 className="font-semibold text-white">Data and integrations</h2>
         <p>Scans use temporary source workspaces. Findings and review reasons are stored for this organization. AI requests send sanitized excerpts to NVIDIA; use approved material.</p>
         <p>Repository automation is configured from each repository page. Write permissions are needed only to create draft pull requests.</p>
