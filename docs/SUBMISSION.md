@@ -1,49 +1,37 @@
 # Technical submission summary
 
-SecurePatch helps developers and security reviewers investigate repository
-vulnerabilities and draft defensive fixes. The supplied AVPR-Net folder contains
-a working static-analysis architecture, not a trained network model.
+SecurePatch (repository AVPR-Net) helps developers scan authorized GitHub code,
+prioritize findings and review proposed fixes. Production is available at
+https://avpr-psi.vercel.app/. The application is static analysis plus hosted AI
+assistance; it is not a trained network detector.
 
-The baseline React/Express application queues authorized GitHub repository scans
-through BullMQ/Redis, runs Semgrep/Bandit, normalizes/deduplicates findings and
-stores deterministic risk-prioritized results in MongoDB. That pipeline and its
-risk calculation remain intact and are covered by regression tests.
+React/Vite and Express deploy under one Vercel domain. MongoDB stores sessions,
+organizations, evidence and review decisions. Vercel Queues and an unprivileged
+cloud daemon perform bounded, immutable-commit scans. Local operation can use
+BullMQ/Redis instead. Semgrep uses twelve project-owned versioned baseline rules;
+Bandit analyzes Python. Credential-pattern checks omit matched values, and optional
+npm lockfile advisory matching uses OSV. Coverage and failures remain visible.
 
-The extension uses NVIDIA-hosted Nemotron 3.5 Lightning 30B A3B for advisory
-analysis and defensive code proposals, and Nemotron 3 Embed 1B for passage/query
-embeddings. A small persistent local exact-cosine index stores explicitly
-approved guidance/project excerpts with hashes, source types and line references.
-Section-aware chunking, incremental updates and safe rebuilds make it repeatable.
+NVIDIA Nemotron 3.5 Lightning supplies advisory evidence explanations and code/diff
+proposals. Nemotron 3 Embed 1B supplies 2048-dimensional query/passage embeddings
+for a small approved shared corpus. The API validates schemas/citation IDs, keeps
+scanner scores separate from AI opinion and imposes persistent usage budgets.
 
-Completed features: shared hosted provider with bounded failures; persistent
-RAG and source inspection; synthetic/manual event and actual-finding adapters;
-source-resolved advisory analysis; Python/JavaScript/TypeScript/C/C++/Bash code
-generation and diff review; nonexecuting syntax checks where supported;
-authenticated organization-scoped API routes; existing-app assistant UI and
-loopback-only synthetic demo mode; regression/security tests, evaluation and demo
-documentation. No response action, generated program, patch or test is executed.
+Users can inspect paginated history/findings, compare compatible scans, review or
+dismiss issues with a reason, export JSON/SARIF, and draft a finding-specific fix.
+A patch must apply to the exact scanned file before a reviewed draft PR can be
+created. PR write permissions and signed webhook configuration require explicit
+external App setup. Weekly/monthly schedules are opt-in. No default branch update,
+automatic merge or arbitrary project test execution is performed by this service.
 
-Validation: 150 offline tests pass across 11 suites, including formerly
-configuration-blocked baseline tests after test-only mocks. Clean backend and
-frontend installs, isolated tests, and frontend build pass. Both main workflows
-were verified through the browser with live NVIDIA requests.
+Verification includes deterministic backend/frontend tests, actual offline scanner
+fixtures, isolated Mongo transaction/concurrency/index checks and production
+smoke checks. CI runs tests, builds, production audits and browser fixture flows.
+Mocked tests are not represented as live OAuth/provider verification. See the
+implementation record and CI for the current release's exact validation results.
 
-Two nine-workflow live runs each completed 7/9 structured responses. Retrieval
-expected-document hit@3 was 4/5 initially and 5/5 after section-aware chunking.
-Revised live median latency was 11.324 seconds; maximum 40.485 seconds. All
-completed responses used valid supplied source IDs, which does not establish
-semantic citation accuracy. See EVALUATION.md and the machine-readable reports.
-
-Limits: live schema/citation failures remain; only JS/TS/Python source receives
-syntax checks; no generated-code behavioral tests ran; no production network
-detector or attack-accuracy result exists. The original authenticated scan path
-needs MongoDB/Redis, OAuth/GitHub credentials and scanners and was not verified
-end to end here. Privacy minimization is best effort and trial terms constrain
-content use. Production sessions/deployment require further review.
-
-Next steps: improve measured schema reliability, independently review semantic
-citations and generated tests, add safe language parsers/isolation if needed,
-verify the original authenticated scanning deployment, and evaluate a larger
-authorized dataset. The specific NVIDIA hackathon and its rules were not
-provided, so eligibility, permitted usage and submission compliance are not
-claimed. Verify the actual event rules and original licensing before submission.
+The last recorded nine-workflow live AI suite completed 8/9 structured responses;
+the failed C case passed a separate rerun. Valid source IDs do not prove semantic
+citation accuracy. C/C++/Bash/diff syntax and generated-code behavioral tests are
+not provided. Trial-provider data minimization is best effort. Review all proposals
+independently and consult the actual event rules before claiming eligibility.

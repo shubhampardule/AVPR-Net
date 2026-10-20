@@ -31,10 +31,22 @@ test.each(Object.keys(snippets))("shared code service supports %s without execut
 test("review requires a diff and source; no file is changed", async () => {
   const { service, provider } = setup();
   const request = { language: "javascript", mode: "review", request: "Review input validation", originalCode: "let x = 1;" };
-  expect((await service.generateCode(request)).status).toBe("unavailable");
+  const generated = await service.generateCode(request);
+  expect(generated.status).toBe("complete");
+  expect(generated.proposal.code).toContain("--- a/source");
   provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "diff", code: "--- a/input.js\n+++ b/input.js\n@@ -1 +1 @@\n-let x = 1;\n+const x = 1;" }) });
   expect((await service.generateCode(request)).proposal.format).toBe("diff");
   await expect(service.generateCode({ ...request, originalCode: undefined })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
+});
+
+test("review replacement source becomes a deterministic diff for the finding path", async () => {
+  const { service, provider } = setup();
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), code: "const x = 1;\n" }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Return a minimal unified diff for a/src/main.js and b/src/main.js. Preserve behavior.", originalCode: "let x = 1;\n" });
+  expect(result.status).toBe("complete");
+  expect(result.proposal.format).toBe("diff");
+  expect(result.proposal.code).toContain("--- a/src/main.js");
+  expect(require("diff").applyPatch("let x = 1;\n", result.proposal.code)).toBe("const x = 1;\n");
 });
 
 test("configurable languages, bounds and unknown fields are enforced", async () => {
@@ -42,6 +54,18 @@ test("configurable languages, bounds and unknown fields are enforced", async () 
   await expect(service.generateCode({ language: "python", mode: "generate", request: "x" })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
   await expect(service.generateCode({ language: "javascript", mode: "generate", request: "x", execute: true })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
   await expect(service.generateCode({ language: "javascript", mode: "generate", request: "x".repeat(3001) })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
+});
+
+test.each([
+  "--- a/source\n+++ b/source\n@@ -1,7 +1,7 @@\n-let x = 1;\n+const x = 1;\n",
+  "--- a/source\n+++ b/source\n@@ -1 +1 @@\n-let other = 1;\n+const other = 1;\n",
+])("malformed or mismatched review patches are never offered as complete", async code => {
+  const { service, provider, validator } = setup();
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "diff", code }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Review source", originalCode: "let x = 1;\n" });
+  expect(result).toMatchObject({ status: "unavailable", proposal: null });
+  expect(provider.chat).toHaveBeenCalledTimes(2);
+  expect(validator).not.toHaveBeenCalled();
 });
 
 test("malformed and hallucinated code citations fail safely", async () => {

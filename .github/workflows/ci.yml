@@ -1,0 +1,53 @@
+name: Application checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - run: node backend/src/cli/check-secrets.js
+      - run: npm audit --omit=dev --audit-level=moderate
+        working-directory: backend
+      - run: npm ci --ignore-scripts
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm audit --omit=dev --audit-level=moderate
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: frontend/test-results
+  scanner-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t securepatch-worker -f backend/Dockerfile.worker backend
+      - run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,size=256m
+          --mount type=bind,source=${{ github.workspace }}/backend/fixtures/scanner-contract,target=/fixtures,readonly
+          --entrypoint node securepatch-worker src/cli/scanner-contract.js

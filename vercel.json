@@ -9,7 +9,9 @@
       "functions": {
         "**": {
           "includeFiles": "src/**",
-          "regions": ["bom1"]
+          "regions": [
+            "bom1"
+          ]
         }
       }
     },
@@ -47,5 +49,28 @@
       },
       "terminationGracePeriodSeconds": 300
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com https://lh3.googleusercontent.com; connect-src 'self'"
+        }
+      ]
+    }
+  ]
 }

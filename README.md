@@ -10,9 +10,16 @@ The NVIDIA extension adds source-backed event/finding explanations, defensive
 code generation/review in six languages, and persistent retrieval over approved
 project guidance. Hosted inference runs on NVIDIA; no local LLM/GPU is required.
 
+Production: https://avpr-psi.vercel.app/
+
+See [audit remediation and new workflows](docs/IMPLEMENTATION_2026-10-20.md) for
+current capabilities, resource limits, verification and external setup.
+See the [private beta roadmap](docs/PRODUCT_ROADMAP.md) for the concrete work
+needed before teams can rely on SecurePatch beyond an internal pilot.
+
 ## Architecture and responsibilities
 
-- **Existing scanning path:** React -> authenticated Express API -> BullMQ/Redis
+- **Existing scanning path:** React -> authenticated Express API -> Vercel Queues in production (BullMQ/Redis locally) -> cloud
   worker -> authorized GitHub archive -> Semgrep/Bandit -> normalization and
   SHA-256 deduplication -> occurrence counts -> deterministic weighted risk ->
   MongoDB findings. Temporary source workspaces are cleaned up by the worker.
@@ -27,7 +34,7 @@ project guidance. Hosted inference runs on NVIDIA; no local LLM/GPU is required.
   ignored `backend/.local/knowledge.json`. Atomic writes, incremental reuse,
   model/chunker compatibility checks and an exclusive lock protect updates.
   This shared nonsensitive corpus is capped at 500 chunks; exact cosine search
-  is appropriate for this demo, not a large multi-tenant vector deployment.
+  is appropriate for a small private beta, not a large multi-tenant deployment.
 
 Nemotron `nvidia/nemotron-3.5-lightning-30b-a3b` supplies hosted text/code
 assistance. `nvidia/nemotron-3-embed-1b` supplies 2048-dimensional retrieval
@@ -100,15 +107,19 @@ callbacks in `.env.example` to match the OAuth/GitHub applications you own.
 
 After signing in and selecting an organization, run a scan from a connected
 repository. **Explain with Nemotron** links a persisted finding to `/assistant`;
-AI requests require both session authentication and organization membership.
+AI requests require both session authentication and active organization membership.
 Finding queries are scoped by finding ID and organization. Original scanner
-severity and weighted risk remain authoritative. The supplied environment lacks
-these original services/credentials/scanners, so full authenticated scanning has
-not been verified here. Core scanner normalization/risk tests still pass.
+severity and weighted risk remain authoritative. Production uses Mongo-backed
+sessions, Vercel Queues and an unprivileged scanner daemon. Google/GitHub sign-in,
+repository access and a real scan were verified on the deployment. Public examples
+are illustrative; generated code and tests are not executed by the scanning worker.
 
-The default in-memory session store and existing security assumptions are not a
-production deployment design. Some landing-page examples predate this extension
-and depict automated PR/container testing that the backend does not implement.
+New workflows include paginated findings, history/comparison, review reasons,
+current unresolved issues, JSON/SARIF export, finding-specific review drafts,
+exact-source patch checks, reviewed draft PR creation and opt-in repository
+schedules/events. PRs require approved App write permissions; signed GitHub
+webhooks require their server-only secret and App subscriptions. Those features
+remain guarded when external configuration is missing.
 
 ## Index, test and evaluate
 
@@ -153,8 +164,8 @@ Normal mode: `/api/v1/organizations/:organizationId/ai`; demo mode:
 | POST /code | `{language,mode,request,originalCode?}` -> code/diff, explanation, sources and parser status |
 
 Requests are bounded to 24 KiB at the HTTP layer and smaller per-field limits.
-Ten costly requests/minute per user and two concurrent workflows bound hosted
-usage. Missing/failed AI services return understandable unavailable results;
+Persistent limits allow ten costly requests/minute per user, 100/org/hour and two
+concurrent requests/user. An overall workflow deadline bounds provider retries. Missing/failed AI services return understandable unavailable results;
 original scan results remain available. Stale/corrupt indexes require operator
 repair; an empty index produces an explicit insufficient-context result.
 
@@ -177,7 +188,9 @@ JavaScript/TypeScript are parsed in a bounded worker; Python uses a trusted
 isolated AST parser with stdin, size and time limits. Generated programs/tests
 are never evaluated. C/C++/Bash syntax and unified-diff validation are unavailable
 and labeled as such. No dependency is installed from a generated suggestion.
-No host blocking, firewall change, patch application, deployment or PR occurs.
+No host blocking, firewall change, automatic patch application or merge occurs.
+An explicit owner/admin review action can create a new proposal branch and draft
+PR, after exact-source and available syntax checks. Project tests remain unexecuted.
 
 ## Attribution and submission evidence
 

@@ -21,7 +21,9 @@ For production, register these exact callback URLs with their providers:
 Set `GITHUB_CALLBACK_URL` to the GitHub callback in Vercel, and use
 `http://localhost:5000/api/v1/auth/github/callback` for local development.
 The GitHub App requires read access to **Email addresses** to identify a verified
-email. Repository **Contents** and **Metadata** remain read-only. Sign-in uses
+email. Scanning requires read-only repository **Contents** and **Metadata**. Optional
+reviewed draft PR creation requires explicitly approved Contents and Pull requests
+write permissions. Sign-in uses
 one-use session state and PKCE. Only verified email addresses can link existing
 accounts; signed-in users can also explicitly link their GitHub identity.
 
@@ -39,6 +41,29 @@ only the explicit files in `backend/knowledge/sources.json`; it includes no
 repository uploads or user data. Fresh Vercel instances use this read-only
 artifact when no local index exists. Embedding settings must match the index.
 
+## Current workflows and deployment setup
+
+See [the implementation record](docs/IMPLEMENTATION_2026-10-20.md) for limits and
+the complete audit remediation map. Production sessions are persisted in MongoDB.
+The worker records an immutable commit SHA, coverage/tool versions and rules hash.
+It does not execute project test suites or arbitrary generated code.
+
+The repository page offers weekly/monthly schedules. A live worker dispatches due
+jobs; no external cron token is needed. GitHub event triggers additionally require
+an App webhook at `/api/v1/webhooks/github`, matching `GITHUB_WEBHOOK_SECRET`, and
+push/pull_request subscriptions. Event signatures and delivery IDs are verified.
+Draft PR creation needs owner/admin role, an unchanged default-branch SHA and App
+Contents/Pull requests write approval; a missing permission returns a clear error.
+
+Secrets patterns run locally without storing matched values. Optional dependency
+checks send npm package names/versions to OSV; select them only for approved data.
+AI finding explanations may be cached for ten minutes within the authorized org.
+Source archives are temporary; scan evidence and review reasons persist in MongoDB.
+
+Local frontend `/api` requests proxy to `127.0.0.1:5000` by default. In production,
+leave `VITE_API_URL` unset and use the shared Vercel domain. Never put private keys
+or provider credentials in a VITE_ variable.
+
 ## Overview
 
 SecurePatch features an asynchronous, orchestrated security scan pipeline powered by:
@@ -48,7 +73,7 @@ SecurePatch features an asynchronous, orchestrated security scan pipeline powere
 - **Normalizer & Deduplicator**: Normalizes findings to a unified schema and generates deterministic SHA-256 fingerprints to eliminate duplicate reports.
 - **Auditable Weighted Risk Model**:
   $$\text{Risk} = 0.40 \times \text{Severity} + 0.25 \times \text{Exploitability} + 0.15 \times \text{Occurrence} + 0.20 \times \text{Business Impact}$$
-- **BullMQ / Redis Asynchronous Processing**: HTTP requests enqueue scan jobs and immediately return `202 Accepted`. Background worker processes jobs separately.
+- **Vercel Queues in production / BullMQ with Redis locally**: HTTP requests enqueue scan jobs and immediately return `202 Accepted`. Background worker processes jobs separately.
 
 ---
 
