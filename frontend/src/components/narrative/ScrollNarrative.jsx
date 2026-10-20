@@ -1,135 +1,42 @@
-import React, { useState } from 'react';
-import { StageDiscover } from './StageDiscover';
-import { StagePrioritize } from './StagePrioritize';
-import { StageRemediate } from './StageRemediate';
-import { StageVerify } from './StageVerify';
-import { ArrowRight, CheckCircle2 } from 'lucide-react';
+import React from 'react';
+
+const steps = [
+  {
+    number: '01',
+    title: 'Scan a commit',
+    description: 'Run the configured scanners against a pinned revision. Tool versions, covered files, and scan errors stay with the result.',
+  },
+  {
+    number: '02',
+    title: 'Review the evidence',
+    description: 'Open a report at its source location, see which scanner raised it, and compare it with a prior scan when coverage matches.',
+  },
+  {
+    number: '03',
+    title: 'Evaluate a change',
+    description: 'Inspect a focused diff and its applicability checks. Run project tests in trusted CI before deciding whether to open a draft PR.',
+  },
+];
 
 export function ScrollNarrative() {
-  const [activeStage, setActiveStage] = useState(0);
-
-  const stages = [
-    {
-      id: 'discover',
-      step: '01',
-      title: 'DISCOVER',
-      headline: "See what's hiding in your code.",
-      copy: "SecurePatch analyzes source code to identify security weaknesses before they become production incidents. Configured scanners report their coverage for each repository.",
-      badge: 'Multi-Scanner Ingestion',
-      component: <StageDiscover />
-    },
-    {
-      id: 'prioritize',
-      step: '02',
-      title: 'PRIORITIZE',
-      headline: 'Not every vulnerability deserves the same urgency.',
-      copy: 'Correlate findings, reduce noise, and focus your team on the vulnerabilities that matter most. Deterministic fingerprints and an explainable weighted score help prioritize findings; scores are not CVSS or probabilities.',
-      badge: 'M3 Deduplication & M4 Risk',
-      component: <StagePrioritize />
-    },
-    {
-      id: 'remediate',
-      step: '03',
-      title: 'REMEDIATE',
-      headline: 'From finding to fix.',
-      copy: 'SecurePatch helps developers understand the issue and move from detection to practical remediation with minimal, targeted unified diffs on isolated branches.',
-      badge: 'Targeted Patch Generation',
-      component: <StageRemediate />
-    },
-    {
-      id: 'verify',
-      step: '04',
-      title: 'VERIFY',
-      headline: 'Fix it. Verify it. Move on.',
-      copy: 'Check patch applicability and available syntax parsers, review suggested tests, then validate changes in trusted CI before merging.',
-      badge: 'Patch Checks & Human Review',
-      component: <StageVerify />
-    }
-  ];
-
   return (
-    <section id="workflow" className="relative py-24 border-t border-white/[0.06] bg-[#08090B]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Section Header */}
-        <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-mono text-text-secondary tracking-wider uppercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]" />
-            End-to-End Security Workflow
-          </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-[#F5F7FA]">
-            From repository evidence to a reviewable fix.
-          </h2>
-          <p className="text-base sm:text-lg text-text-secondary leading-relaxed">
-            Four stages connect scanner evidence, explainable risk, proposed changes and independent review.
-          </p>
-
-          {/* Interactive Navigation Timeline / Stepper */}
-          <div className="pt-4 flex flex-wrap items-center justify-center gap-2 font-mono text-xs">
-            {stages.map((stg, index) => (
-              <button
-                key={stg.id}
-                onClick={() => setActiveStage(index)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                  activeStage === index
-                    ? 'bg-white/10 text-text-primary border-white/20 font-semibold shadow-subtle-glow'
-                    : 'bg-[#0D0F12] text-text-muted hover:text-text-secondary border-white/[0.06]'
-                }`}
-              >
-                <span className="text-[10px] text-[#4ADE80] font-bold">{stg.step}</span>
-                <span>{stg.title}</span>
-              </button>
-            ))}
-          </div>
+    <section id="workflow" className="scroll-mt-24 border-t border-white/[0.07] bg-[#141A1B] py-20 sm:py-24">
+      <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
+        <div className="mb-12 max-w-2xl space-y-4">
+          <p className="text-sm font-medium text-[#A8B9AF]">Workflow</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.035em] text-[#E8EEEB] sm:text-4xl">How a finding moves through review.</h2>
+          <p className="max-w-xl text-base leading-7 text-[#AEB9B3]">Each step stays tied to the scanned commit and the evidence that produced the result.</p>
         </div>
 
-        {/* Active Stage Content Area */}
-        <div className="space-y-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Stage Info */}
-            <div className="lg:col-span-4 space-y-4 text-left">
-              <div className="inline-flex items-center gap-1.5 text-xs font-mono text-[#4ADE80] bg-[#4ADE80]/10 px-2.5 py-1 rounded border border-[#4ADE80]/20">
-                <span className="font-bold">{stages[activeStage].step}</span>
-                <span>/ 04</span>
-                <span className="text-white/20">|</span>
-                <span>{stages[activeStage].badge}</span>
-              </div>
-
-              <h3 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F5F7FA] leading-snug">
-                {stages[activeStage].headline}
-              </h3>
-
-              <p className="text-sm sm:text-base text-text-secondary leading-relaxed">
-                {stages[activeStage].copy}
-              </p>
-
-              {/* Step progression buttons */}
-              <div className="pt-4 flex items-center gap-3">
-                {activeStage > 0 && (
-                  <button
-                    onClick={() => setActiveStage((prev) => prev - 1)}
-                    className="px-3.5 py-1.5 rounded-lg text-xs font-mono bg-[#111419] border border-white/[0.08] text-text-muted hover:text-text-primary transition-colors"
-                  >
-                    ← Previous Stage
-                  </button>
-                )}
-                {activeStage < 3 && (
-                  <button
-                    onClick={() => setActiveStage((prev) => prev + 1)}
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-mono font-medium text-[#08090B] bg-[#4ADE80] hover:bg-[#3ecf74] transition-all"
-                  >
-                    <span>Next: {stages[activeStage + 1].title}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Stage Interactive Visual Panel */}
-            <div className="lg:col-span-8">
-              {stages[activeStage].component}
-            </div>
-          </div>
-        </div>
+        <ol className="grid gap-0 border-t border-white/[0.1] md:grid-cols-3 md:divide-x md:divide-white/[0.1]">
+          {steps.map((step) => (
+            <li key={step.number} className="border-b border-white/[0.1] py-6 md:border-b-0 md:px-7 md:py-7 first:md:pl-0 last:md:pr-0">
+              <p className="font-mono-code text-xs text-[#A8B9AF]">{step.number}</p>
+              <h3 className="mt-4 text-lg font-semibold text-[#E8EEEB]">{step.title}</h3>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-[#AEB9B3]">{step.description}</p>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );

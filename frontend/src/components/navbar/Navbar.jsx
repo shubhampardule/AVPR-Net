@@ -1,125 +1,76 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Menu, X, ArrowRight } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, Menu, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ThemeToggle } from '../ui/ThemeToggle';
+import { BrandLockup } from '../ui/BrandLogo';
 
-export function Navbar({ onOpenAuthModal }) {
+const navLinks = [
+  { label: 'Workflow', href: '#workflow' },
+  { label: 'Example', href: '#playground' },
+  { label: 'Capabilities', href: '#capabilities' },
+  { label: 'AI assistant', href: import.meta.env.DEV ? '/assistant-demo' : '/assistant' },
+];
+
+export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
-    };
+    const handleScroll = () => setScrolled(window.scrollY > 12);
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const navLinks = [
-    { label: 'Product', href: '#product' },
-    { label: 'How it works', href: '#workflow' },
-    { label: 'Security', href: '#security' },
-    { label: 'Playground', href: '#playground' },
-    { label: 'Capabilities', href: '#capabilities' },
-    { label: 'AI assistant', href: import.meta.env.DEV ? '/assistant-demo' : '/assistant' },
-  ];
-
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled
-        ? 'bg-[#08090B]/85 backdrop-blur-md border-b border-white/[0.06] py-3 shadow-elevated'
-        : 'bg-transparent py-5'
-        }`}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-        {/* Wordmark Logo */}
-        <a href="/" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-[#111419] border border-white/[0.1] flex items-center justify-center transition-all group-hover:border-[#4ADE80]/50 group-hover:bg-[#4ADE80]/10">
-            <ShieldCheck className="w-4 h-4 text-[#4ADE80] transition-transform group-hover:scale-110" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-semibold tracking-tight text-[#F5F7FA]">
-              Secure<span className="text-[#4ADE80]">Patch</span>
-            </span>
-            <span className="hidden sm:inline-flex text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/[0.04] text-text-muted border border-white/[0.06]">
-              v1.0
-            </span>
-          </div>
-        </a>
+    <header className={`fixed inset-x-0 top-0 z-50 border-b transition-colors duration-200 ${scrolled ? 'border-white/[0.08] bg-[#101416]/95 backdrop-blur-md' : 'border-transparent bg-[#101416]/70'}`}>
+      <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
+        <Link to="/" aria-label="SecurePatch home" className="group inline-flex items-center gap-2.5">
+          <BrandLockup wordmarkClassName="text-lg" />
+        </Link>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1 rounded-full px-4 py-1.5 border border-white/[0.06] bg-[#0D0F12]/60 backdrop-blur-sm">
+        <nav aria-label="Main navigation" className="hidden items-center gap-6 lg:flex">
           {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="px-3.5 py-1 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors tracking-wide"
-            >
+            <a key={link.label} href={link.href} className="text-[13px] font-medium text-[#AFBAB4] transition-colors hover:text-[#E8EEEB]">
               {link.label}
             </a>
           ))}
         </nav>
 
-        {/* Right CTA Actions */}
-        <div className="hidden md:flex items-center gap-3">
-          <Link
-            to="/login"
-            className="px-3.5 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors font-mono"
-          >
-            Sign in
-          </Link>
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium text-[#08090B] bg-[#4ADE80] hover:bg-[#3ecf74] transition-all shadow-subtle-glow"
-          >
-            <span>Start scanning</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+        <div className="hidden items-center gap-5 lg:flex">
+          <Link to="/login" className="text-[13px] font-medium text-[#AFBAB4] transition-colors hover:text-[#E8EEEB]">Sign in</Link>
+          <ThemeToggle />
+          <Link to="/login" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#78A88B] px-3.5 text-[13px] font-semibold text-[#101916] transition-colors hover:bg-[#8DB89C]">
+            Connect a repository <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
         </div>
 
-        {/* Mobile Hamburger Button */}
-        <div className="flex md:hidden">
+        <div className="flex items-center gap-2 lg:hidden">
+          <ThemeToggle />
           <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-lg bg-[#111419] border border-white/[0.08] text-text-secondary hover:text-white"
+            type="button"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/[0.12] text-[#E8EEEB] transition-colors hover:bg-white/[0.05]"
             aria-label="Toggle navigation menu"
             aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation"
           >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-white/[0.08] bg-[#0D0F12]/95 backdrop-blur-xl px-4 pt-3 pb-5 space-y-3">
-          <nav className="flex flex-col space-y-2">
+        <div id="mobile-navigation" className="border-t border-white/[0.08] bg-[#151B1D] px-5 pb-5 pt-3 lg:hidden">
+          <nav aria-label="Mobile navigation" className="mx-auto flex max-w-7xl flex-col">
             {navLinks.map((link) => (
-              <a
-                key={link.label}
-                href={link.href}
-                onClick={() => setMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-md text-sm font-medium text-text-secondary hover:text-white hover:bg-white/[0.04] transition-colors"
-              >
+              <a key={link.label} href={link.href} onClick={() => setMobileMenuOpen(false)} className="border-b border-white/[0.06] py-3 text-sm font-medium text-[#C6D0CA] transition-colors hover:text-white">
                 {link.label}
               </a>
             ))}
           </nav>
-          <div className="pt-3 border-t border-white/[0.06] flex flex-col gap-2">
-            <Link
-              to="/login"
-              onClick={() => setMobileMenuOpen(false)}
-              className="w-full py-2 text-center text-xs font-mono text-text-secondary hover:text-white bg-[#111419] rounded-lg border border-white/[0.08] block"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/login"
-              onClick={() => setMobileMenuOpen(false)}
-              className="w-full py-2 text-center text-xs font-mono font-semibold text-[#08090B] bg-[#4ADE80] rounded-lg shadow-subtle-glow flex items-center justify-center gap-1.5"
-            >
-              <span>Start scanning</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+          <div className="mx-auto flex max-w-7xl gap-3 pt-4">
+            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="inline-flex h-10 flex-1 items-center justify-center rounded-md border border-white/[0.12] text-sm font-medium text-[#E8EEEB]">Sign in</Link>
+            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-[#78A88B] text-sm font-semibold text-[#101916]">Connect a repository <ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
           </div>
         </div>
       )}

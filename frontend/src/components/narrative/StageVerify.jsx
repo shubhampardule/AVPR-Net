@@ -7,8 +7,8 @@ export function StageVerify() {
     ["Independent tests", "Project test suites are not executed by the scanning service. Run them in your trusted CI before merging."],
     ["Human review", "Draft PR creation requires explicit review and never updates the default branch."],
   ];
-  return <div className="rounded-xl border border-white/10 bg-[#0D0F12] p-6 space-y-4 text-left">
-    <p className="text-xs font-mono text-green-300">VALIDATION CAPABILITIES · NO FABRICATED PASS RESULTS</p>
+  return <div className="rounded-xl border border-white/10 bg-[#171D1F] p-6 space-y-4 text-left">
+    <p className="text-sm font-medium text-[#A8B9AF]">What these checks cover</p>
     {checks.map(([title, text]) => <div key={title} className="border-t border-white/10 pt-3"><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-xs text-text-secondary">{text}</p></div>)}
   </div>;
 }

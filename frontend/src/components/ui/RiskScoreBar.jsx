@@ -24,10 +24,10 @@ export function RiskScoreBar({ score, category }) {
       border: "border-amber-400/20",
     },
     low: {
-      bar: "bg-[#4ADE80]",
-      text: "text-[#4ADE80]",
-      bg: "bg-[#4ADE80]/10",
-      border: "border-[#4ADE80]/20",
+      bar: "bg-[#78A88B]",
+      text: "text-[#78A88B]",
+      bg: "bg-[#78A88B]/10",
+      border: "border-[#78A88B]/20",
     },
   }[category?.toLowerCase()] || {
     bar: "bg-gray-400",

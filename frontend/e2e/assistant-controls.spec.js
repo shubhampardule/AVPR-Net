@@ -83,7 +83,7 @@ test("assistant investigation fixtures, tabs, evidence details, consent and subm
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto("/assistant");
   await expect(page.getByRole("heading", { name: "Evidence before action." })).toBeVisible();
-  await expect(page.getByText("NVIDIA: configured")).toBeVisible();
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
 
   const preview = page.getByLabel("Sanitized data preview");
   await expect(preview).toContainText("event-suspicious");
@@ -94,9 +94,9 @@ test("assistant investigation fixtures, tabs, evidence details, consent and subm
 
   const reviewDetails = page.getByText("Review the data for this request");
   await reviewDetails.click();
-  await expect(page.getByText(/This is the supplied evidence after best-effort redaction/)).toBeHidden();
+  await expect(page.getByText(/This preview shows the supplied evidence after best-effort redaction/)).toBeHidden();
   await reviewDetails.click();
-  await expect(page.getByText(/This is the supplied evidence after best-effort redaction/)).toBeVisible();
+  await expect(page.getByText(/This preview shows the supplied evidence after best-effort redaction/)).toBeVisible();
 
   const consent = page.getByRole("checkbox", { name: /I approve sending the data shown above/ });
   const analyze = page.getByRole("button", { name: "Analyze evidence" });

@@ -3,8 +3,8 @@ import { Link, useOutletContext, useParams, useSearchParams } from "react-router
 import { API_BASE_URL } from "../config/api";
 import { FindingCard } from "../components/ui/FindingCard";
 import { ScanStatusBadge } from "../components/ui/ScanStatusBadge";
-const panel = "rounded-xl border border-white/10 bg-[#0D0F12] p-5";
-const button = "rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40 hover:border-green-400";
+const panel = "rounded-xl border border-white/10 bg-[#171D1F] p-5";
+const button = "rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40 hover:border-[#78A88B]";
 export default function ScanPage() {
   const { owner, repo } = useParams();
   const [searchParams] = useSearchParams();
@@ -77,18 +77,18 @@ export default function ScanPage() {
   }
   const active = ["queued", "running"].includes(scan?.status);
   return <main className="mx-auto max-w-6xl p-5 space-y-5 text-white">
-    <Link className="text-green-300 text-sm" to={`/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>← Repository</Link>
+    <Link className="text-[#9BC2A9] text-sm" to={`/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>← Repository</Link>
     <header className="flex flex-wrap items-center justify-between gap-4"><div>
       <p className="text-sm text-slate-400">{owner}/{repo}</p><h1 className="text-2xl font-semibold">Security scans</h1>
     </div><div className="flex gap-2"><button className={button} disabled={busy || active || !org} onClick={start}>{busy ? "Queuing…" : "New scan"}</button>
       {active && <button className={button} onClick={cancel}>Cancel scan</button>}</div></header>
     <label className="text-sm text-slate-400 block"><input type="checkbox" checked={supplyChain} onChange={e => setSupplyChain(e.target.checked)} /> Include dependency advisories (package names/versions are sent to OSV). Credential pattern checks run locally.</label>
     {error && <p role="alert" className="rounded-lg border border-red-400/40 p-4 text-red-200">{error} <button className="underline" onClick={() => scanId ? setRefresh(n => n + 1) : setHistoryRevision(n => n + 1)}>Retry</button></p>}
-    <label className="block text-sm">Scan history<select aria-label="Scan history" className="ml-3 bg-[#151820] border border-white/20 p-2 rounded max-w-full" value={scanId} onChange={e => { setScanId(e.target.value); setPage(1); setScan(null); }}>
+    <label className="block text-sm">Scan history<select aria-label="Scan history" className="ml-3 bg-[#263032] border border-white/20 p-2 rounded max-w-full" value={scanId} onChange={e => { setScanId(e.target.value); setPage(1); setScan(null); }}>
       <option value="">Select a scan</option>{history.map(s => <option key={s._id} value={s._id}>{new Date(s.createdAt).toLocaleString()} · {s.status} · {s.commitSha?.slice(0, 7) || "legacy"}</option>)}</select></label>
     {scan && <section className={`${panel} space-y-4`}>
       <div className="flex flex-wrap gap-4 items-center"><ScanStatusBadge status={scan.status} /><span className="text-sm text-slate-400">{scan.summary?.total || 0} findings</span>
-        {scan.commitSha && <a className="text-xs text-green-300 break-all" href={`https://github.com/${owner}/${repo}/commit/${scan.commitSha}`} target="_blank" rel="noreferrer">Commit {scan.commitSha}</a>}</div>
+        {scan.commitSha && <a className="text-xs text-[#9BC2A9] break-all" href={`https://github.com/${owner}/${repo}/commit/${scan.commitSha}`} target="_blank" rel="noreferrer">Commit {scan.commitSha}</a>}</div>
       {active && <p aria-live="polite" className="text-amber-200 text-sm">{scan.status === "queued" ? "Waiting for the worker…" : "Scanning the pinned commit…"}</p>}
       {scan.errorMessage && <p className="text-red-200 text-sm">{scan.errorMessage}</p>}
       {scan.scannerErrors?.length > 0 && <div className="text-amber-200 text-sm"><strong>Incomplete scanner coverage</strong>{scan.scannerErrors.map((e, i) => <p key={i}>{e.scanner}: {e.message}</p>)}</div>}
@@ -102,7 +102,7 @@ export default function ScanPage() {
       <p className="text-slate-400">{comparison.limitation}</p>
       {["new", "persistent", "fixed"].map(kind => <details key={kind}><summary className="capitalize cursor-pointer">{kind}</summary>{comparison[kind].length > 100 && <p className="text-slate-400">Showing 100 of {comparison[kind].length}. Export JSON for complete evidence.</p>}<ul className="list-disc pl-5">{comparison[kind].slice(0, 100).map(f => <li key={f._id}>{f.filePath}:{f.startLine} · {f.title}</li>)}</ul></details>)}
     </section>}
-    <section className="space-y-3"><div className="flex justify-between items-center"><h2 className="font-semibold">Findings</h2><label className="text-sm">Risk <select aria-label="Risk filter" className="ml-2 bg-[#151820] p-2 rounded" value={risk} onChange={e => { setRisk(e.target.value); setPage(1); }}>{["all", "critical", "high", "medium", "low"].map(v => <option key={v}>{v}</option>)}</select></label></div>
+    <section className="space-y-3"><div className="flex justify-between items-center"><h2 className="font-semibold">Findings</h2><label className="text-sm">Risk <select aria-label="Risk filter" className="ml-2 bg-[#263032] p-2 rounded" value={risk} onChange={e => { setRisk(e.target.value); setPage(1); }}>{["all", "critical", "high", "medium", "low"].map(v => <option key={v}>{v}</option>)}</select></label></div>
       {findings.map(f => <FindingCard key={f._id} finding={f} organizationId={org} commitSha={scan?.commitSha} onReviewed={() => setRefresh(n => n + 1)} />)}
       {!findings.length && pagination && <p className="text-slate-400">No findings match this filter. Check scanner coverage before drawing conclusions.</p>}
       {!scanId && <p className="text-slate-400">Select an organization and run a scan to inspect results.</p>}

@@ -27,11 +27,11 @@ export function CodeBlock({
   const lines = code.trim().split('\n');
 
   return (
-    <div className={`rounded-lg border border-white/[0.08] bg-[#0D0F12] overflow-hidden text-xs font-mono ${className}`}>
+    <div className={`rounded-lg border border-white/[0.08] bg-[#171D1F] overflow-hidden text-xs font-mono ${className}`}>
       {filename && (
-        <div className="flex items-center justify-between px-4 py-2 bg-[#111419] border-b border-white/[0.06] text-text-secondary">
+        <div className="flex items-center justify-between px-4 py-2 bg-[#202729] border-b border-white/[0.06] text-text-secondary">
           <div className="flex items-center gap-2">
-            <FileCode className="w-3.5 h-3.5 text-[#60A5FA]" />
+            <FileCode className="w-3.5 h-3.5 text-[#8AA7B2]" />
             <span className="text-[11px] font-medium tracking-wide text-text-primary">{filename}</span>
           </div>
           <div className="flex items-center gap-3">
@@ -43,7 +43,7 @@ export function CodeBlock({
               title="Copy code"
               aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-[#4ADE80]" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? <Check className="w-3.5 h-3.5 text-[#78A88B]" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
@@ -71,7 +71,7 @@ export function CodeBlock({
                   <td className="pr-4 pl-1 text-right select-none text-text-muted/50 w-8 font-mono text-[11px]">
                     {lineNum}
                   </td>
-                  <td className="font-mono whitespace-pre text-[#F5F7FA]">
+                  <td className="font-mono whitespace-pre text-[#E8EEEB]">
                     {renderSyntaxHighlight(line)}
                   </td>
                 </tr>
@@ -97,13 +97,13 @@ function renderSyntaxHighlight(line) {
 
   return parts.map((part, i) => {
     if (/^(const|let|var|function|async|await|return|import|export|from|def|if|else|router|try|catch)$/.test(part)) {
-      return <span key={i} className="text-[#60A5FA] font-medium">{part}</span>;
+      return <span key={i} className="text-[#8AA7B2] font-medium">{part}</span>;
     }
     if (/^["'`].*["'`]$/.test(part)) {
       if (part.includes('SELECT') || part.includes('ffmpeg') || part.includes('AKIA')) {
         return <span key={i} className="text-[#F87171]">{part}</span>;
       }
-      return <span key={i} className="text-[#4ADE80]">{part}</span>;
+      return <span key={i} className="text-[#78A88B]">{part}</span>;
     }
     if (/^\d+$/.test(part)) {
       return <span key={i} className="text-[#FBBF24]">{part}</span>;

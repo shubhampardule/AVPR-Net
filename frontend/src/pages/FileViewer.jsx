@@ -212,9 +212,9 @@ function CodeViewer({ file, filePath }) {
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border-subtle bg-[#0D0F12]">
+    <div className="overflow-hidden rounded-xl border border-border-subtle bg-[#171D1F]">
 
-      <div className="flex items-center justify-between border-b border-border-subtle bg-[#111419] px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border-subtle bg-[#202729] px-4 py-3">
 
         <div className="flex items-center gap-2">
           <FileCode2 className="h-4 w-4 text-accent-blue" />
@@ -245,7 +245,7 @@ function CodeViewer({ file, filePath }) {
               key={index}
               className="flex hover:bg-white/[0.025]"
             >
-              <span className="sticky left-0 w-14 shrink-0 select-none border-r border-border-subtle bg-[#0D0F12] px-3 text-right text-text-muted">
+              <span className="sticky left-0 w-14 shrink-0 select-none border-r border-border-subtle bg-[#171D1F] px-3 text-right text-text-muted">
                 {index + 1}
               </span>
 

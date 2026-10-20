@@ -2,17 +2,27 @@
 <html lang="en" class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/securepatch-favicon.png?v=1" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SecurePatch — AI-Assisted Code Security & Automated Remediation</title>
-    <meta name="description" content="SecurePatch discovers, prioritizes, understands, and remediates software vulnerabilities in source code with verified, non-destructive patch generation." />
+    <title>SecurePatch — Source-code security review</title>
+    <meta name="description" content="Connect authorized GitHub repositories, review scanner coverage and findings, and inspect focused patch proposals. Developers review every change before it is merged." />
+    <script>
+      try {
+        const theme = localStorage.getItem("securepatch-theme") === "light" ? "light" : "dark";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.classList.toggle("dark", theme === "dark");
+        document.documentElement.classList.toggle("light", theme === "light");
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
     
     <!-- Preconnect to Google Fonts for Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#08090B] text-[#F5F7FA] font-sans antialiased selection:bg-[#4ADE80]/20 selection:text-[#4ADE80] min-h-screen overflow-x-hidden">
+  <body class="bg-[#101416] text-[#E8EEEB] font-sans antialiased selection:bg-[#78A88B]/20 selection:text-[#78A88B] min-h-screen overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

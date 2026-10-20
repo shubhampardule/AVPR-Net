@@ -7,16 +7,16 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
   // Use a 270 degree arc for gauge look
   const strokeDashoffset = circumference - (normalizedScore / 10) * circumference * 0.75;
 
-  let color = '#4ADE80'; // Resolved or Low
+  let color = 'var(--severity-low)'; // Resolved or Low
   let label = 'Low';
   if (normalizedScore >= 9.0) {
-    color = '#F87171'; // Critical
+    color = 'var(--severity-critical)'; // Critical
     label = 'Critical';
   } else if (normalizedScore >= 7.0) {
-    color = '#FB923C'; // High
+    color = 'var(--severity-high)'; // High
     label = 'High';
   } else if (normalizedScore >= 4.0) {
-    color = '#FBBF24'; // Medium
+    color = 'var(--severity-medium)'; // Medium
     label = 'Medium';
   } else if (normalizedScore === 0) {
     label = 'Resolved';
@@ -58,26 +58,26 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
         </svg>
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="font-mono text-2xl font-bold tracking-tight text-[#F5F7FA]">
+          <span className="font-sans text-2xl font-semibold tracking-tight text-[#E8EEEB]">
             {score.toFixed(1)}
           </span>
-          <span className="text-[10px] font-mono tracking-wider uppercase" style={{ color }}>
+          <span className="text-xs font-medium" style={{ color }}>
             {label}
           </span>
         </div>
       </div>
 
       {showBreakdown && (exploitability || businessImpact) && (
-        <div className="mt-3 grid grid-cols-2 gap-3 w-full text-xs font-mono border-t border-white/[0.06] pt-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 w-full text-xs border-t border-white/[0.06] pt-3">
           {exploitability !== null && (
             <div className="flex flex-col">
-              <span className="text-text-muted text-[10px]">EXPLOITABILITY</span>
+              <span className="text-text-muted text-[11px]">Exploitability</span>
               <span className="font-semibold text-text-primary">{exploitability.toFixed(1)} / 10</span>
             </div>
           )}
           {businessImpact !== null && (
             <div className="flex flex-col text-right">
-              <span className="text-text-muted text-[10px]">BUSINESS IMPACT</span>
+              <span className="text-text-muted text-[11px]">Business impact</span>
               <span className="font-semibold text-text-primary">{businessImpact.toFixed(1)} / 10</span>
             </div>
           )}

@@ -84,8 +84,8 @@ test("workspace navigation exposes team settings and current findings", async ({
   await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
   await expect(page.getByText("Demo Reviewer").first()).toBeVisible();
   await page.getByRole("link", { name: "Findings", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Current unresolved findings" })).toBeVisible();
-  await expect(page.getByText("No unresolved findings match this view.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
+  await expect(page.getByText("No findings in this view")).toBeVisible();
 });
 test("workspace owners can create a shareable invitation link", async ({ page }) => {
   await page.goto("/settings");
@@ -116,7 +116,7 @@ test("sign-out posts to the session endpoint and returns home", async ({ page })
   const logout = page.waitForRequest(request => request.url().endsWith("/api/v1/auth/logout") && request.method() === "POST");
   await page.getByTitle("Sign out").click();
   await logout;
-  await expect(page.getByRole("heading", { name: /find the vulnerability/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Review security findings in their source context/i })).toBeVisible();
 });
 test("hosted assistant shows a sanitized data preview and requires per-request approval", async ({ page }) => {
   let submittedRequest;
@@ -137,7 +137,7 @@ test("hosted assistant shows a sanitized data preview and requires per-request a
 });
 test("unknown routes show a recoverable not-found page", async ({ page }) => {
   await page.goto("/missing-page"); await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Return home" })).toHaveAttribute("href", "/");
+  await expect(page.getByRole("link", { name: "Return to SecurePatch" })).toHaveAttribute("href", "/");
 });
 test("invitation acceptance and missing-token states are recoverable", async ({ page }) => {
   await page.goto("/invite/accept?token=fixture-token");
@@ -150,15 +150,15 @@ test("all application routes render their intended page", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
   const routes = [
-    ["/", /Find the vulnerability/],
-    ["/login", /Secure your codebase/],
+    ["/", /Review security findings in their source context/],
+    ["/login", /Review repository security in one workspace/],
     ["/invite/accept?token=fixture-token", /Join a SecurePatch workspace/],
     ["/dashboard", /Demo Team/],
     ["/github", /^GitHub$/],
     ["/github/team/project", /^project$/],
     ["/github/team/project/scan", /Security scans/],
     ["/github/team/project/file?path=src%2Findex.js", /src\/index\.js/],
-    ["/findings", /Current unresolved findings/],
+    ["/findings", /^Findings$/],
     ["/settings", /Workspace settings/],
     ["/assistant", /Evidence before action/],
     ["/assistant-demo", /Evidence before action/],
@@ -191,13 +191,13 @@ test("scan history follows the polled status and pinned commit", async ({ page }
   await expect(page.getByRole("combobox", { name: "Scan history" }).getByRole("option", { selected: true })).toHaveText(/completed · abc1234/);
 });
 
-test("hero scanning CTA and final CTA both lead to working authentication actions", async ({ page }) => {
+test("repository CTAs lead directly to the supported sign-in providers", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto("/");
 
-  await page.locator("#product").getByRole("link", { name: "Start scanning" }).click();
-  await expect(page.getByRole("heading", { name: "Secure your codebase." })).toBeVisible();
+  await page.locator("#product").getByRole("link", { name: "Connect a repository" }).click();
+  await expect(page.getByRole("heading", { name: "Review repository security in one workspace." })).toBeVisible();
   const githubAuth = page.waitForRequest(request => request.url().includes("/api/v1/auth/github"));
   await page.getByRole("button", { name: /continue with github/i }).click();
   await githubAuth;
@@ -207,12 +207,10 @@ test("hero scanning CTA and final CTA both lead to working authentication action
   expect(new URL((await googleAuth).url()).searchParams.get("returnTo")).toBe("/assistant");
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Start scanning" }).click();
-  const dialog = page.getByRole("dialog", { name: "Scan your GitHub repository" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open repositories" })).toHaveAttribute("href", "/github");
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
+  await page.goto("/");
+  await page.getByRole("link", { name: "Continue to sign in" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "Review repository security in one workspace." })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 
@@ -349,21 +347,20 @@ test("GitHub installation can be connected and repository access modal can be cl
   await expect(modal).toBeHidden();
 });
 
-test("landing workflow, playground tabs and stage controls respond to clicks", async ({ page }) => {
+test("landing workflow is concise and playground tabs remain interactive", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "How it works", exact: true }).click();
+  await page.locator('header nav[aria-label="Main navigation"]').getByRole("link", { name: "Workflow", exact: true }).click();
   await expect(page).toHaveURL(/#workflow$/);
-  await page.getByRole("button", { name: "02 PRIORITIZE" }).click();
-  await expect(page.getByText("Not every vulnerability deserves the same urgency.")).toBeVisible();
-  await page.getByRole("button", { name: /Next: REMEDIATE/ }).click();
-  await expect(page.getByText("From finding to fix.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Scan a commit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Review the evidence" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evaluate a change" })).toBeVisible();
 
   await page.getByRole("button", { name: "Risk Scoring" }).click();
-  await expect(page.getByText("TOTAL RISK")).toBeVisible();
+  await expect(page.getByText("9.4", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Source Code" }).click();
   await expect(page.getByText("Showing contextual window around Line 124")).toBeVisible();
   await page.getByRole("button", { name: "Verification" }).click();
-  await expect(page.getByText(/Independent compatibility review required|Run independent tests/)).toBeVisible();
+  await expect(page.getByText(/Run them in your trusted CI before merging/)).toBeVisible();
 });
 
 test("assistant rejects malformed finding IDs and consumes approval after one request", async ({ page }) => {
@@ -436,7 +433,7 @@ test("local synthetic assistant demo requires approval and labels demo requests"
     await route.fulfill({ json: { success: true, data: { status: "complete", analysis: { summary: "Synthetic event reviewed." }, retrieved_sources: [] } } });
   });
   await page.goto("/assistant-demo");
-  await expect(page.getByText("LOCAL SYNTHETIC DEMO")).toBeVisible();
+  await expect(page.getByText("Sample-data demo")).toBeVisible();
   await page.getByRole("button", { name: "benign fixture" }).click();
   await expect(page.getByLabel("Sanitized data preview")).toContainText("service_check");
   const consent = page.getByRole("checkbox", { name: /I approve sending the data shown above/ });

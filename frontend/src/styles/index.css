@@ -1,18 +1,210 @@
 @import "tailwindcss";
 @config "../../tailwind.config.js";
 
-:focus-visible { outline: 2px solid #4ade80; outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 
 :root {
-  --bg-primary: #08090B;
-  --bg-secondary: #0D0F12;
-  --bg-elevated: #111419;
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --text-primary: #F5F7FA;
-  --text-secondary: rgba(245, 247, 250, 0.62);
-  --text-muted: rgba(245, 247, 250, 0.42);
-  --accent-security: #4ADE80;
-  --accent-blue: #60A5FA;
+  color-scheme: dark;
+  --bg-primary: #101416;
+  --bg-secondary: #171D1F;
+  --bg-elevated: #202729;
+  --bg-subtle: #263032;
+  --border-subtle: rgba(237, 241, 239, 0.1);
+  --border-light: rgba(237, 241, 239, 0.12);
+  --border-highlight: rgba(237, 241, 239, 0.18);
+  --text-primary: #E8EEEB;
+  --text-secondary: rgba(232, 238, 235, 0.72);
+  --text-muted: rgba(232, 238, 235, 0.52);
+  --accent-security: #78A88B;
+  --accent-blue: #8AA7B2;
+  --severity-critical: #F87171;
+  --severity-high: #FB923C;
+  --severity-medium: #FBBF24;
+  --severity-low: #78A88B;
+  --severity-info: #8AA7B2;
+  --focus-ring: #A2C7AE;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-primary: #F5F7F5;
+  --bg-secondary: #FFFFFF;
+  --bg-elevated: #EEF2EF;
+  --bg-subtle: #E5EBE7;
+  --border-subtle: rgba(35, 50, 41, 0.13);
+  --border-light: rgba(35, 50, 41, 0.17);
+  --border-highlight: rgba(35, 50, 41, 0.23);
+  --text-primary: #1B2620;
+  --text-secondary: rgba(27, 38, 32, 0.78);
+  --text-muted: rgba(27, 38, 32, 0.59);
+  --accent-security: #477A57;
+  --accent-blue: #4C7180;
+  --severity-critical: #B93434;
+  --severity-high: #A84F0A;
+  --severity-medium: #8C6800;
+  --severity-low: #477A57;
+  --severity-info: #4C7180;
+  --focus-ring: #477A57;
+  --scrollbar-thumb: rgba(27, 38, 32, 0.2);
+  --scrollbar-thumb-hover: rgba(27, 38, 32, 0.34);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Keep the existing dark utility classes useful while adapting them to the selected palette. */
+:root[data-theme="light"] [class*="bg-[#101416]"],
+:root[data-theme="light"] [class*="bg-[#0A0B0E]"],
+:root[data-theme="light"] [class*="bg-[#050607]"] {
+  background-color: var(--bg-primary) !important;
+}
+
+:root[data-theme="light"] [class*="bg-[#171D1F]"],
+:root[data-theme="light"] [class*="bg-[#E8EEEB]"] {
+  background-color: var(--bg-secondary) !important;
+}
+
+:root[data-theme="light"] [class*="bg-[#141A1B]"],
+:root[data-theme="light"] [class*="bg-[#151921]"] {
+  background-color: #F1F4F1 !important;
+}
+
+:root[data-theme="light"] [class*="bg-[#151B1D]"],
+:root[data-theme="light"] [class*="bg-[#202729]"],
+:root[data-theme="light"] [class*="bg-[#242C2E]"],
+:root[data-theme="light"] [class*="bg-[#263032]"],
+:root[data-theme="light"] [class*="bg-[#313A3B]"] {
+  background-color: var(--bg-elevated) !important;
+}
+
+:root[data-theme="light"] [class*="bg-white/"] {
+  background-color: color-mix(in srgb, var(--text-primary) 4%, transparent) !important;
+}
+
+:root[data-theme="light"] [class*="bg-black/30"],
+:root[data-theme="light"] [class*="bg-black/40"] {
+  background-color: var(--bg-elevated) !important;
+}
+
+:root[data-theme="light"] [class*="border-white/"] {
+  border-color: var(--border-subtle) !important;
+}
+
+:root[data-theme="light"] [class*="divide-white/"] {
+  border-color: var(--border-subtle) !important;
+}
+
+:root[data-theme="light"] [class~="text-white"],
+:root[data-theme="light"] [class~="text-[#E8EEEB]"],
+:root[data-theme="light"] [class~="text-[#D7DFDA]"],
+:root[data-theme="light"] [class~="text-[#C5CFC9]"],
+:root[data-theme="light"] [class~="text-[#C2CCC6]"],
+:root[data-theme="light"] [class~="text-[#C6D0CA]"],
+:root[data-theme="light"] [class~="text-[#B9C4BE]"],
+:root[data-theme="light"] [class~="text-[#B8C3BD]"],
+:root[data-theme="light"] [class~="text-[#B7C2BC]"],
+:root[data-theme="light"] [class~="text-[#C8C1AE]"],
+:root[data-theme="light"] [class~="text-[#E0D6BF]"],
+:root[data-theme="light"] [class~="hover:text-[#E8EEEB]"]:hover,
+:root[data-theme="light"] [class~="hover:text-white"]:hover {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme="light"] [class~="text-text-primary"],
+:root[data-theme="light"] [class~="text-[#AEB9B3]"],
+:root[data-theme="light"] [class~="text-[#AFBAB4]"],
+:root[data-theme="light"] [class~="text-[#B1BCB6]"],
+:root[data-theme="light"] [class~="text-slate-300"],
+:root[data-theme="light"] [class~="text-slate-200"] {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme="light"] [class~="text-text-secondary"],
+:root[data-theme="light"] [class~="text-text-muted"],
+:root[data-theme="light"] [class~="text-[#9BA8A1]"],
+:root[data-theme="light"] [class~="text-[#89968F]"],
+:root[data-theme="light"] [class~="text-[#87948D]"],
+:root[data-theme="light"] [class~="text-[#8F9B94]"],
+:root[data-theme="light"] [class~="text-[#819087]"],
+:root[data-theme="light"] [class~="text-[#78857E]"],
+:root[data-theme="light"] [class~="text-[#64716B]"],
+:root[data-theme="light"] [class~="text-slate-400"],
+:root[data-theme="light"] [class~="text-gray-400"] {
+  color: var(--text-muted) !important;
+}
+
+:root[data-theme="light"] [class*="text-[#78A88B]"],
+:root[data-theme="light"] [class~="text-[#A8C4B1]"],
+:root[data-theme="light"] [class~="text-[#A8B9AF]"],
+:root[data-theme="light"] [class~="text-[#91B39C]"],
+:root[data-theme="light"] [class~="text-[#9BC2A9]"],
+:root[data-theme="light"] [class~="text-[#A9C8B4]"] {
+  color: var(--accent-security) !important;
+}
+
+:root[data-theme="light"] [class*="text-[#8AA7B2]"] {
+  color: var(--accent-blue) !important;
+}
+
+:root[data-theme="light"] [class*="text-[#F87171]"],
+:root[data-theme="light"] [class~="text-[#E79B94]"],
+:root[data-theme="light"] [class~="text-red-200"],
+:root[data-theme="light"] [class~="text-rose-400"] {
+  color: var(--severity-critical) !important;
+}
+
+:root[data-theme="light"] [class*="text-[#FB923C]"],
+:root[data-theme="light"] [class~="text-orange-400"] {
+  color: var(--severity-high) !important;
+}
+
+:root[data-theme="light"] [class*="text-[#FBBF24]"],
+:root[data-theme="light"] [class~="text-amber-200"],
+:root[data-theme="light"] [class~="text-amber-400"] {
+  color: var(--severity-medium) !important;
+}
+
+:root[data-theme="light"] [class~="text-green-300"] {
+  color: var(--severity-low) !important;
+}
+
+:root[data-theme="light"] [class*="placeholder:text-[#78857E]"]::placeholder {
+  color: var(--text-muted) !important;
+  opacity: 1;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-light);
+  border-radius: 0.5rem;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--border-highlight);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+html.theme-changing *,
+html.theme-changing *::before,
+html.theme-changing *::after {
+  transition: background-color 280ms ease, border-color 280ms ease, color 280ms ease,
+    fill 280ms ease, stroke 280ms ease, box-shadow 280ms ease !important;
 }
 
 /* Custom subtle scrollbar */
@@ -21,27 +213,14 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #08090B;
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-/* Fine technical grid background pattern */
-.tech-grid {
-  background-size: 32px 32px;
-  background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-}
-
-.tech-dots {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Monospace code styling */
@@ -52,6 +231,12 @@
 
 /* Accessibility: respect user prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
+  html.theme-changing *,
+  html.theme-changing *::before,
+  html.theme-changing *::after {
+    transition-duration: 0.01ms !important;
+  }
+
   *,
   ::before,
   ::after {

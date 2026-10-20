@@ -3,8 +3,8 @@ import React from 'react';
 export function Badge({ children, variant = 'default', className = '' }) {
   const variants = {
     default: 'bg-white/[0.04] text-text-secondary border-white/[0.08]',
-    security: 'bg-[#4ADE80]/10 text-[#4ADE80] border-[#4ADE80]/20',
-    blue: 'bg-[#60A5FA]/10 text-[#60A5FA] border-[#60A5FA]/20',
+    security: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/20',
+    blue: 'bg-[#8AA7B2]/10 text-[#8AA7B2] border-[#8AA7B2]/20',
     critical: 'bg-[#F87171]/10 text-[#F87171] border-[#F87171]/25',
     high: 'bg-[#FB923C]/10 text-[#FB923C] border-[#FB923C]/25',
     medium: 'bg-[#FBBF24]/10 text-[#FBBF24] border-[#FBBF24]/25',

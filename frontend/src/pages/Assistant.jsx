@@ -1,11 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import { API_BASE_URL } from "../config/api";
+import { ThemeToggle } from "../components/ui/ThemeToggle";
+import { BrandLockup } from "../components/ui/BrandLogo";
 
-const box = "rounded-2xl border border-white/10 bg-[#0D0F12] p-5 sm:p-6";
-const field = "w-full rounded-lg border border-white/15 bg-[#08090B] px-3 py-2 text-sm text-white focus:outline-none focus:border-green-400";
-const button = "rounded-lg bg-[#4ADE80] px-4 py-2 text-sm font-semibold text-[#08090B] disabled:opacity-40 hover:bg-green-300";
+const box = "rounded-xl border border-white/10 bg-[#171D1F] p-5 shadow-card sm:p-6";
+const field = "w-full rounded-md border border-white/15 bg-[#101416] px-3 py-2 text-sm text-[#E8EEEB] placeholder:text-[#78857E] focus:outline-none focus:border-[#78A88B] focus:ring-1 focus:ring-[#78A88B]/40";
+const button = "rounded-md bg-[#78A88B] px-4 py-2.5 text-sm font-semibold text-[#101916] transition-colors disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[#8DB89C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A2C7AE]";
 const labels = { python: "Python", javascript: "JavaScript", typescript: "TypeScript", c: "C", cpp: "C++", bash: "Bash" };
+const providerStatuses = {
+  configured: "Connected",
+  configured_unverified: "Configured · verification pending",
+  missing_key: "Not configured",
+};
 
 function sanitizePreview(value, depth = 0) {
   if (depth > 8) return "[CONTENT TOO DEEP]";
@@ -27,19 +34,19 @@ function sanitizePreview(value, depth = 0) {
 
 function TextList({ title, items }) {
   if (!items?.length) return null;
-  return <div className="space-y-2"><h3 className="text-xs font-mono uppercase tracking-wider text-green-300">{title}</h3>
-    {Array.isArray(items) ? <ul className="list-disc pl-5 space-y-1 text-sm text-slate-300">{items.map((s, i) => <li key={i}>{s}</li>)}</ul>
-      : <pre className="text-sm whitespace-pre-wrap text-slate-300">{items}</pre>}</div>;
+  return <div className="space-y-2"><h3 className="text-sm font-semibold capitalize text-[#D7DFDA]">{title}</h3>
+    {Array.isArray(items) ? <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-[#AEB9B3]">{items.map((s, i) => <li key={i}>{s}</li>)}</ul>
+      : <pre className="whitespace-pre-wrap text-sm leading-6 text-[#AEB9B3]">{items}</pre>}</div>;
 }
 
 function Sources({ sources = [] }) {
-  return <div className="space-y-3"><h3 className="text-xs uppercase font-mono text-green-300">Retrieved evidence</h3>
+  return <div className="space-y-3"><h3 className="text-sm font-semibold text-[#D7DFDA]">Retrieved evidence</h3>
     {!sources.length && <p className="text-sm text-amber-200">No relevant sources retrieved. Context is insufficient.</p>}
-    {sources.map((s) => <details key={s.id} className="rounded-lg border border-white/10 p-3">
-      <summary className="cursor-pointer text-sm text-slate-200 break-all">{s.source}:{s.startLine}–{s.endLine}
-        {typeof s.score === "number" && <span className="ml-2 text-slate-500">similarity {s.score.toFixed(3)}</span>}</summary>
-      <p className="text-xs text-slate-500 my-2">Source ID {s.id}</p>
-      <pre className="whitespace-pre-wrap text-xs text-slate-400">{s.text}</pre>
+    {sources.map((s) => <details key={s.id} className="rounded-md border border-white/10 bg-[#101416] p-3">
+      <summary className="cursor-pointer break-all text-sm text-[#D7DFDA]">{s.source}:{s.startLine}–{s.endLine}
+        {typeof s.score === "number" && <span className="ml-2 text-[#89968F]">similarity {s.score.toFixed(3)}</span>}</summary>
+      <p className="my-2 text-xs text-[#89968F]">Source ID {s.id}</p>
+      <pre className="whitespace-pre-wrap text-xs text-[#AEB9B3]">{s.text}</pre>
     </details>)}
   </div>;
 }
@@ -100,6 +107,9 @@ export default function Assistant({ demo = false }) {
   const findingIdFormatInvalid = !demo && Boolean(findingId.trim()) && !/^[a-f0-9]{24}$/i.test(findingId.trim());
   const findingPreviewPending = !demo && tab === "investigate" && Boolean(findingId.trim()) && !findingIdFormatInvalid && !findingPreview;
   const hostedAiBlocked = !demo && policy?.hostedAiEnabled !== true;
+  const providerStatus = health?.status
+    ? providerStatuses[health.status] || health.status.replaceAll("_", " ")
+    : "Checking";
 
   async function api(route, body, signal) {
     const response = await fetch(`${base}/${route}`, { method: body === undefined ? "GET" : "POST",
@@ -202,122 +212,129 @@ export default function Assistant({ demo = false }) {
     link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <div className="min-h-screen bg-[#08090B] text-white px-4 py-8 sm:px-8">
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-        <Link to={demo ? "/" : "/dashboard"} className="hover:text-green-300">← SecurePatch</Link>
-        <span>{demo ? "LOCAL SYNTHETIC DEMO" : "ORGANIZATION ASSISTANT"}</span>
+  return <main className="min-h-screen bg-[#101416] px-4 py-6 text-[#E8EEEB] sm:px-8 sm:py-8">
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="flex items-center justify-between border-b border-white/[0.08] pb-4 text-sm">
+        <Link to={demo ? "/" : "/dashboard"} aria-label="SecurePatch home" className="transition-colors hover:opacity-80">
+          <BrandLockup wordmarkClassName="text-sm" />
+        </Link>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[#89968F]">{demo ? "Sample-data demo" : "Organization assistant"}</span>
+          <ThemeToggle />
+        </div>
       </div>
-      <header className="space-y-3 py-4">
-        <p className="text-green-400 font-mono text-xs tracking-[0.2em] uppercase">NVIDIA Nemotron · Retrieval augmented assistance</p>
-        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Evidence before action.</h1>
-        <p className="max-w-2xl text-slate-400 text-sm leading-relaxed">Investigate supplied events, explain scanner findings, and draft defensive code with traceable sources.</p>
-        <div className="flex flex-wrap gap-3 text-xs text-slate-300">
-          <span className="rounded-full border border-white/10 px-3 py-1">NVIDIA: {health?.status || "checking"}</span>
-          <span className="rounded-full border border-white/10 px-3 py-1">Knowledge: {knowledge?.chunks ?? "—"} chunks</span>
-          <span className="rounded-full border border-white/10 px-3 py-1">Code execution disabled</span>
+      <header className="space-y-4 border-b border-white/[0.08] pb-6 pt-2">
+        <p className="text-sm font-medium text-[#A8B9AF]">Security assistant · NVIDIA Nemotron</p>
+        <h1 className="text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">Evidence before action.</h1>
+        <p className="max-w-2xl text-sm leading-6 text-[#AEB9B3]">Investigate supplied events, explain scanner findings, and draft defensive code with traceable sources.</p>
+        <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-xs text-[#AEB9B3]">
+          <span>NVIDIA: <strong className="font-medium text-[#D7DFDA]">{providerStatus}</strong></span>
+          <span>Knowledge index: <strong className="font-medium text-[#D7DFDA]">{knowledge?.chunks ?? "—"} passages</strong></span>
+          <span>Code execution disabled</span>
         </div>
       </header>
-      <div className="rounded-xl border border-amber-300/15 bg-amber-300/5 p-4 text-xs text-amber-100/80 leading-relaxed">
-        After you approve a request, its sanitized evidence and up to four excerpts from the approved shared security index are sent to NVIDIA for embeddings and hosted inference. Redaction is best effort.
-        {demo && " Demo events are synthetic. This application has no network detection engine."}
-        {" "}Advice, code and suggested tests require review. No proposed action is executed.
-      </div>
-      <nav className="flex gap-2" aria-label="Assistant workflows">
+      <aside className="border-l-2 border-[#B99B62] bg-[#171D1F] px-4 py-3 text-sm leading-6 text-[#C8C1AE]">
+        <p className="font-semibold text-[#E0D6BF]">Before sending data</p>
+        <p className="mt-1">After approval, SecurePatch sends redacted evidence and up to four excerpts from the approved security index to NVIDIA for search and inference. Redaction is best effort.
+        {demo && " This demo uses sample events and does not monitor network traffic."}
+        {" "}Review all advice, code, and suggested tests. Nothing is executed.</p>
+      </aside>
+      <nav className="flex flex-wrap gap-x-5 border-b border-white/[0.1]" aria-label="Assistant workflows">
         {[["investigate", "Investigate"], ["code", "Code & review"], ["sources", "Knowledge"]].map(([id, label]) =>
           <button key={id} type="button" disabled={busy} onClick={() => { setTab(id); setResult(null); setError(""); }}
-            className={`rounded-lg px-4 py-2 text-sm border ${tab === id ? "border-green-400/40 bg-green-400/10 text-green-300" : "border-white/10 text-slate-400"}`}>{label}</button>)}
+            aria-current={tab === id ? "page" : undefined}
+            className={`-mb-px border-b-2 px-1 py-3 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A2C7AE] ${tab === id ? "border-[#78A88B] font-semibold text-[#E8EEEB]" : "border-transparent text-[#9BA8A1] hover:text-[#E8EEEB] disabled:opacity-50"}`}>{label}</button>)}
       </nav>
-      {error && <p role="alert" className="p-4 rounded-xl border border-rose-400/30 bg-rose-400/10 text-sm text-rose-200">{error}</p>}
+      {error && <p role="alert" className="rounded-md border border-rose-400/30 bg-rose-400/10 p-4 text-sm text-rose-200">{error}</p>}
       {!demo && !organizationId && <p className="text-sm text-amber-200">Select an organization to use the assistant.</p>}
       {!demo && organizationId && policy && hostedAiBlocked && <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100">Hosted AI is disabled for this organization. An owner or admin can enable it in <Link className="underline" to="/settings">Workspace settings</Link>.</p>}
-      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] gap-6 items-start">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <form onSubmit={run} className={`${box} space-y-4`}>
           {tab === "investigate" && <>
             <h2 className="font-semibold">Structured evidence</h2>
-            {!demo && <label className="block text-sm text-slate-300">Existing finding ID (optional)
+            {!demo && <label className="block text-sm text-[#C5CFC9]">Existing finding ID (optional)
               <input aria-label="Finding ID" className={`${field} mt-2`} value={findingId} onChange={(e) => setFindingId(e.target.value)} maxLength={24} />
             </label>}
             {findingIdFormatInvalid && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding ID must contain exactly 24 hexadecimal characters.</p>}
-            {findingId.trim() && !demo && findingPreviewPending && !findingPreviewError && <p role="status" className="text-xs text-slate-400">Loading sanitized finding preview…</p>}
+            {findingId.trim() && !demo && findingPreviewPending && !findingPreviewError && <p role="status" className="text-xs text-[#9BA8A1]">Loading sanitized finding preview…</p>}
             {findingPreviewError && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding preview: {findingPreviewError}</p>}
             <div className="flex gap-2">{["suspicious", "benign"].map((name) => <button key={name} type="button" disabled={!fixtures || busy}
               onClick={() => { setEventText(JSON.stringify(fixtures.events[name], null, 2)); setFindingId(""); }}
-              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs capitalize">{name} fixture</button>)}</div>
-            <label className="block text-xs text-slate-400">Event JSON
-              <textarea className={`${field} mt-2 font-mono text-xs`} aria-label="Event JSON" rows={17} maxLength={16000}
+              className="rounded-md border border-white/15 px-3 py-1.5 text-xs capitalize transition-colors hover:border-white/30 hover:bg-white/[0.03] disabled:opacity-50">{name} fixture</button>)}</div>
+            <label className="block text-xs text-[#9BA8A1]">Event JSON
+              <textarea className={`${field} mt-2 font-mono text-xs`} aria-label="Event JSON" rows={12} maxLength={16000}
                 value={eventText} onChange={(e) => setEventText(e.target.value)} disabled={busy || Boolean(findingId && !demo)} />
             </label>
           </>}
           {tab === "code" && <>
             <h2 className="font-semibold">Defensive code proposal</h2>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-slate-400">Language<select className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
+              <label className="text-xs text-[#9BA8A1]">Language<select className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l] || l.toUpperCase()}</option>)}</select></label>
-              <label className="text-xs text-slate-400">Mode<select className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <label className="text-xs text-[#9BA8A1]">Mode<select className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="generate">Generate</option><option value="review">Review as diff</option></select></label>
             </div>
-            <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs text-green-300 underline">Load review example</button>
-            <label className="block text-xs text-slate-400">Request<textarea aria-label="Code request" className={`${field} mt-2`} rows={8}
+            <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2">Load review example</button>
+            <label className="block text-xs text-[#9BA8A1]">Request<textarea aria-label="Code request" className={`${field} mt-2`} rows={8}
               value={request} onChange={(e) => setRequest(e.target.value)} required maxLength={3000} /></label>
-            {mode === "review" && <label className="block text-xs text-slate-400">Source for review<textarea aria-label="Source for review"
+            {mode === "review" && <label className="block text-xs text-[#9BA8A1]">Source for review<textarea aria-label="Source for review"
               className={`${field} mt-2 font-mono`} rows={7} value={originalCode} onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
           </>}
           {tab === "sources" && <>
             <h2 className="font-semibold">Inspect shared knowledge</h2>
-            <p className="text-xs text-slate-400">{fixtures?.provenance}. Only operator-approved files are indexed.</p>
-            <label className="block text-xs text-slate-400">Search query<input aria-label="Knowledge query" className={`${field} mt-2`} value={query}
+            <p className="text-xs text-[#9BA8A1]">{fixtures?.provenance}. Only operator-approved files are indexed.</p>
+            <label className="block text-xs text-[#9BA8A1]">Search query<input aria-label="Knowledge query" className={`${field} mt-2`} value={query}
               onChange={(e) => setQuery(e.target.value)} maxLength={1500} required /></label>
-            <ul className="space-y-2 text-xs text-slate-500 break-all">{knowledge?.sources?.map((s) => <li key={s}>{s}</li>)}</ul>
+            <ul className="space-y-2 break-all text-xs text-[#89968F]">{knowledge?.sources?.map((s) => <li key={s}>{s}</li>)}</ul>
           </>}
-          <details open className="rounded-xl border border-green-300/20 bg-green-300/5 p-4 space-y-3">
-            <summary className="cursor-pointer text-sm font-medium text-green-200">Review the data for this request</summary>
-            <p className="text-xs leading-relaxed text-slate-300">This is the supplied evidence after best-effort redaction. The search text shown below is sent to NVIDIA embeddings to select up to four excerpts from the approved shared security index; the selected excerpts are sent to NVIDIA inference and appear in the result.</p>
-            <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs text-slate-300">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
-            {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-slate-400">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs text-slate-300">{embeddingQuery}</pre></div>}
-            <label className="flex items-start gap-2 text-xs text-slate-200"><input type="checkbox" className="mt-0.5 accent-green-400" checked={consentFor === requestFingerprint}
+          <details open className="space-y-3 rounded-lg border border-white/10 bg-[#202729] p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-[#D7DFDA]">Review the data for this request</summary>
+            <p className="text-xs leading-5 text-[#AEB9B3]">This preview shows the supplied evidence after best-effort redaction. The search text below is sent to NVIDIA embeddings to select up to four excerpts from the approved shared security index. Those excerpts are sent to NVIDIA inference and appear in the result.</p>
+            <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#101416] p-3 text-xs text-[#C5CFC9]">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
+            {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-[#9BA8A1]">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-md bg-[#101416] p-3 text-xs text-[#C5CFC9]">{embeddingQuery}</pre></div>}
+            <label className="flex items-start gap-2 text-xs leading-5 text-[#D7DFDA]"><input type="checkbox" className="mt-0.5 accent-[#78A88B]" checked={consentFor === requestFingerprint}
               disabled={busy || !health || hostedAiBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
               onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
               <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
           </details>
           <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
-          <p className="text-xs text-slate-500">{busy ? "The request may retry on a temporary provider failure." : "Nothing is applied, executed, blocked or deployed."}</p>
+          <p className="text-xs leading-5 text-[#89968F]">{busy ? "The request may retry on a temporary provider failure." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
-        <section className={`${box} space-y-6`} aria-live="polite" aria-label="Assistant result">
-          {!result && <div className="py-14 text-center"><p className="text-green-300 font-mono text-sm">A reviewable result starts here.</p>
-            <p className="mt-3 text-sm text-slate-500">Submit evidence or a request to see sources, limitations and next steps.</p></div>}
+        <section className={`${box} min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
+          {!result && <div className="flex min-h-[18rem] flex-col justify-center border-l-2 border-white/10 pl-5"><p className="text-base font-semibold text-[#D7DFDA]">Your review will appear here.</p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-[#89968F]">Submit evidence or a request to see its sources, limitations, and suggested next steps.</p></div>}
           {result?.original && <details open className="space-y-3"><summary className="font-semibold cursor-pointer">Original evidence · {result.kind}</summary>
-            <pre className="overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-3 text-xs text-slate-300">{JSON.stringify(result.original, null, 2)}</pre>
+            <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-[#101416] p-3 text-xs text-[#C5CFC9]">{JSON.stringify(result.original, null, 2)}</pre>
             {result.detector && <p className="text-xs text-amber-200">Scanner verdict retained: {result.detector.severity}; risk {result.detector.riskScore} (not a probability).</p>}</details>}
           {result?.analysis && <><div><p className="text-xs text-amber-200 mb-2">Advisory severity: {result.analysis.severity_assessment}</p>
-            <p className="text-sm text-slate-200 leading-relaxed">{result.analysis.summary}</p></div>
+            <p className="text-sm leading-6 text-[#D7DFDA]">{result.analysis.summary}</p></div>
             {["observed_evidence", "possible_interpretations", "recommended_actions", "false_positive_checks", "missing_information", "limitations"].map((key) =>
               <TextList key={key} title={key.replaceAll("_", " ")} items={result.analysis[key]} />)}
           </>}
           {result?.proposal && <>
-            <p className="text-sm text-slate-300">{result.proposal.explanation}</p>
-            <p className="text-xs font-mono text-green-300">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: not executed</p>
+            <p className="text-sm leading-6 text-[#C5CFC9]">{result.proposal.explanation}</p>
+            <p className="text-xs text-[#A8C4B1]">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: not executed</p>
             {result.validation?.message && <p className="text-xs text-amber-200">{result.validation.message}</p>}
-            <pre className="overflow-auto max-h-[32rem] rounded-lg bg-black/40 p-4 text-xs text-green-100"><code>{result.proposal.code}</code></pre>
-            <div className="flex gap-3"><button className="text-sm text-green-300 underline" onClick={downloadProposal}>Download proposal</button>
-              <button className="text-sm text-green-300 underline" onClick={() => navigator.clipboard.writeText(result.proposal.code).catch(() => setError("Clipboard unavailable. Download the proposal instead."))}>Copy proposal</button></div>
+            <pre className="max-h-[32rem] overflow-auto rounded-md bg-[#101416] p-4 text-xs leading-5 text-[#D7DFDA]"><code>{result.proposal.code}</code></pre>
+            <div className="flex gap-4"><button className="text-sm font-medium text-[#A8C4B1] underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
+              <button className="text-sm font-medium text-[#A8C4B1] underline underline-offset-2" onClick={() => navigator.clipboard.writeText(result.proposal.code).catch(() => setError("Clipboard unavailable. Download the proposal instead."))}>Copy proposal</button></div>
             {draftContext && result.proposal.format === "diff" && <div className="space-y-3 rounded-lg border border-white/15 p-4 text-sm">
-              <p className="text-slate-400 break-all">Target: {draftContext.filePath} at {draftContext.commitSha.slice(0, 7)}</p>
-              <button disabled={busy} className="text-green-300 underline" onClick={() => patchAction("validate")}>Check patch against scanned source</button>
+              <p className="break-all text-[#9BA8A1]">Target: {draftContext.filePath} at {draftContext.commitSha.slice(0, 7)}</p>
+              <button disabled={busy} className="font-medium text-[#A8C4B1] underline underline-offset-2" onClick={() => patchAction("validate")}>Check patch against scanned source</button>
               {patchCheck && <p className="text-amber-200">Patch applies. Syntax: {patchCheck.syntax.status}. Tests were not executed.</p>}
-              <label className="block text-slate-300"><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this patch and understand that tests were not executed.</label>
+              <label className="block text-[#C5CFC9]"><input type="checkbox" className="mr-2 accent-[#78A88B]" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this patch and understand that tests were not executed.</label>
               <button disabled={busy || !acknowledged || !patchCheck || Boolean(pullRequest) || !canCreatePullRequest} className={`${button} text-xs`} onClick={() => patchAction("pull-request")}>Create draft pull request</button>
-              <p className="text-xs text-slate-400">Owner/admin role and approved GitHub App write permissions required. The default branch must still match the scanned commit.</p>
-              {pullRequest && <a target="_blank" rel="noreferrer" href={pullRequest.url} className="block text-green-300 underline">Open draft pull request #{pullRequest.number}</a>}
+              <p className="text-xs leading-5 text-[#9BA8A1]">Owner/admin role and approved GitHub App write permissions required. The default branch must still match the scanned commit.</p>
+              {pullRequest && <a target="_blank" rel="noreferrer" href={pullRequest.url} className="block font-medium text-[#A8C4B1] underline underline-offset-2">Open draft pull request #{pullRequest.number}</a>}
             </div>}
             {["assumptions", "dependencies", "security_considerations", "validation_instructions", "tests"].map((key) =>
               <TextList key={key} title={key === "tests" ? "Suggested tests · unexecuted" : key.replaceAll("_", " ")} items={result.proposal[key]} />)}
           </>}
           {result && <Sources sources={result.sources || result.retrieved_sources} />}
           <TextList title="Application limitations" items={result?.limitations} />
-          {result?.requestId && <p className="text-[10px] text-slate-600 font-mono break-all">Request {result.requestId}</p>}
+          {result?.requestId && <p className="break-all font-mono text-[10px] text-[#78857E]">Request {result.requestId}</p>}
         </section>
       </div>
     </div>
-  </div>;
+  </main>;
 }

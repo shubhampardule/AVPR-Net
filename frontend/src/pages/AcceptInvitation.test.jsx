@@ -2,17 +2,20 @@ import React from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ThemeProvider } from "../context/ThemeContext";
 import AcceptInvitation from "./AcceptInvitation";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function Harness() {
-  return <MemoryRouter initialEntries={["/invite/accept?token=one-time-token"]}>
-    <Routes>
-      <Route path="/invite/accept" element={<AcceptInvitation />} />
-      <Route path="/login" element={<LoginTarget />} />
-    </Routes>
-  </MemoryRouter>;
+  return <ThemeProvider>
+    <MemoryRouter initialEntries={["/invite/accept?token=one-time-token"]}>
+      <Routes>
+        <Route path="/invite/accept" element={<AcceptInvitation />} />
+        <Route path="/login" element={<LoginTarget />} />
+      </Routes>
+    </MemoryRouter>
+  </ThemeProvider>;
 }
 
 function LoginTarget() {

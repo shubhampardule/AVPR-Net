@@ -20,10 +20,10 @@ export function ScanStatusBadge({ status }) {
     },
     completed: {
       label: "COMPLETED",
-      bg: "bg-[#4ADE80]/10",
-      text: "text-[#4ADE80]",
-      border: "border-[#4ADE80]/20",
-      dot: "bg-[#4ADE80]",
+      bg: "bg-[#78A88B]/10",
+      text: "text-[#78A88B]",
+      border: "border-[#78A88B]/20",
+      dot: "bg-[#78A88B]",
     },
     failed: {
       label: "FAILED",

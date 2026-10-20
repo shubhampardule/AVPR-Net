@@ -80,15 +80,6 @@ router.post('/login', async (req, res) => {
       strategy: "Parameterized Prepared Statement",
       rationale: "Replacing string concatenation with bound SQL parameters ensures database driver escapes all user inputs, completely neutralizing arbitrary SQL command execution.",
       remediationBranch: "securepatch/fix-VUL-NODE-089"
-    },
-    verification: {
-      overallStatus: "Passed",
-      syntaxCheck: { status: "Passed", engine: "Node.js v20.14 ESLint Check" },
-      testSuite: { status: "Passed", passed: 18, total: 18, coverage: "94.2%" },
-      rescan: { status: "Passed", scanner: "Semgrep + ZAP", findingsCount: 0 },
-      beforeRisk: 9.4,
-      afterRisk: 0.0,
-      stateTransition: "OPEN → PATCHED → VERIFIED"
     }
   },
   {
@@ -144,15 +135,6 @@ router.post('/login', async (req, res) => {
       strategy: "Subprocess Argument List Isolation",
       rationale: "Passing arguments as a strict list to subprocess.run with shell=False directly invokes the target executable without an intermediate shell parser.",
       remediationBranch: "securepatch/fix-VUL-PY-078"
-    },
-    verification: {
-      overallStatus: "Passed",
-      syntaxCheck: { status: "Passed", engine: "Python 3.11 AST Compiler" },
-      testSuite: { status: "Passed", passed: 24, total: 24, coverage: "91.8%" },
-      rescan: { status: "Passed", scanner: "Bandit + Semgrep", findingsCount: 0 },
-      beforeRisk: 9.8,
-      afterRisk: 0.0,
-      stateTransition: "OPEN → PATCHED → VERIFIED"
     }
   },
   {
@@ -216,15 +198,6 @@ const mailConfig = {
       strategy: "External Secret Environment Delegation",
       rationale: "Decouples credentials from the version-controlled codebase, delegating secret injection to runtime environment variables or container secret stores.",
       remediationBranch: "securepatch/fix-VUL-SEC-798"
-    },
-    verification: {
-      overallStatus: "Passed",
-      syntaxCheck: { status: "Passed", engine: "Node.js Syntax Linter" },
-      testSuite: { status: "Passed", passed: 12, total: 12, coverage: "88.5%" },
-      rescan: { status: "Passed", scanner: "Trivy Secrets Scanner", findingsCount: 0 },
-      beforeRisk: 8.1,
-      afterRisk: 0.0,
-      stateTransition: "OPEN → PATCHED → VERIFIED"
     }
   },
   {
@@ -282,15 +255,6 @@ async def trigger_webhook(payload: WebhookPayload):
       strategy: "Destination Allowlist & Private IP Rejection",
       rationale: "Resolves hostname prior to connection and drops requests targeting RFC 1918 addresses, loopbacks, and cloud provider link-local metadata endpoints.",
       remediationBranch: "securepatch/fix-VUL-NET-918"
-    },
-    verification: {
-      overallStatus: "Passed",
-      syntaxCheck: { status: "Passed", engine: "Python Type Checker" },
-      testSuite: { status: "Passed", passed: 31, total: 31, coverage: "96.0%" },
-      rescan: { status: "Passed", scanner: "Semgrep + Bandit", findingsCount: 0 },
-      beforeRisk: 7.9,
-      afterRisk: 0.0,
-      stateTransition: "OPEN → PATCHED → VERIFIED"
     }
   }
 ];

@@ -503,14 +503,19 @@ test.describe("workspace controls, with mocked APIs", () => {
     await page.getByTitle("Sign out").click();
     await expect(page.getByRole("alert")).toContainText("Sign-out could not be confirmed");
     await page.getByTitle("Sign out").click();
-    await expect(page.getByRole("heading", { name: /find the vulnerability/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Review security findings in their source context/i })).toBeVisible();
     expect(state.calls.filter(call => call.pathname.endsWith("/auth/logout")).map(call => call.method)).toEqual(["POST", "POST"]);
   });
 
   test("workspace context retry recovers after the organizations request fails", async ({ page }) => {
-    const state = installWorkspaceApi(page, { failNext: { organizations: "Workspace list unavailable" } });
+    const state = installWorkspaceApi(page, { failNext: { organizations: { message: "Workspace list unavailable", remaining: 2 } } });
     await page.goto("/dashboard");
     await expect(page.getByRole("alert")).toContainText("Workspace list unavailable");
+    await expect(page.getByRole("alert")).toContainText("We couldn’t load your account.");
+    await expect(page.getByText("Account unavailable").first()).toBeVisible();
+    await expect(page.getByText("Authenticated user")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create workspace" })).toHaveCount(0);
+    state.failNext.organizations.remaining = 0;
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByRole("heading", { name: "Demo Team" })).toBeVisible();
     expect(state.calls.filter(call => call.method === "GET" && call.pathname.endsWith("/organizations")).length).toBeGreaterThanOrEqual(2);
@@ -544,5 +549,19 @@ test.describe("workspace controls, with mocked APIs", () => {
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByRole("link", { name: "Commit abc123456789" })).toBeVisible();
     expect(state.calls.filter(call => call.pathname.endsWith("/repositories/team/project") && call.method === "GET").length).toBeGreaterThan(initialHistoryCalls);
+  });
+
+  test("workspace header theme toggle updates the shared appearance", async ({ page }) => {
+    installWorkspaceApi(page);
+    await page.goto("/github");
+    await expect(page.getByRole("heading", { name: "project", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Use light appearance" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(245, 247, 245)");
+    await expect(page.getByRole("button", { name: "Use dark appearance" })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Use dark appearance" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });
 });

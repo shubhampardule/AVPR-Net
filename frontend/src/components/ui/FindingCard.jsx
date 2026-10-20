@@ -35,7 +35,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
     critical: "bg-rose-500/10 text-rose-400 border-rose-500/20",
     high: "bg-orange-500/10 text-orange-400 border-orange-500/20",
     medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    low: "bg-[#4ADE80]/10 text-[#4ADE80] border-[#4ADE80]/20",
+    low: "bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/20",
     info: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   };
 
@@ -47,13 +47,13 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
     "bg-white/[0.05] text-text-muted border-white/[0.1]";
 
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-[#0D0F12] overflow-hidden transition hover:border-white/[0.16]">
+    <div className="rounded-xl border border-white/[0.08] bg-[#171D1F] overflow-hidden transition hover:border-white/[0.16]">
       {/* Header Row */}
       <div
         className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none"
       >
         <div className="flex items-start gap-3.5">
-          <div className="mt-0.5 p-2 rounded-lg bg-[#111419] border border-white/[0.08] text-rose-400">
+          <div className="mt-0.5 p-2 rounded-lg bg-[#202729] border border-white/[0.08] text-rose-400">
             <ShieldAlert className="w-4 h-4" />
           </div>
 
@@ -88,8 +88,8 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
               {finding.title}
             </h3>
             {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId || finding.organization || "")}`}
-              onClick={(event) => event.stopPropagation()} className="text-xs text-green-300 hover:underline">Explain with Nemotron →</Link>}
-            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs text-green-300 hover:underline">Draft a fix →</Link>}
+              onClick={(event) => event.stopPropagation()} className="text-xs font-medium text-[#A8C4B1] hover:underline underline-offset-2">Explain with Nemotron →</Link>}
+            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-[#A8C4B1] hover:underline underline-offset-2">Draft a fix →</Link>}
             <span className="ml-3 text-xs text-slate-400">{finding.status || "open"}</span>
 
             <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">
@@ -132,12 +132,12 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
       {/* Expanded Details */}
       {expanded && (
         <div className="px-4 pb-5 pt-2 sm:px-5 border-t border-white/[0.06] bg-[#0A0B0E]/60 space-y-4">
-          {commitSha && <a className="text-xs text-green-300 underline" target="_blank" rel="noreferrer" href={`https://github.com/${finding.owner}/${finding.repo}/blob/${commitSha}/${finding.filePath.split("/").map(encodeURIComponent).join("/")}#L${finding.startLine}`}>View exact scanned source</a>}
+          {commitSha && <a className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://github.com/${finding.owner}/${finding.repo}/blob/${commitSha}/${finding.filePath.split("/").map(encodeURIComponent).join("/")}#L${finding.startLine}`}>View exact scanned source</a>}
           {organizationId && <form onSubmit={saveReview} className="space-y-2">
-            <label className="block text-xs text-slate-300">Review status<select value={reviewStatus} onChange={e => setReviewStatus(e.target.value)} className="ml-2 bg-[#151820] p-2 rounded">{["open", "acknowledged", "dismissed", "resolved"].map(value => <option key={value}>{value}</option>)}</select></label>
+            <label className="block text-xs text-slate-300">Review status<select value={reviewStatus} onChange={e => setReviewStatus(e.target.value)} className="ml-2 bg-[#263032] p-2 rounded">{["open", "acknowledged", "dismissed", "resolved"].map(value => <option key={value}>{value}</option>)}</select></label>
             <p className="text-xs text-slate-400">Review decisions are manual. A persisting issue marked resolved reopens on the next scan.</p>
             <label className="block text-xs text-slate-300">Reason<textarea required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} className="block mt-2 w-full bg-black/30 border border-white/15 p-2 rounded" /></label>
-            <button disabled={saving} className="text-xs text-green-300 underline">{saving ? "Saving…" : "Save review"}</button>
+            <button disabled={saving} className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2">{saving ? "Saving…" : "Save review"}</button>
             {finding.statusReason && <p className="text-xs text-slate-400">Last review: {finding.statusReason}</p>}
             {error && <p role="alert" className="text-xs text-red-200">{error}</p>}
           </form>}
@@ -157,7 +157,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
           {finding.evidenceSnippet && (
             <div>
               <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1.5 flex items-center gap-1.5">
-                <Terminal className="w-3 h-3 text-[#4ADE80]" />
+                <Terminal className="w-3 h-3 text-[#78A88B]" />
                 Vulnerable Code Evidence
               </h4>
               <div className="p-3 rounded-lg bg-[#050607] border border-white/[0.08] overflow-x-auto font-mono text-xs text-text-primary">
@@ -168,7 +168,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
 
           {/* Risk Factors Breakdown */}
           {finding.riskFactors && (
-            <div className="p-3 rounded-lg bg-[#111419] border border-white/[0.06]">
+            <div className="p-3 rounded-lg bg-[#202729] border border-white/[0.06]">
               <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-2">
                 Deterministic Risk Factors
               </h4>
@@ -204,7 +204,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
           {/* Remediation Guidance */}
           {finding.remediation && (
             <div>
-              <h4 className="text-[11px] font-mono uppercase tracking-wider text-[#4ADE80] mb-1">
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-[#78A88B] mb-1">
                 Suggested Remediation
               </h4>
               <a

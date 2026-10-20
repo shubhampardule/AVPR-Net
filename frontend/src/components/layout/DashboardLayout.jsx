@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import {
   ShieldCheck,
@@ -11,8 +11,9 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import { GithubIcon } from "../ui/GithubIcon";
 import { API_BASE_URL } from "../../config/api";
+import { ThemeToggle } from "../ui/ThemeToggle";
+import { BrandLockup } from "../ui/BrandLogo";
 
 export default function DashboardLayout() {
   const location = useLocation();
@@ -28,6 +29,8 @@ export default function DashboardLayout() {
   const [orgError, setOrgError] = useState("");
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [contextError, setContextError] = useState("");
+  const [signOutError, setSignOutError] = useState("");
+  const contextRequestId = useRef(0);
   const desiredOrganization = searchParams.get("org");
   useEffect(() => {
     const desired = organizations.find(item => (item.id || item._id) === desiredOrganization);
@@ -64,6 +67,7 @@ export default function DashboardLayout() {
   }, [location.pathname]);
 
   const loadDashboardContext = async () => {
+    const requestId = ++contextRequestId.current;
     setContextError(""); setLoading(true);
     try {
       const [userResponse, orgResponse] = await Promise.all([
@@ -76,6 +80,8 @@ export default function DashboardLayout() {
         }),
       ]);
 
+      if (requestId !== contextRequestId.current) return;
+
       if (userResponse.status === 401) {
         window.location.href = "/login";
         return;
@@ -84,6 +90,7 @@ export default function DashboardLayout() {
       const userData = await userResponse.json();
       if (!userResponse.ok) throw new Error(userData.error?.message || "Unable to load your account.");
       const orgData = await orgResponse.json();
+      if (requestId !== contextRequestId.current) return;
       if (!orgResponse.ok) throw new Error(orgData.error?.message || "Unable to load organizations.");
 
       const currentUser =
@@ -106,15 +113,19 @@ export default function DashboardLayout() {
       if (normalizedOrganizations.length > 0) {
         const desired = searchParams.get("org") || sessionStorage.getItem(`securepatch-org:${currentUser?.id || currentUser?._id}`);
         setSelectedOrg(normalizedOrganizations.find(item => (item.id || item._id) === desired) || normalizedOrganizations[0]);
+      } else {
+        setSelectedOrg(null);
       }
     } catch (error) {
-      setContextError(error.message || "Unable to load workspace context.");
-      console.error(
-        "Dashboard context loading failed:",
-        error
-      );
+      if (requestId === contextRequestId.current) {
+        setUser(null);
+        setOrganizations([]);
+        setSelectedOrg(null);
+        setContextError(error.message || "Unable to load workspace context.");
+        console.error("Dashboard context loading failed:", error);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === contextRequestId.current) setLoading(false);
     }
   };
 
@@ -131,6 +142,7 @@ export default function DashboardLayout() {
   };
 
   const handleLogout = async () => {
+    setSignOutError("");
     try {
       const response = await fetch(`${API_BASE_URL}/auth/logout`, {
         method: "POST",
@@ -139,7 +151,7 @@ export default function DashboardLayout() {
       if (!response.ok) throw new Error("Sign-out could not be confirmed. Please retry.");
       window.location.href = "/";
     } catch (error) {
-      setContextError(error.message);
+      setSignOutError(error.message);
     }
   };
 
@@ -147,26 +159,23 @@ export default function DashboardLayout() {
     user?.name ||
     user?.displayName ||
     user?.email?.split("@")[0] ||
-    "Developer";
+    (loading ? "Loading account…" : "Account unavailable");
 
   const userInitial =
-    displayName.charAt(0).toUpperCase();
+    user ? displayName.charAt(0).toUpperCase() : loading ? "…" : "?";
 
   return (
-    <div className="min-h-screen bg-[#08090B] text-[#F5F7FA]">
+    <div className="min-h-screen bg-[#101416] text-[#E8EEEB]">
 
       {/* ---------------------------------------------------------------- */}
       {/* Background                                                      */}
       {/* ---------------------------------------------------------------- */}
 
-      <div className="fixed inset-0 tech-grid opacity-20 pointer-events-none" />
-
-
       {/* ---------------------------------------------------------------- */}
       {/* Mobile Header                                                   */}
       {/* ---------------------------------------------------------------- */}
 
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-[#08090B]/90 backdrop-blur-xl border-b border-white/[0.06]">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-[#101416] border-b border-white/[0.06]">
 
         <div className="h-full px-4 flex items-center justify-between">
 
@@ -174,37 +183,22 @@ export default function DashboardLayout() {
             to="/dashboard"
             className="flex items-center gap-2.5"
           >
-
-            <div className="w-8 h-8 rounded-lg bg-[#111419] border border-white/[0.1] flex items-center justify-center">
-
-              <ShieldCheck className="w-4 h-4 text-[#4ADE80]" />
-
-            </div>
-
-            <span className="font-mono text-sm font-semibold">
-              Secure<span className="text-[#4ADE80]">Patch</span>
-            </span>
+            <BrandLockup wordmarkClassName="text-sm" />
 
           </Link>
 
 
-          <button
-            onClick={() =>
-              setMobileSidebarOpen(
-                !mobileSidebarOpen
-              )
-            }
-            className="p-2 rounded-lg bg-[#111419] border border-white/[0.08]"
-            aria-label="Toggle navigation"
-          >
-
-            {mobileSidebarOpen ? (
-              <X className="w-5 h-5" />
-            ) : (
-              <Menu className="w-5 h-5" />
-            )}
-
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+              className="p-2 rounded-lg bg-[#202729] border border-white/[0.08]"
+              aria-label="Toggle navigation"
+              aria-expanded={mobileSidebarOpen}
+            >
+              {mobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
 
         </div>
 
@@ -226,7 +220,7 @@ export default function DashboardLayout() {
           className={`
             fixed lg:fixed top-0 left-0 z-40
             h-screen w-[250px]
-            bg-[#0D0F12]
+            bg-[#171D1F]
             border-r border-white/[0.06]
             flex flex-col
             transition-transform duration-300
@@ -248,25 +242,7 @@ export default function DashboardLayout() {
               to="/dashboard"
               className="flex items-center gap-2.5"
             >
-
-              <div className="w-8 h-8 rounded-lg bg-[#111419] border border-white/[0.1] flex items-center justify-center">
-
-                <ShieldCheck className="w-4 h-4 text-[#4ADE80]" />
-
-              </div>
-
-
-              <div>
-
-                <div className="font-mono text-sm font-semibold">
-                  Secure<span className="text-[#4ADE80]">Patch</span>
-                </div>
-
-                <div className="text-[8px] font-mono text-text-muted uppercase tracking-wider">
-                  Security Platform
-                </div>
-
-              </div>
+              <BrandLockup wordmarkClassName="text-sm" descriptor />
 
             </Link>
 
@@ -279,7 +255,7 @@ export default function DashboardLayout() {
 
           <div className="p-4 border-b border-white/[0.06]">
 
-            <div className="text-[9px] font-mono text-text-muted uppercase tracking-wider mb-2">
+            <div className="mb-2 px-1 text-xs font-medium text-text-muted">
               Workspace
             </div>
 
@@ -287,19 +263,18 @@ export default function DashboardLayout() {
             <div className="relative">
 
               <select
+                disabled={loading || Boolean(contextError)}
                 value={
                   selectedOrg?._id ||
                   selectedOrg?.id ||
                   ""
                 }
                 onChange={handleOrganizationChange}
-                className="appearance-none w-full bg-[#111419] border border-white/[0.08] rounded-lg px-3 py-2.5 pr-8 text-xs font-mono text-text-primary focus:outline-none focus:border-[#4ADE80]/50"
+                className="appearance-none w-full rounded-md border border-white/[0.1] bg-[#202729] px-3 py-2.5 pr-8 text-sm text-text-primary focus:outline-none focus:border-[#78A88B]/60"
               >
 
                 {organizations.length === 0 ? (
-                  <option value="">
-                    No organization
-                  </option>
+                  <option value="">{contextError ? "Organization list unavailable" : loading ? "Loading organizations…" : "No organization"}</option>
                 ) : (
                   organizations.map((org) => (
                     <option
@@ -318,13 +293,13 @@ export default function DashboardLayout() {
 
             </div>
 
-            {organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-xs text-[#4ADE80] hover:underline">{showOrgForm ? "Cancel" : "Create organization"}</button>}
-            {(showOrgForm || (!loading && organizations.length === 0)) && (
+            {!contextError && organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-sm font-medium text-[#A8C4B1] hover:underline underline-offset-2">{showOrgForm ? "Cancel" : "Create organization"}</button>}
+            {!contextError && (showOrgForm || (!loading && organizations.length === 0)) && (
               <form onSubmit={createOrganization} className="mt-3 space-y-2">
                 <label htmlFor="organization-name" className="block text-xs text-text-secondary">Organization name</label>
-                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-white/10 bg-[#111419] px-3 py-2 text-xs focus:border-[#4ADE80] focus:outline-none" />
+                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-white/10 bg-[#202729] px-3 py-2 text-xs focus:border-[#78A88B] focus:outline-none" />
                 {orgError && <p role="alert" className="text-xs text-red-300">{orgError}</p>}
-                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-[#4ADE80] px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
+                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-[#78A88B] px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
               </form>
             )}
 
@@ -339,7 +314,7 @@ export default function DashboardLayout() {
 
             {/* Platform */}
 
-            <div className="text-[9px] font-mono text-text-muted uppercase tracking-wider px-3 mb-2">
+            <div className="mb-2 px-3 text-xs font-medium text-text-muted">
               Platform
             </div>
 
@@ -380,22 +355,12 @@ export default function DashboardLayout() {
 
             {/* Workspace */}
 
-            <div className="mt-8 text-[9px] font-mono text-text-muted uppercase tracking-wider px-3 mb-2">
+            <div className="mb-2 mt-8 px-3 text-xs font-medium text-text-muted">
               Workspace
             </div>
 
 
             <div className="space-y-1">
-
-              <SidebarItem
-                icon={GithubIcon}
-                label="GitHub"
-                to="/github"
-                active={
-                  location.pathname === "/github"
-                }
-              />
-
 
               <SidebarItem
                 icon={Settings}
@@ -415,9 +380,9 @@ export default function DashboardLayout() {
 
           <div className="p-3 border-t border-white/[0.06]">
 
-            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-[#111419] border border-white/[0.06]">
+            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-[#202729] border border-white/[0.06]">
 
-              <div className="w-8 h-8 rounded-lg bg-[#4ADE80]/10 border border-[#4ADE80]/20 flex items-center justify-center text-xs font-mono font-bold text-[#4ADE80]">
+              <div className="w-8 h-8 rounded-lg bg-[#78A88B]/10 border border-[#78A88B]/20 flex items-center justify-center text-xs font-mono font-bold text-[#78A88B]">
                 {userInitial}
               </div>
 
@@ -430,9 +395,9 @@ export default function DashboardLayout() {
                     : displayName}
                 </div>
 
-                <div className="text-[9px] font-mono text-text-muted truncate">
+                <div className="truncate text-[11px] text-text-muted">
                   {user?.email ||
-                    "Authenticated user"}
+                    (loading ? "Loading account…" : "Account details unavailable")}
                 </div>
 
               </div>
@@ -440,7 +405,9 @@ export default function DashboardLayout() {
 
               <button
                 onClick={handleLogout}
-                title="Sign out"
+                title={user ? "Sign out" : "Sign out is unavailable until your account loads"}
+                aria-label="Sign out"
+                disabled={!user}
                 className="p-1.5 text-text-muted hover:text-[#F87171] transition-colors"
               >
 
@@ -474,19 +441,17 @@ export default function DashboardLayout() {
         {/* Main                                                            */}
         {/* ---------------------------------------------------------------- */}
 
-        <main className="lg:ml-[250px] min-h-screen min-w-0">
+        <main className="min-h-screen min-w-0 pt-16 lg:ml-[250px] lg:pt-0">
 
           {/* ------------------------------------------------------------ */}
           {/* Desktop Topbar                                               */}
           {/* ------------------------------------------------------------ */}
 
-          <header className="hidden lg:flex h-16 px-8 items-center justify-between border-b border-white/[0.06] bg-[#08090B]/70 backdrop-blur-xl">
+          <header className="hidden h-16 items-center justify-between border-b border-white/[0.06] bg-[#101416] px-8 lg:flex">
 
-            <div className="flex items-center gap-2 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+            <div className="flex items-center gap-2 text-xs font-medium text-text-muted">
 
-              <span className="text-[#4ADE80]">
-                SECUREPATCH
-              </span>
+              <span className="text-[#78A88B]">SecurePatch</span>
 
               <span>/</span>
 
@@ -499,18 +464,10 @@ export default function DashboardLayout() {
 
             <div className="flex items-center gap-3">
 
-              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#111419] border border-white/[0.06]">
+              <ThemeToggle />
+              <span className="text-xs text-text-muted">{user ? "Signed in" : loading ? "Loading account" : "Account unavailable"}</span>
 
-                <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
-
-                <span className="text-[9px] font-mono text-text-muted">
-                  AUTHENTICATED WORKSPACE
-                </span>
-
-              </div>
-
-
-              <div className="w-8 h-8 rounded-lg bg-[#111419] border border-white/[0.08] flex items-center justify-center text-xs font-mono text-[#4ADE80]">
+              <div title={user?.name || (loading ? "Loading account" : "Account unavailable")} className="w-8 h-8 rounded-full bg-[#202729] border border-white/[0.1] flex items-center justify-center text-xs font-medium text-[#D7DFDA]">
                 {userInitial}
               </div>
 
@@ -523,8 +480,22 @@ export default function DashboardLayout() {
           {/* Page Content                                                  */}
           {/* ------------------------------------------------------------ */}
 
-          {contextError && <div role="alert" className="m-5 rounded-lg border border-red-400/30 p-4 text-sm text-red-200">{contextError} <button className="underline" onClick={loadDashboardContext}>Retry</button></div>}
-          <Outlet
+          {contextError && <section role="alert" className="mx-5 my-8 max-w-2xl rounded-xl border border-red-400/30 bg-red-400/[0.04] p-5 text-sm text-red-100 sm:p-6">
+            <p className="text-xs font-medium uppercase tracking-wide text-red-100/70">Workspace unavailable</p>
+            <h1 className="mt-2 text-xl font-semibold tracking-tight">We couldn’t load your account.</h1>
+            <p className="mt-2 leading-6 text-red-100/75">Try again. If this continues, contact your administrator with the technical details below.</p>
+            <details className="mt-4 text-xs text-red-100/70">
+              <summary className="w-fit cursor-pointer underline underline-offset-2">Technical details</summary>
+              <p className="mt-2 break-words font-mono-code">{contextError}</p>
+            </details>
+            <button className="mt-5 rounded-md border border-red-100/20 px-3 py-2 text-xs font-semibold hover:bg-red-100/10" onClick={loadDashboardContext}>Retry</button>
+          </section>}
+          {signOutError && <div role="alert" className="m-5 rounded-lg border border-red-400/30 bg-red-400/[0.04] p-4 text-sm text-red-100">
+            <p className="font-medium">Sign-out could not be confirmed.</p>
+            <p className="mt-1 text-red-100/75">Please try again.</p>
+            <details className="pt-1 text-xs text-red-100/70"><summary className="w-fit cursor-pointer underline underline-offset-2">Technical details</summary><p className="mt-2 break-words font-mono-code">{signOutError}</p></details>
+          </div>}
+          {!contextError && <Outlet
             key={`${selectedOrg?.id || selectedOrg?._id}:${location.pathname}:${location.search}`}
             context={{
               user,
@@ -533,7 +504,7 @@ export default function DashboardLayout() {
               loading,
               refreshContext: loadDashboardContext,
             }}
-          />
+          />}
 
         </main>
 
@@ -599,7 +570,7 @@ function SidebarItem({
 
       <Icon
         className={`w-4 h-4 ${
-          active ? "text-[#4ADE80]" : ""
+          active ? "text-[#78A88B]" : ""
         }`}
       />
 

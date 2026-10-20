@@ -23,14 +23,14 @@ export function SeverityPill({ severity, size = 'md', className = '' }) {
     },
     Low: {
       label: 'Low',
-      badgeClass: 'bg-[#4ADE80]/10 text-[#4ADE80] border-[#4ADE80]/25',
-      dotClass: 'bg-[#4ADE80]',
+      badgeClass: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/25',
+      dotClass: 'bg-[#78A88B]',
       icon: ShieldCheck,
     },
     Resolved: {
       label: 'Resolved',
-      badgeClass: 'bg-[#4ADE80]/10 text-[#4ADE80] border-[#4ADE80]/30',
-      dotClass: 'bg-[#4ADE80]',
+      badgeClass: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/30',
+      dotClass: 'bg-[#78A88B]',
       icon: ShieldCheck,
     }
   };
@@ -51,7 +51,7 @@ export function SeverityPill({ severity, size = 'md', className = '' }) {
       } ${sizeStyles[size]} ${className}`}
       aria-label={`Severity level: ${config.label}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dotClass} animate-pulse`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dotClass}`} aria-hidden="true" />
       <IconComponent className={size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
       <span>{config.label}</span>
     </span>

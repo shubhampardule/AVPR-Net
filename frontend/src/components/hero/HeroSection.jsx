@@ -1,81 +1,47 @@
 import React from 'react';
-import { ArrowRight, Terminal, ShieldCheck, ChevronRight, Play } from 'lucide-react';
-import { CodeScannerTerminal } from './CodeScannerTerminal';
+import { ArrowDown, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { RepositoryPreview } from './RepositoryPreview';
 
-export function HeroSection({ onOpenScanModal }) {
+export function HeroSection() {
   return (
-    <section className="relative min-h-[92vh] flex flex-col justify-center pt-28 pb-16 overflow-hidden tech-grid">
-      {/* Background ambient lighting - strictly restrained, not a giant purple blob */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-gradient-to-b from-[#4ADE80]/[0.04] to-transparent blur-3xl pointer-events-none" />
+    <section className="relative overflow-hidden border-b border-white/[0.06] bg-[#101416] pt-28 pb-16 sm:pt-32 sm:pb-20 lg:min-h-[680px] lg:pt-36 lg:pb-24">
+      <div className="mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-12 px-5 sm:px-8 lg:grid-cols-12 lg:gap-10 lg:px-10">
+        <div className="space-y-7 text-left lg:col-span-5">
+          <p className="flex items-center gap-3 text-sm font-medium text-[#A8B9AF]">
+            <span className="h-px w-8 bg-[#78A88B]" />
+            Repository security review
+          </p>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
-          {/* Left / Editorial Typography */}
-          <div className="lg:col-span-6 space-y-6 text-left">
-            {/* Eyebrow */}
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-mono text-text-secondary tracking-wider uppercase">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
-              AI-Assisted Code Security
-            </div>
-
-            {/* Headline */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-[#F5F7FA] leading-[1.08]">
-              Find the vulnerability.{' '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#F5F7FA] via-white to-[#4ADE80]">
-                Fix the risk.
-              </span>
+          <div className="space-y-5">
+            <h1 className="max-w-xl text-[2.65rem] font-semibold leading-[1.08] tracking-[-0.045em] text-[#E8EEEB] sm:text-5xl lg:text-[3.65rem]">
+              Review security findings in their source context.
             </h1>
-
-            {/* Supporting Copy */}
-            <p className="text-base sm:text-lg text-text-secondary leading-relaxed max-w-xl">
-              SecurePatch analyzes source code, correlates scanner findings, calculates business risk, and drafts reviewable fixes—before security weaknesses become production incidents.
+            <p className="max-w-lg text-base leading-7 text-[#B1BCB6] sm:text-lg">
+              SecurePatch brings scanner results, repository history, and proposed changes into one review flow. Your team decides what reaches GitHub.
             </p>
-
-            {/* CTAs */}
-            <div className="flex flex-wrap items-center gap-4 pt-2">
-              <Link
-                to="/login"
-                className="px-5 py-3 text-xs font-mono font-semibold text-[#08090B] bg-[#4ADE80] rounded-lg shadow-subtle-glow flex items-center justify-center gap-1.5"
-              >
-                <span>Start scanning</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-
-              <a
-                href="#workflow"
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-xs font-mono font-medium text-text-primary bg-[#111419] hover:bg-[#161b22] border border-white/[0.08] hover:border-white/[0.15] transition-all"
-              >
-                <Play className="w-3.5 h-3.5 text-[#60A5FA]" />
-                <span>See how it works</span>
-              </a>
-            </div>
-
-            {/* Supported Trust Telemetry */}
-            <div className="pt-6 border-t border-white/[0.06] flex flex-wrap items-center gap-y-2 gap-x-6 text-xs font-mono text-text-muted">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#4ADE80]">●</span>
-                <span className="text-text-secondary font-medium">JavaScript & Python</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#60A5FA]">●</span>
-                <span className="text-text-secondary font-medium">Semgrep · Bandit · Credential patterns</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-white/40">●</span>
-                <span className="text-text-secondary font-medium">Protected Git Branches</span>
-              </div>
-            </div>
           </div>
 
-          {/* Right / Interactive Code & Remediation Visual */}
-          <div className="lg:col-span-6 w-full">
-            <div className="relative">
-              {/* Subtle backdrop glow */}
-              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-white/[0.04] to-transparent blur-sm -z-10" />
-              <CodeScannerTerminal />
-            </div>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <Link
+              to="/login"
+              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-[#78A88B] px-4 py-2.5 text-sm font-semibold text-[#101916] transition-colors hover:bg-[#8DB89C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A2C7AE]"
+            >
+              Connect a repository
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <a
+              href="#playground"
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/15 px-4 py-2.5 text-sm font-medium text-[#E8EEEB] transition-colors hover:border-white/30 hover:bg-white/[0.04]"
+            >
+              View an example
+              <ArrowDown className="h-4 w-4 text-[#A8B9AF]" aria-hidden="true" />
+            </a>
           </div>
+        </div>
+
+        <div className="lg:col-span-7">
+          <RepositoryPreview />
         </div>
       </div>
     </section>

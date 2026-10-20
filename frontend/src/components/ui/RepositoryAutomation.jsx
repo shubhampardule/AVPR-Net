@@ -26,10 +26,10 @@ export default function RepositoryAutomation({ organization, owner, repo }) {
       {!data.webhookReady && <p className="text-amber-200">GitHub event triggers require the deployment's webhook setup. Scheduled scans can be enabled independently.</p>}
       <label className="block"><input type="checkbox" disabled={!data.webhookReady} checked={data.settings.push} onChange={e => edit("push", e.target.checked)} /> Scan default-branch pushes</label>
       <label className="block"><input type="checkbox" disabled={!data.webhookReady} checked={data.settings.pullRequest} onChange={e => edit("pullRequest", e.target.checked)} /> Scan opened/updated pull requests</label>
-      <label className="block">Schedule<select className="ml-3 bg-[#151820] p-2 rounded" value={data.settings.frequency} onChange={e => edit("frequency", e.target.value)}>{["off", "weekly", "monthly"].map(v => <option key={v}>{v}</option>)}</select></label>
+      <label className="block">Schedule<select className="ml-3 bg-[#263032] p-2 rounded" value={data.settings.frequency} onChange={e => edit("frequency", e.target.value)}>{["off", "weekly", "monthly"].map(v => <option key={v}>{v}</option>)}</select></label>
       {data.settings.nextRunAt && <p className="text-slate-400">Next run: {new Date(data.settings.nextRunAt).toLocaleString()} (processed by the cloud worker)</p>}
       {data.settings.lastError && <p className="text-amber-200">{data.settings.lastError}</p>}
-      {["owner", "admin"].includes(organization?.role) && <button disabled={busy} className="text-green-300 underline">{busy ? "Saving…" : "Save automation"}</button>}
+      {["owner", "admin"].includes(organization?.role) && <button disabled={busy} className="text-[#9BC2A9] underline underline-offset-4">{busy ? "Saving…" : "Save automation"}</button>}
     </form>}
   </details>;
 }

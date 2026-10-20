@@ -216,7 +216,7 @@ const connectInstallation = async () => {
               <select id="github-installation" value={selectedInstallation} onChange={(event) => setSelectedInstallation(event.target.value)} className="rounded-lg border border-white/10 bg-bg-elevated px-3 py-2 text-sm">
                 {installations.map((item) => <option key={item.id} value={item.id}>{item.account}</option>)}
               </select>
-              <button disabled={connecting || !selectedInstallation} onClick={connectInstallation} className="rounded-lg bg-[#4ADE80] px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">{connecting ? "Connecting..." : "Connect installation"}</button>
+              <button disabled={connecting || !selectedInstallation} onClick={connectInstallation} className="rounded-lg bg-[#78A88B] px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">{connecting ? "Connecting..." : "Connect installation"}</button>
             </div>}
           </section>
         )}
@@ -330,7 +330,7 @@ const connectInstallation = async () => {
 function AddRepositoryModal({ onClose, installationUrl }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(event) => event.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.09] bg-[#0D0F12] shadow-2xl">
+      <div onClick={(event) => event.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.09] bg-[#171D1F] shadow-2xl">
         <div className="flex items-start justify-between border-b border-white/[0.06] px-6 py-5">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04]">
