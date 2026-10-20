@@ -1,3 +1,13 @@
+require("dotenv").config({ quiet: true });
+
+const dns = require("node:dns");
+const dnsServers = (process.env.MONGODB_DNS_SERVERS || "")
+  .split(",")
+  .map((server) => server.trim())
+  .filter(Boolean);
+
+if (dnsServers.length) dns.setServers(dnsServers);
+
 const app = require("./app");
 const env = require("./config/env");
 const connectDatabase = require("./config/database");
