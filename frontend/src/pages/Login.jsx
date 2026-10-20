@@ -7,7 +7,10 @@ import { GithubIcon } from '../components/ui/GithubIcon';
 
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
-  const errorCode = new URLSearchParams(window.location.search).get('error');
+  const query = new URLSearchParams(window.location.search);
+  const errorCode = query.get('error');
+  const returnTo = query.get('returnTo');
+  const authUrl = (provider) => `${API_BASE_URL}/auth/${provider}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`;
   const errors = {
     github_unavailable: 'GitHub sign-in is not configured yet.',
     github_state: 'The sign-in request expired. Please try again.',
@@ -22,7 +25,7 @@ export default function Login() {
 
     // Redirect to the backend Google OAuth endpoint.
     // The backend handles Google authentication and session creation.
-    window.location.href = `${API_BASE_URL}/auth/google`;
+    window.location.href = authUrl('google');
   };
 
   return (
@@ -106,7 +109,7 @@ export default function Login() {
 
               <button type="button" disabled={isLoading} onClick={() => {
                 setIsLoading(true);
-                window.location.href = `${API_BASE_URL}/auth/github`;
+                window.location.href = authUrl('github');
               }} className="mb-3 flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-white/15 bg-[#181B20] text-sm font-medium transition hover:bg-[#242830] disabled:opacity-60">
                 <GithubIcon className="h-4 w-4" /> Continue with GitHub
               </button>

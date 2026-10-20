@@ -34,7 +34,7 @@ rules:
     languages: [javascript, typescript]
     message: MD5 and SHA1 are unsuitable for security-sensitive hashing.
     severity: WARNING
-    metadata: {cwe: ["CWE-327"]}
+    metadata: {cwe: ["CWE-327"], baseline: "securepatch-v1"}
     pattern-either:
       - pattern: $C.createHash("md5", ...)
       - pattern: $C.createHash("sha1", ...)
@@ -42,25 +42,25 @@ rules:
     languages: [javascript, typescript]
     message: Parameterize SQL queries instead of concatenating values.
     severity: ERROR
-    metadata: {cwe: ["CWE-89"]}
+    metadata: {cwe: ["CWE-89"], baseline: "securepatch-v1"}
     pattern: $DB.query($A + $B, ...)
   - id: securepatch.js.disabled-tls
     languages: [javascript, typescript]
     message: Do not disable TLS certificate verification.
     severity: ERROR
-    metadata: {cwe: ["CWE-295"]}
+    metadata: {cwe: ["CWE-295"], baseline: "securepatch-v1"}
     pattern: "{..., rejectUnauthorized: false, ...}"
   - id: securepatch.js.jwt-unverified
     languages: [javascript, typescript]
     message: Decoding a JWT does not verify its signature or claims.
     severity: WARNING
-    metadata: {cwe: ["CWE-347"]}
+    metadata: {cwe: ["CWE-347"], baseline: "securepatch-v1"}
     pattern: $JWT.decode(...)
   - id: securepatch.python.dynamic-eval
     languages: [python]
     message: Avoid evaluating source supplied as data.
     severity: ERROR
-    metadata: {cwe: ["CWE-95"]}
+    metadata: {cwe: ["CWE-95"], baseline: "securepatch-v1"}
     pattern-either:
       - pattern: eval(...)
       - pattern: exec(...)
@@ -68,7 +68,7 @@ rules:
     languages: [python]
     message: Avoid shell execution; use an argument list and shell=False.
     severity: ERROR
-    metadata: {cwe: ["CWE-78"]}
+    metadata: {cwe: ["CWE-78"], baseline: "securepatch-v1"}
     pattern-either:
       - pattern: os.system(...)
       - pattern: subprocess.$F(..., shell=True, ...)
@@ -76,7 +76,7 @@ rules:
     languages: [python]
     message: SQL string formatting may permit injection. Bind parameters.
     severity: ERROR
-    metadata: {cwe: ["CWE-89"]}
+    metadata: {cwe: ["CWE-89"], baseline: "securepatch-v1"}
     pattern-either:
       - pattern: $DB.execute($S % $ARGS, ...)
       - pattern: $DB.execute($A + $B, ...)
@@ -84,5 +84,5 @@ rules:
     languages: [python]
     message: Use safe_load for untrusted YAML.
     severity: ERROR
-    metadata: {cwe: ["CWE-502"]}
+    metadata: {cwe: ["CWE-502"], baseline: "securepatch-v1"}
     pattern: yaml.load($DATA)

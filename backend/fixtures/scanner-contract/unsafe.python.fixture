@@ -1,0 +1,14 @@
+import os
+import pickle
+import subprocess
+import yaml
+
+def unsafe(source, command, cursor, raw_yaml):
+    eval(source)
+    exec(source)
+    os.system(command)
+    subprocess.run(command, shell=True, check=True)
+    cursor.execute("SELECT * FROM accounts WHERE id = %s" % source)
+    cursor.execute("SELECT * FROM accounts WHERE id = " + source)
+    pickle.loads(source)
+    yaml.load(raw_yaml)

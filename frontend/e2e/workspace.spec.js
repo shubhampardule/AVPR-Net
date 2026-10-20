@@ -5,6 +5,8 @@ test.beforeEach(async ({ page }) => {
     if (url.pathname.endsWith("/auth/me")) data = { user: { id: "test-user", name: "Demo Reviewer" } };
     else if (url.pathname.endsWith("/organizations")) data = { organizations: [{ id: "test-org", name: "Demo Team", role: "owner" }] };
     else if (url.pathname.endsWith("/members")) data = { members: [{ user: { id: "test-user", name: "Demo Reviewer", email: "test@example.com" }, role: "owner" }] };
+    else if (url.pathname.endsWith("/invitations") && route.request().method() === "POST") data = { invitation: { id: "invite-1", email: "new@example.com", role: "developer", status: "pending", expiresAt: "2026-10-27T00:00:00.000Z", url: "http://127.0.0.1:5174/invite/accept?token=fixture-token" } };
+    else if (url.pathname.endsWith("/invitations")) data = { invitations: [] };
     else if (url.pathname.includes("/findings")) data = { findings: [], latestScans: [], pagination: { page: 1, total: 0, totalPages: 1 } };
     else data = {};
     await route.fulfill({ json: { success: true, data } });
@@ -17,6 +19,13 @@ test("workspace navigation exposes team settings and current findings", async ({
   await page.getByRole("link", { name: "Findings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Current unresolved findings" })).toBeVisible();
   await expect(page.getByText("No unresolved findings match this view.")).toBeVisible();
+});
+test("workspace owners can create a shareable invitation link", async ({ page }) => {
+  await page.goto("/settings");
+  await page.getByLabel("Email address").fill("new@example.com");
+  await page.getByRole("button", { name: "Create invite link" }).click();
+  await expect(page.getByText("Invite link created. Anyone with this link can use it once before it expires.")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Invitation link" })).toHaveValue(/invite\/accept\?token=fixture-token/);
 });
 test("unknown routes show a recoverable not-found page", async ({ page }) => {
   await page.goto("/missing-page"); await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();

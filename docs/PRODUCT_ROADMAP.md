@@ -33,14 +33,16 @@ push/pull-request rescans are not live.
 The current bundled Semgrep configuration has twelve project-owned rules, plus
 Bandit and local credential-pattern checks. Optional dependency advisory checks
 cover npm lockfiles. This is a useful narrow baseline, not broad enterprise SAST
-or full SCA coverage.
+or full SCA coverage. CI now checks all twelve rules against paired synthetic
+unsafe and fixed samples. That catches rule regressions; it does not estimate
+precision or recall on real projects. See the [rule inventory and limitations](SCANNER_BASELINE_V1.md).
 
 - Pick the first supported languages and frameworks from the teams you can
   actually pilot with; start with JavaScript/TypeScript and Python if those are
   representative.
-- Document every rule's intent, supported files, severity mapping, limitations
-  and known false positives.
-- Build a versioned benchmark from safe vulnerable and fixed fixtures. Measure
+- Keep the versioned synthetic fixture contract green as rules change; update
+  the rule inventory, supported files, severity mapping and limitations with it.
+- Build a benchmark from independently reviewed project samples. Measure
   detection and false-positive rates by rule before changing defaults.
 - Expand rules only from sources whose license permits the intended hosted use,
   or write and review original rules. Pin the version and record it with scans.
@@ -51,13 +53,14 @@ or full SCA coverage.
 
 ### 3. Finish team onboarding and account lifecycle
 
-Current team settings can add an email only after that person already has a
-SecurePatch account. There is no invite delivery and acceptance workflow yet.
+Team settings now create seven-day, single-use invitation links. Only a hash is
+stored; the recipient must sign in with the exact verified email, and acceptance
+and membership activation happen in one transaction. Owners and admins can see
+open invitations and revoke them. Link delivery is manual because no mail
+provider is configured.
 
-- Add invitations with a short-lived, single-use token; store only a hash of the
-  token and bind acceptance to the invited verified account email.
-- Send invitations through a selected mail provider, with expiry, resend,
-  revoke and audit history. Do not add passwords when OAuth is already used.
+- Add a mail provider with delivery status, expiry, resend and invitation audit
+  history. Do not add passwords when OAuth is already used.
 - Test joining, leaving, removal, owner transfer, account linking and re-entry
   across multiple organizations.
 - Add account and organization deletion/export flows with a documented data
@@ -113,8 +116,8 @@ when availability changes.
 
 - Each supported language has a published rule inventory and a repeatable
   benchmark with measured precision and recall.
-- A team can join through an expiring invitation, scan a selected repository,
-  review a finding and revoke the App without developer intervention.
+- A team can receive and accept an expiring email invitation, scan a selected
+  repository, review a finding and revoke the App without developer intervention.
 - A fresh scan pins a commit, records scanner coverage and can be exported; a
   failed or partial run cannot be mistaken for a clean result.
 - AI-generated changes become a deterministic, source-matched diff; syntax

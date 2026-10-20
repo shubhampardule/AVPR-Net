@@ -1,0 +1,13 @@
+const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
+const jwt = require("jsonwebtoken");
+
+function unsafe(req, db, token, done) {
+  db.query("SELECT * FROM accounts WHERE id=" + req.query.id);
+  eval(req.query.expression);
+  childProcess.exec(req.query.command, done);
+  crypto.createHash("md5");
+  jwt.decode(token);
+  const tls = { rejectUnauthorized: false };
+  return <div dangerouslySetInnerHTML={{ __html: req.query.html }} />;
+}

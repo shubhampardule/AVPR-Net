@@ -41,6 +41,17 @@ describe("Authentication", () => {
     });
   });
 
+  describe("POST /api/v1/organizations/invitations/accept", () => {
+    test("requires a signed-in account before processing an invitation token", async () => {
+      const response = await request(app)
+        .post("/api/v1/organizations/invitations/accept")
+        .send({ token: "a".repeat(43) });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.body.error.code).toBe("UNAUTHORIZED");
+    });
+  });
+
   describe("GET /api/v1/auth/google/failure", () => {
     test("should return 401 when Google authentication fails", async () => {
       const response = await request(app)

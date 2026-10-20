@@ -23,6 +23,7 @@ const Assistant = lazy(() => import("./pages/Assistant"));
 
 const Settings = lazy(() => import("./pages/Settings"));
 const Findings = lazy(() => import("./pages/Findings"));
+const AcceptInvitation = lazy(() => import("./pages/AcceptInvitation"));
 
 function Home() {
   const [modalOpen, setModalOpen] = useState(false);
@@ -73,6 +74,7 @@ export default function App() {
       <Suspense fallback={<p role="status" className="p-8 text-slate-300">Loading workspace…</p>}><Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/invite/accept" element={<AcceptInvitation />} />
         <Route path="/assistant-demo" element={import.meta.env.PROD ? <Navigate to="/assistant" replace /> : <Assistant demo />} />
 
         <Route element={<DashboardLayout />}>

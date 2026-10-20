@@ -5,7 +5,7 @@ changes, not a rewrite of the original assessment or project history.
 
 | Audit | Delivered behavior |
 | --- | --- |
-| A01 | Schema-valid membership suspension, restoration of existing members, owner protection, team settings UI, and real-model regression tests. |
+| A01 | Schema-valid membership suspension, owner protection, hashed single-use email-bound invitations with transactional acceptance, role-limited invite creation, revoke/list controls, OAuth return-path preservation, and regression tests. |
 | A02 | Fatal exit/JSON errors fail closed; no-success orchestration fails; scanner errors and coverage stay visible. |
 | A03 | Atomic active-repository lock, shared hourly quota, pinned authorized SHA, bounded streaming archive download/extraction, subprocess deadlines/process-group cleanup, cancellation and expired-job recovery. |
 | A04 | Removed hardcoded verification pass claims and unimplemented scanner branding; examples are marked illustrative; docs describe current services. |
@@ -25,6 +25,16 @@ changes, not a rewrite of the original assessment or project history.
 
 ## New workflows
 
+- Owner/admin can issue a seven-day email-bound invitation link; only its hash
+  is stored, acceptance must use the matching verified OAuth email, and
+  membership activation plus token consumption commit in one MongoDB transaction.
+  Open invites can be listed and revoked; an email delivery provider remains
+  an external setup item.
+- Semgrep's twelve original v1 rules now have paired synthetic unsafe/fixed
+  regression samples and a published inventory of intent, severity and limits.
+  The offline CI contract checks all twelve detections, zero unexpected results
+  on the paired fixed samples, and zero findings when the fixture files are
+  scanned with their non-source suffixes. This does not claim real-world rates.
 - Current unresolved issues are separate from historical dashboard totals.
 - Review findings as open, acknowledged, dismissed or manually resolved, with a
   reason and reviewer. Matching acknowledgements/dismissals survive rescans;

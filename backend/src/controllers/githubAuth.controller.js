@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const env = require("../config/env");
 const User = require("../models/User");
+const safeReturnTo = require("../utils/safeReturnTo");
 
 const frontend = () => process.env.FRONTEND_URL || "http://localhost:5174";
 const failure = (res, code) => res.redirect(`${frontend()}/login?error=${code}`);
@@ -41,7 +42,8 @@ async function startGitHubLogin(req, res, next) {
   try {
     const state = crypto.randomBytes(32).toString("base64url");
     const verifier = crypto.randomBytes(32).toString("base64url");
-    req.session.githubOAuth = { state, verifier, createdAt: Date.now(), userId: req.user?.id || null };
+    req.session.githubOAuth = { state, verifier, createdAt: Date.now(), userId: req.user?.id || null,
+      returnTo: safeReturnTo(req.query.returnTo) };
     await saveSession(req);
     const url = new URL("https://github.com/login/oauth/authorize");
     url.search = new URLSearchParams({
@@ -98,7 +100,7 @@ async function finishGitHubLogin(req, res, next) {
     // Keep only verified installation metadata. OAuth tokens are never persisted.
     req.session.githubAccess = { userId: user.id, installations, checkedAt: Date.now() };
     await saveSession(req);
-    return res.redirect(`${frontend()}${oauth.userId ? "/github" : "/dashboard"}`);
+    return res.redirect(`${frontend()}${oauth.userId ? "/github" : oauth.returnTo || "/dashboard"}`);
   } catch (error) { next(error); }
 }
 

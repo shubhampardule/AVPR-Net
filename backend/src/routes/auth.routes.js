@@ -5,17 +5,18 @@ const { requireAuth, } = require("../middleware/auth.middleware");
 
 const router = express.Router();
 const { startGitHubLogin, finishGitHubLogin } = require("../controllers/githubAuth.controller");
+const safeReturnTo = require("../utils/safeReturnTo");
 
 router.get("/github", startGitHubLogin);
 router.get("/github/callback", finishGitHubLogin);
 
-router.get(
-    "/google",
-    passport.authenticate("google", {
-        scope: ["profile", "email"],
-        state: true,
-    })
-);
+router.get("/google", (req, res, next) => {
+    req.session.authReturnTo = safeReturnTo(req.query.returnTo);
+    req.session.save((error) => {
+        if (error) return next(error);
+        return passport.authenticate("google", { scope: ["profile", "email"], state: true })(req, res, next);
+    });
+});
 
 router.get(
     "/google/callback",

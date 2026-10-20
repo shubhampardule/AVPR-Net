@@ -25,13 +25,22 @@ afterAll(() => { global.fetch = originalFetch; });
 
 test("sign-in saves unpredictable state and a PKCE challenge before redirecting", async () => {
   const req = buildRequest(), res = buildResponse(), next = jest.fn();
+  req.query.returnTo = "/invite/accept?token=invitation-token";
   await startGitHubLogin(req, res, next);
   const url = new URL(res.redirect.mock.calls[0][0]);
   expect(req.session.save).toHaveBeenCalled();
   expect(url.searchParams.get("state")).toBe(req.session.githubOAuth.state);
   expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   expect(url.searchParams.get("code_challenge")).toHaveLength(43);
+  expect(req.session.githubOAuth.returnTo).toBe("/invite/accept?token=invitation-token");
   expect(next).not.toHaveBeenCalled();
+});
+
+test("OAuth return paths cannot redirect GitHub sign-in to an external site", async () => {
+  const req = buildRequest(), res = buildResponse();
+  req.query.returnTo = "//attacker.example/path";
+  await startGitHubLogin(req, res, jest.fn());
+  expect(req.session.githubOAuth.returnTo).toBeNull();
 });
 
 test.each(["missing", "mismatch", "expired", "switched-account"])("rejects %s state without exchanging a code", async (kind) => {
@@ -76,6 +85,17 @@ test("links an existing verified-email account and retains only owned installati
   expect(JSON.stringify(req.session)).not.toContain("ephemeral-token");
   expect(JSON.parse(global.fetch.mock.calls[0][1].body).code_verifier).toBe("pkce-verifier");
   expect(next).not.toHaveBeenCalled();
+});
+
+test("new GitHub sign-in returns to the requested local invitation path", async () => {
+  const req = buildRequest(), res = buildResponse();
+  req.session.githubOAuth.returnTo = "/invite/accept?token=abc";
+  User.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+  User.create.mockResolvedValue(user());
+  mockIdentity();
+  global.fetch.mockResolvedValueOnce(ok({ installations: [] }));
+  await finishGitHubLogin(req, res, jest.fn());
+  expect(res.redirect).toHaveBeenCalledWith("http://localhost:5174/invite/accept?token=abc");
 });
 
 test("unverified GitHub emails cannot claim an existing account", async () => {

@@ -1,0 +1,12 @@
+const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
+const jwt = require("jsonwebtoken");
+
+function fixed(req, db, token, html, done) {
+  const rows = db.query("SELECT * FROM accounts WHERE id = ?", [req.query.id]);
+  const digest = crypto.createHash("sha256").update(String(req.query.value)).digest("hex");
+  const claims = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
+  childProcess.execFile("git", ["status", "--short"], { shell: false }, done);
+  const tls = { rejectUnauthorized: true };
+  return <div title={String(claims.sub)}>{html}{digest}{rows.length}{tls.rejectUnauthorized}</div>;
+}

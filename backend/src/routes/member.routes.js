@@ -2,7 +2,8 @@ const express = require("express");
 const { requireAuth, } = require("../middleware/auth.middleware");
 const { requireOrganizationMember, } = require("../middleware/organization.middleware");
 const { requireRole, } = require("../middleware/rbac.middleware");
-const { getMembers, addMember, updateMemberRole, removeMember,} = require("../controllers/member.controller");
+const { getMembers, updateMemberRole, removeMember,} = require("../controllers/member.controller");
+const { createInvitation, listInvitations, revokeInvitation, acceptInvitation } = require("../controllers/invitation.controller");
 
 const router = express.Router();
 
@@ -11,14 +12,6 @@ router.get(
     requireAuth,
     requireOrganizationMember,
     getMembers
-);
-
-router.post(
-    "/:organizationId/members",
-    requireAuth,
-    requireOrganizationMember,
-    requireRole("owner", "admin"),
-    addMember
 );
 
 router.patch(
@@ -36,5 +29,31 @@ router.delete(
   requireRole("owner", "admin"),
   removeMember
 );
+
+router.get(
+  "/:organizationId/invitations",
+  requireAuth,
+  requireOrganizationMember,
+  requireRole("owner", "admin"),
+  listInvitations
+);
+
+router.post(
+  "/:organizationId/invitations",
+  requireAuth,
+  requireOrganizationMember,
+  requireRole("owner", "admin"),
+  createInvitation
+);
+
+router.delete(
+  "/:organizationId/invitations/:invitationId",
+  requireAuth,
+  requireOrganizationMember,
+  requireRole("owner", "admin"),
+  revokeInvitation
+);
+
+router.post("/invitations/accept", requireAuth, acceptInvitation);
 
 module.exports = router;

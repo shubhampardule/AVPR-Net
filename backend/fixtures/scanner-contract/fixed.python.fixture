@@ -1,0 +1,10 @@
+import ast
+import hashlib
+import yaml
+
+def fixed(source, cursor, value, raw_yaml):
+    parsed = ast.literal_eval(source)
+    cursor.execute("SELECT * FROM accounts WHERE id = ?", (value,))
+    settings = yaml.safe_load(raw_yaml)
+    digest = hashlib.sha256(str(value).encode()).hexdigest()
+    return parsed, settings, digest

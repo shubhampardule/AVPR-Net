@@ -1,7 +1,10 @@
 const ApiResponse = require("../utils/ApiResponse");
+const safeReturnTo = require("../utils/safeReturnTo");
 
 const googleCallback = (req, res) => {
-  return res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5174"}/dashboard`);
+  const returnTo = safeReturnTo(req.session?.authReturnTo);
+  delete req.session?.authReturnTo;
+  return res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5174"}${returnTo || "/dashboard"}`);
 };
 
 const getCurrentUser = (req, res) => {
