@@ -105,6 +105,16 @@ also needs Semgrep and/or Bandit installed on PATH. Start MongoDB/Redis, then
 backend server, worker (`npm run worker` in backend) and frontend. Configure the
 callbacks in `.env.example` to match the OAuth/GitHub applications you own.
 
+For the production deployment, set `FRONTEND_URL` to
+`https://avpr-psi.vercel.app` and register these exact callback URLs with the
+providers:
+
+- Google: `https://avpr-psi.vercel.app/api/v1/auth/google/callback`
+- GitHub OAuth: `https://avpr-psi.vercel.app/api/v1/auth/github/callback`
+
+The callback variables must use the same URLs. Preview deployments need their
+own provider callback configuration if you want OAuth sign-in there.
+
 After signing in and selecting an organization, run a scan from a connected
 repository. **Explain with Nemotron** links a persisted finding to `/assistant`;
 AI requests require both session authentication and active organization membership.

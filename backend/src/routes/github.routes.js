@@ -10,6 +10,7 @@ const { connectGitHubInstallation, getGitHubStatus } = require("../controllers/g
 const { getRepositories, getRepositoryFiles, getFileContent } = require("../services/github.service");
 
 const Organization = require("../models/Organization");
+const { optionalCommitSha } = require("../utils/input");
 
 const router = express.Router();
 const { authorizedInstallations, finishGitHubLogin } = require("../controllers/githubAuth.controller");
@@ -184,7 +185,7 @@ router.get(
 
             const { owner, repo } = req.params;
             const { path: filePath } = req.query;
-            const ref = typeof req.query.ref === "string" && /^[a-f0-9]{40}$/.test(req.query.ref) ? req.query.ref : undefined;
+            const ref = optionalCommitSha(req.query.ref);
 
             if (!filePath) {
                 return res.status(400).json({

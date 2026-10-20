@@ -664,9 +664,14 @@ var require_ai_output = __commonJS({
 // src/services/code-validation.js
 var require_code_validation = __commonJS({
   "src/services/code-validation.js"(exports2, module2) {
-    var path = require("node:path");
     var { Worker } = require("node:worker_threads");
     var { execFile } = require("node:child_process");
+    var fs = require("node:fs");
+    var path = require("node:path");
+    function syntaxWorkerPath() {
+      const candidates = [path.join(__dirname, "syntax-worker.js"), path.join(__dirname, "services", "syntax-worker.js")];
+      return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+    }
     async function validateCode(language, code, format = "code") {
       if (typeof code !== "string" || Buffer.byteLength(code) > 32e3) {
         return { status: "failed", executed: false, message: "Proposal exceeds parser input limit" };
@@ -703,7 +708,7 @@ var require_code_validation = __commonJS({
         });
       }
       return new Promise((resolve) => {
-        const worker = new Worker(path.resolve(process.cwd(), "src/services/syntax-worker.js"), {
+        const worker = new Worker(syntaxWorkerPath(), {
           workerData: { language, code },
           resourceLimits: { maxOldGenerationSizeMb: 64 },
           // Do not inherit loader/preload flags into the parser worker.
@@ -1218,7 +1223,12 @@ var require_input = __commonJS({
       if (typeof value !== "string" || !mongoose.isValidObjectId(value)) throw bad("Invalid identifier");
       return value;
     }
-    module2.exports = { bad, integer, repository, objectId };
+    function optionalCommitSha(value) {
+      if (value === void 0) return void 0;
+      if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) throw bad("Invalid commit SHA");
+      return value;
+    }
+    module2.exports = { bad, integer, repository, objectId, optionalCommitSha };
   }
 });
 
@@ -1392,6 +1402,7 @@ var require_Scan = __commonJS({
         activeKey: { type: String, default: null },
         deadlineAt: { type: Date, default: null },
         leaseUntil: { type: Date, default: null },
+        leaseToken: { type: String, default: null },
         cancelledAt: { type: Date, default: null },
         coverage: { type: [mongoose.Schema.Types.Mixed], default: [] },
         rulesHash: { type: String, default: null },
@@ -3145,6 +3156,7 @@ var require_github_routes = __commonJS({
     var { connectGitHubInstallation, getGitHubStatus } = require_github_controller();
     var { getRepositories, getRepositoryFiles, getFileContent } = require_github_service();
     var Organization = require_Organization();
+    var { optionalCommitSha } = require_input();
     var router = express2.Router();
     var { authorizedInstallations, finishGitHubLogin } = require_githubAuth_controller();
     router.get("/callback", finishGitHubLogin);
@@ -3291,7 +3303,7 @@ var require_github_routes = __commonJS({
           }
           const { owner, repo } = req.params;
           const { path: filePath } = req.query;
-          const ref = typeof req.query.ref === "string" && /^[a-f0-9]{40}$/.test(req.query.ref) ? req.query.ref : void 0;
+          const ref = optionalCommitSha(req.query.ref);
           if (!filePath) {
             return res.status(400).json({
               success: false,
@@ -3444,6 +3456,23 @@ var require_scanQueue = __commonJS({
   }
 });
 
+// src/config/scan-timing.js
+var require_scan_timing = __commonJS({
+  "src/config/scan-timing.js"(exports2, module2) {
+    var SCAN_JOB_TIMEOUT_MS = 10 * 60 * 1e3;
+    var SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS = 660;
+    var SCAN_RECORD_DEADLINE_MS = 25 * 60 * 1e3;
+    if (SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 <= SCAN_JOB_TIMEOUT_MS || SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 + SCAN_JOB_TIMEOUT_MS >= SCAN_RECORD_DEADLINE_MS) {
+      throw new Error("Scan record deadline must allow queue redelivery and another full worker attempt");
+    }
+    module2.exports = {
+      SCAN_JOB_TIMEOUT_MS,
+      SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS,
+      SCAN_RECORD_DEADLINE_MS
+    };
+  }
+});
+
 // src/services/scan.service.js
 var require_scan_service = __commonJS({
   "src/services/scan.service.js"(exports2, module2) {
@@ -3451,7 +3480,8 @@ var require_scan_service = __commonJS({
     var Finding = require_Finding();
     var Organization = require_Organization();
     var { scanQueue } = require_scanQueue();
-    var { bad, integer, repository } = require_input();
+    var { bad, integer, repository, optionalCommitSha } = require_input();
+    var { SCAN_RECORD_DEADLINE_MS } = require_scan_timing();
     var ScanService = class {
       /**
        * Enqueues a new scan job asynchronously. Returns 202-ready payload immediately.
@@ -3473,7 +3503,7 @@ var require_scan_service = __commonJS({
           throw err;
         }
         const { resolveCommit } = require_github_service();
-        if (ref !== void 0 && !/^[a-f0-9]{40}$/.test(ref)) throw bad("Invalid commit SHA");
+        ref = optionalCommitSha(ref);
         const commit = await resolveCommit(effectiveInstallationId, owner, repo, ref);
         await Scan.init();
         await require_budget_service().consume(`scans:${organizationId}`, 20, 60 * 60 * 1e3);
@@ -3483,7 +3513,14 @@ var require_scan_service = __commonJS({
           repo,
           status: { $in: ["queued", "running"] },
           deadlineAt: { $lt: /* @__PURE__ */ new Date() }
-        }, { $set: { status: "failed", activeKey: null, errorMessage: "Scan deadline expired", completedAt: /* @__PURE__ */ new Date() } });
+        }, { $set: {
+          status: "failed",
+          activeKey: null,
+          leaseUntil: null,
+          leaseToken: null,
+          errorMessage: "Scan deadline expired",
+          completedAt: /* @__PURE__ */ new Date()
+        } });
         const scan = await Scan.create({
           organization: organizationId,
           installationId: effectiveInstallationId,
@@ -3493,7 +3530,7 @@ var require_scan_service = __commonJS({
           commitSha: commit.sha,
           branch: commit.branch,
           activeKey: `${organizationId}:${owner.toLowerCase()}/${repo.toLowerCase()}`,
-          deadlineAt: new Date(Date.now() + 15 * 60 * 1e3),
+          deadlineAt: new Date(Date.now() + SCAN_RECORD_DEADLINE_MS),
           includeDependencies: includeDependencies === true
         });
         let job;
@@ -3511,6 +3548,8 @@ var require_scan_service = __commonJS({
           scan.status = "failed";
           scan.errorMessage = `Failed to enqueue scan: ${queueErr.message}`;
           scan.activeKey = null;
+          scan.leaseUntil = null;
+          scan.leaseToken = null;
           await scan.save();
           const err = new Error(scan.errorMessage);
           err.statusCode = 503;
@@ -3794,7 +3833,15 @@ var require_scan_routes = __commonJS({
     router.post("/:scanId/cancel", requireAuth, requireScanMember, handler(async (req, res) => {
       const scan = await Scan.findOneAndUpdate(
         { _id: req.params.scanId, status: { $in: ["queued", "running"] } },
-        { $set: { cancelledAt: /* @__PURE__ */ new Date(), status: "failed", errorMessage: "Cancelled by organization member", activeKey: null, completedAt: /* @__PURE__ */ new Date() } },
+        { $set: {
+          cancelledAt: /* @__PURE__ */ new Date(),
+          status: "failed",
+          errorMessage: "Cancelled by organization member",
+          activeKey: null,
+          leaseUntil: null,
+          leaseToken: null,
+          completedAt: /* @__PURE__ */ new Date()
+        } },
         { returnDocument: "after" }
       );
       if (!scan) throw bad("No active scan to cancel", 409);

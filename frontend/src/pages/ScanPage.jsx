@@ -17,7 +17,7 @@ export default function ScanPage() {
   const [page, setPage] = useState(1), [pagination, setPagination] = useState(null);
   const [risk, setRisk] = useState("all"), [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [comparison, setComparison] = useState(null);
-  const [refresh, setRefresh] = useState(0), [supplyChain, setSupplyChain] = useState(false);
+  const [refresh, setRefresh] = useState(0), [historyRevision, setHistoryRevision] = useState(0), [supplyChain, setSupplyChain] = useState(false);
   const endpoint = `${API_BASE_URL}/scans`;
   async function json(path, options = {}) {
     const r = await fetch(`${endpoint}${path}`, { credentials: "include", ...options });
@@ -33,7 +33,7 @@ export default function ScanPage() {
       .then(data => { if (!controller.signal.aborted) { setHistory(data.scans); setScanId(searchParams.get("scanId") || data.scans[0]?._id || ""); } })
       .catch(e => { if (e.name !== "AbortError") setError(e.message); });
     return () => controller.abort();
-  }, [scope]);
+  }, [scope, historyRevision]);
   useEffect(() => {
     if (!scanId) return;
     const controller = new AbortController(); let timer;
@@ -83,7 +83,7 @@ export default function ScanPage() {
     </div><div className="flex gap-2"><button className={button} disabled={busy || active || !org} onClick={start}>{busy ? "Queuing…" : "New scan"}</button>
       {active && <button className={button} onClick={cancel}>Cancel scan</button>}</div></header>
     <label className="text-sm text-slate-400 block"><input type="checkbox" checked={supplyChain} onChange={e => setSupplyChain(e.target.checked)} /> Include dependency advisories (package names/versions are sent to OSV). Credential pattern checks run locally.</label>
-    {error && <p role="alert" className="rounded-lg border border-red-400/40 p-4 text-red-200">{error} <button className="underline" onClick={() => setRefresh(n => n + 1)}>Retry</button></p>}
+    {error && <p role="alert" className="rounded-lg border border-red-400/40 p-4 text-red-200">{error} <button className="underline" onClick={() => scanId ? setRefresh(n => n + 1) : setHistoryRevision(n => n + 1)}>Retry</button></p>}
     <label className="block text-sm">Scan history<select aria-label="Scan history" className="ml-3 bg-[#151820] border border-white/20 p-2 rounded max-w-full" value={scanId} onChange={e => { setScanId(e.target.value); setPage(1); setScan(null); }}>
       <option value="">Select a scan</option>{history.map(s => <option key={s._id} value={s._id}>{new Date(s.createdAt).toLocaleString()} · {s.status} · {s.commitSha?.slice(0, 7) || "legacy"}</option>)}</select></label>
     {scan && <section className={`${panel} space-y-4`}>

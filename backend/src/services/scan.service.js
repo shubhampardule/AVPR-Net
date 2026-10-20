@@ -2,7 +2,8 @@ const Scan = require("../models/Scan");
 const Finding = require("../models/Finding");
 const Organization = require("../models/Organization");
 const { scanQueue } = require("../queues/scanQueue");
-const { bad, integer, repository } = require("../utils/input");
+const { bad, integer, repository, optionalCommitSha } = require("../utils/input");
+const { SCAN_RECORD_DEADLINE_MS } = require("../config/scan-timing");
 
 class ScanService {
   /**
@@ -29,12 +30,13 @@ class ScanService {
 
     // Resolve an authorized immutable commit before creating any scan.
     const { resolveCommit } = require("./github.service");
-    if (ref !== undefined && !/^[a-f0-9]{40}$/.test(ref)) throw bad("Invalid commit SHA");
+    ref = optionalCommitSha(ref);
     const commit = await resolveCommit(effectiveInstallationId, owner, repo, ref);
     await Scan.init();
     await require("./budget.service").consume(`scans:${organizationId}`, 20, 60 * 60 * 1000);
     await Scan.updateMany({ organization: organizationId, owner, repo, status: { $in: ["queued", "running"] },
-      deadlineAt: { $lt: new Date() } }, { $set: { status: "failed", activeKey: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
+      deadlineAt: { $lt: new Date() } }, { $set: { status: "failed", activeKey: null, leaseUntil: null,
+        leaseToken: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
     // A unique partial index prevents concurrent enqueues for this repository.
     const scan = await Scan.create({
       organization: organizationId,
@@ -45,7 +47,7 @@ class ScanService {
       commitSha: commit.sha,
       branch: commit.branch,
       activeKey: `${organizationId}:${owner.toLowerCase()}/${repo.toLowerCase()}`,
-      deadlineAt: new Date(Date.now() + 15 * 60 * 1000),
+      deadlineAt: new Date(Date.now() + SCAN_RECORD_DEADLINE_MS),
       includeDependencies: includeDependencies === true,
     });
 
@@ -66,6 +68,8 @@ class ScanService {
       scan.status = "failed";
       scan.errorMessage = `Failed to enqueue scan: ${queueErr.message}`;
       scan.activeKey = null;
+      scan.leaseUntil = null;
+      scan.leaseToken = null;
       await scan.save();
       const err = new Error(scan.errorMessage);
       err.statusCode = 503;

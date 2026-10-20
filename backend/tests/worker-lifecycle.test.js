@@ -27,17 +27,45 @@ test("a duplicate or cancelled job that cannot claim a lease does not run scanne
 test("scanner-wide failure records failure and releases the active key", async () => {
   runAll.mockRejectedValue(Object.assign(new Error("All failed"), { scannerErrors: [{ scanner: "semgrep", message: "Failed" }] }));
   await expect(processScanJob(job)).rejects.toThrow("All failed");
-  expect(record.status).toBe("failed"); expect(record.activeKey).toBeNull();
-  expect(record.scannerErrors).toHaveLength(1); expect(cleanup).toHaveBeenCalledTimes(1);
+  const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
+  expect(Scan.findOneAndUpdate).toHaveBeenCalledTimes(2);
+  expect(Scan.findOneAndUpdate.mock.calls[1][0]).toMatchObject({ status: "running", cancelledAt: null, leaseToken: token });
+  expect(Scan.findOneAndUpdate.mock.calls[1][1].$set).toMatchObject({ status: "failed", activeKey: null, leaseToken: null });
+  expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.scannerErrors).toHaveLength(1);
+  expect(cleanup).toHaveBeenCalledTimes(1);
 });
 test("successful empty analysis pins the archive and finalizes only a still-active job", async () => {
   await expect(processScanJob(job)).resolves.toMatchObject({ success: true, summary: { total: 0 } });
   expect(createEphemeralWorkspace).toHaveBeenCalledWith("1", "owner", "repo", record.commitSha);
-  expect(Scan.findOneAndUpdate.mock.calls[1][0]).toEqual({ _id: "scan", status: "running", cancelledAt: null });
+  const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
+  expect(Scan.findOneAndUpdate.mock.calls[1][0]).toEqual({ _id: "scan", status: "running", cancelledAt: null, leaseToken: token });
+  expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.leaseToken).toBeNull();
   expect(cleanup).toHaveBeenCalledTimes(1);
 });
 test("cancellation wins a race with successful scanner completion", async () => {
-  Scan.findOneAndUpdate.mockResolvedValueOnce(record).mockResolvedValueOnce(null);
+  Scan.findOneAndUpdate.mockResolvedValueOnce(record).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
   await expect(processScanJob(job)).rejects.toThrow("cancelled");
-  expect(record.status).toBe("failed"); expect(cleanup).toHaveBeenCalledTimes(1);
+  const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
+  expect(Scan.findOneAndUpdate.mock.calls[2][0]).toMatchObject({ status: "running", cancelledAt: null, leaseToken: token });
+  expect(cleanup).toHaveBeenCalledTimes(1);
+});
+test("a stale worker cannot finalize or fail a scan after its lease is reclaimed", async () => {
+  let currentToken;
+  Scan.findOneAndUpdate.mockImplementation(async (filter, update) => {
+    if (filter.leaseToken === undefined) {
+      currentToken = update.$set.leaseToken;
+      return record;
+    }
+    if (filter.leaseToken !== currentToken) return null;
+    return record;
+  });
+  runAll.mockImplementation(async () => {
+    currentToken = "new-worker-lease";
+    return { results: [], scannersRun: ["semgrep"], scannerErrors: [], coverage: [] };
+  });
+  await expect(processScanJob(job)).rejects.toThrow("cancelled");
+  const oldToken = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
+  expect(oldToken).not.toBe("new-worker-lease");
+  expect(Scan.findOneAndUpdate.mock.calls.slice(1).every(([filter]) => filter.leaseToken === oldToken)).toBe(true);
+  expect(cleanup).toHaveBeenCalledTimes(1);
 });

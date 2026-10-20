@@ -65,7 +65,8 @@ router.get("/:scanId/export", requireAuth, requireScanMember, handler(async (req
 }));
 router.post("/:scanId/cancel", requireAuth, requireScanMember, handler(async (req, res) => {
   const scan = await Scan.findOneAndUpdate({ _id: req.params.scanId, status: { $in: ["queued", "running"] } },
-    { $set: { cancelledAt: new Date(), status: "failed", errorMessage: "Cancelled by organization member", activeKey: null, completedAt: new Date() } }, { returnDocument: "after" });
+    { $set: { cancelledAt: new Date(), status: "failed", errorMessage: "Cancelled by organization member",
+      activeKey: null, leaseUntil: null, leaseToken: null, completedAt: new Date() } }, { returnDocument: "after" });
   if (!scan) throw bad("No active scan to cancel", 409);
   res.json({ success: true, data: scan });
 }));

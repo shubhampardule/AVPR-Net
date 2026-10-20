@@ -134,12 +134,6 @@ const connectInstallation = async () => {
     navigate(`/github/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`);
   };
 
-const handleManageGitHubAccess = () => {
-  if (!installationUrl) return;
-
-  window.open(installationUrl, "_blank", "noopener,noreferrer");
-};
-
   return (
     <div className="min-h-screen">
       <header className="border-b border-border-subtle bg-bg-primary/80 backdrop-blur-xl">
@@ -328,12 +322,12 @@ const handleManageGitHubAccess = () => {
         )}
       </main>
 
-      {addRepoOpen && <AddRepositoryModal onClose={() => setAddRepoOpen(false)} onManage={handleManageGitHubAccess} />}
+      {addRepoOpen && <AddRepositoryModal onClose={() => setAddRepoOpen(false)} installationUrl={installationUrl} />}
     </div>
   );
 }
 
-function AddRepositoryModal({ onClose, onManage }) {
+function AddRepositoryModal({ onClose, installationUrl }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(event) => event.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.09] bg-[#0D0F12] shadow-2xl">
@@ -380,11 +374,19 @@ function AddRepositoryModal({ onClose, onManage }) {
             Cancel
           </button>
 
-          <button onClick={onManage} className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-white/90">
-            <GithubIcon className="h-4 w-4" />
-            Manage GitHub Access
-            <ExternalLink className="h-3 w-3" />
-          </button>
+          {installationUrl ? (
+            <a href={installationUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-white/90">
+              <GithubIcon className="h-4 w-4" />
+              Manage GitHub Access
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : (
+            <button type="button" disabled title="Refresh GitHub status to load the installation settings link" className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black opacity-50">
+              <GithubIcon className="h-4 w-4" />
+              Manage GitHub Access
+              <ExternalLink className="h-3 w-3" />
+            </button>
+          )}
         </div>
       </div>
     </div>

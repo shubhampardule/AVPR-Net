@@ -47,7 +47,7 @@
       "instances": {
         "bom1": 1
       },
-      "terminationGracePeriodSeconds": 300
+      "terminationGracePeriodSeconds": 660
     }
   },
   "headers": [

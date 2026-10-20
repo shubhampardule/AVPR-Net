@@ -6,6 +6,7 @@ dotenv.config();
 
 const env = require("../config/env");
 const { redisConnection } = require("../config/redis");
+const { SCAN_JOB_TIMEOUT_MS, SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS } = require("../config/scan-timing");
 const { SCAN_QUEUE_NAME, SCAN_QUEUE_REGION } = require("../queues/scanQueue");
 const Scan = require("../models/Scan");
 const Finding = require("../models/Finding");
@@ -48,10 +49,11 @@ const processScanJobInternal = async (job, controller) => {
   await ensureDatabase();
 
   const now = new Date();
+  const leaseToken = require("node:crypto").randomUUID();
   const scan = await Scan.findOneAndUpdate({ _id: scanId, cancelledAt: null,
     $and: [{ $or: [{ deadlineAt: null }, { deadlineAt: { $gt: now } }] },
       { $or: [{ status: "queued" }, { status: "failed" }, { status: "running", leaseUntil: { $lt: now } }] }] },
-    { $set: { status: "running", startedAt: now, leaseUntil: new Date(Date.now() + 60000), errorMessage: null } }, { returnDocument: "after" });
+    { $set: { status: "running", startedAt: now, leaseUntil: new Date(Date.now() + 60000), leaseToken, errorMessage: null } }, { returnDocument: "after" });
   if (!scan) {
     return { success: true, skipped: true };
   }
@@ -61,16 +63,12 @@ const processScanJobInternal = async (job, controller) => {
     return { success: true, skipped: true, summary: scan.summary };
   }
 
-  scan.status = "running";
-  scan.startedAt = new Date();
-  await scan.save();
-
   let workspaceHandle = null;
-  const deadline = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+  const deadline = setTimeout(() => controller.abort(), SCAN_JOB_TIMEOUT_MS);
   const heartbeat = setInterval(async () => {
     try {
       await heartbeatWorker();
-      const renewed = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null },
+      const renewed = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
         { $set: { leaseUntil: new Date(Date.now() + 60000) } });
       if (!renewed) controller.abort();
     } catch { controller.abort(); }
@@ -190,23 +188,21 @@ const processScanJobInternal = async (job, controller) => {
     scan.leaseUntil = null;
     scan.completedAt = new Date();
     scan.summary = summary;
-    const finalized = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null },
+    const finalized = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
       { $set: { status: scan.status, completedAt: scan.completedAt, summary, coverage: scan.coverage,
         scannersUsed: scan.scannersUsed, scannerErrors: scan.scannerErrors, rulesHash: scan.rulesHash,
-        commitSha: scan.commitSha, activeKey: null, leaseUntil: null } });
+        commitSha: scan.commitSha, activeKey: null, leaseUntil: null, leaseToken: null } });
     if (!finalized) throw new Error("Scan was cancelled before completion");
 
     console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
     return { success: true, summary };
   } catch (error) {
     console.error(`[ScanWorker] Scan ${scanId} failed:`, error.message);
-    scan.status = "failed";
-    scan.activeKey = null;
-    scan.leaseUntil = null;
-    scan.scannerErrors = error.scannerErrors || scan.scannerErrors;
-    scan.completedAt = new Date();
-    scan.errorMessage = error.message;
-    await scan.save();
+    const failure = { status: "failed", activeKey: null, leaseUntil: null, leaseToken: null,
+      completedAt: new Date(), errorMessage: error.message };
+    if (error.scannerErrors) failure.scannerErrors = error.scannerErrors;
+    await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
+      { $set: failure });
     throw error;
   } finally {
     clearTimeout(deadline);
@@ -268,7 +264,8 @@ const startVercelQueueWorker = async () => {
       await ensureDatabase();
       await heartbeatWorker();
       await Scan.updateMany({ status: { $in: ["queued", "running"] }, deadlineAt: { $lt: new Date() } },
-        { $set: { status: "failed", activeKey: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
+        { $set: { status: "failed", activeKey: null, leaseUntil: null, leaseToken: null,
+          errorMessage: "Scan deadline expired", completedAt: new Date() } });
       if (Date.now() - lastScheduleCheck > 60000) {
         await require("../services/automation.service").runDueSchedules();
         lastScheduleCheck = Date.now();
@@ -288,7 +285,7 @@ const startVercelQueueWorker = async () => {
           }
           await processScanJob({ id: message.scanId, data: message });
         },
-        { limit: 1, visibilityTimeoutSeconds: 3600 },
+        { limit: 1, visibilityTimeoutSeconds: SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS },
       );
       if (!result.ok) {
         if (result.reason !== "empty") {

@@ -10,4 +10,9 @@ function repository(owner, repo) {
     !/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || [".", ".."].includes(repo)) throw bad("Invalid GitHub repository identifier");
 }
 function objectId(value) { if (typeof value !== "string" || !mongoose.isValidObjectId(value)) throw bad("Invalid identifier"); return value; }
-module.exports = { bad, integer, repository, objectId };
+function optionalCommitSha(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) throw bad("Invalid commit SHA");
+  return value;
+}
+module.exports = { bad, integer, repository, objectId, optionalCommitSha };

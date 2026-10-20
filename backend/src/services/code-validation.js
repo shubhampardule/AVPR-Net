@@ -1,6 +1,12 @@
-const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const { execFile } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+
+function syntaxWorkerPath() {
+  const candidates = [path.join(__dirname, "syntax-worker.js"), path.join(__dirname, "services", "syntax-worker.js")];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
 
 async function validateCode(language, code, format = "code") {
   if (typeof code !== "string" || Buffer.byteLength(code) > 32000) {
@@ -29,7 +35,7 @@ async function validateCode(language, code, format = "code") {
     });
   }
   return new Promise((resolve) => {
-    const worker = new Worker(path.resolve(process.cwd(), "src/services/syntax-worker.js"), {
+    const worker = new Worker(syntaxWorkerPath(), {
       workerData: { language, code }, resourceLimits: { maxOldGenerationSizeMb: 64 },
       // Do not inherit loader/preload flags into the parser worker.
       execArgv: [],

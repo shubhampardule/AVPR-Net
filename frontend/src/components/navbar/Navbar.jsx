@@ -32,7 +32,7 @@ export function Navbar({ onOpenAuthModal }) {
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         {/* Wordmark Logo */}
-        <a href="#" className="flex items-center gap-2.5 group">
+        <a href="/" className="flex items-center gap-2.5 group">
           <div className="w-8 h-8 rounded-lg bg-[#111419] border border-white/[0.1] flex items-center justify-center transition-all group-hover:border-[#4ADE80]/50 group-hover:bg-[#4ADE80]/10">
             <ShieldCheck className="w-4 h-4 text-[#4ADE80] transition-transform group-hover:scale-110" />
           </div>
@@ -82,6 +82,7 @@ export function Navbar({ onOpenAuthModal }) {
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2 rounded-lg bg-[#111419] border border-white/[0.08] text-text-secondary hover:text-white"
             aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>

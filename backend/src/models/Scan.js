@@ -8,6 +8,7 @@ const scanSchema = new mongoose.Schema(
     activeKey: { type: String, default: null },
     deadlineAt: { type: Date, default: null },
     leaseUntil: { type: Date, default: null },
+    leaseToken: { type: String, default: null },
     cancelledAt: { type: Date, default: null },
     coverage: { type: [mongoose.Schema.Types.Mixed], default: [] },
     rulesHash: { type: String, default: null },

@@ -69,7 +69,16 @@ export function StagePrioritize() {
           {findings.map((f, i) => (
             <div
               key={f.title}
+              role="button"
+              tabIndex={0}
+              aria-pressed={selectedFinding === i}
               onClick={() => setSelectedFinding(i)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSelectedFinding(i);
+                }
+              }}
               className={`p-3.5 rounded-lg border cursor-pointer transition-all ${
                 selectedFinding === i
                   ? 'border-white/[0.18] bg-[#151921] shadow-md'
