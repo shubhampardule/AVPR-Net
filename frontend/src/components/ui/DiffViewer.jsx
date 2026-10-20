@@ -76,7 +76,7 @@ export function DiffViewer({
                 <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]" />
                 Secure Code (Suggested Patch)
               </span>
-              <span className="text-[10px] text-[#4ADE80] font-mono">Validated</span>
+              <span className="text-[10px] text-[#4ADE80] font-mono">Proposed · unexecuted</span>
             </div>
             <pre className="text-[12px] leading-relaxed overflow-x-auto whitespace-pre font-mono text-[#4ADE80]/90 select-text">
               {remediatedCode.trim()}

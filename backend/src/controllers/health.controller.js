@@ -8,6 +8,7 @@ const healthCheck = (req, res) => {
     {
       status: "ok",
       service: "securepatch-backend",
+      revision: process.env.VERCEL_GIT_COMMIT_SHA || null,
       database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       ai: new NvidiaService().health(),
     },

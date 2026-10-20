@@ -29,7 +29,7 @@ export function HeroSection({ onOpenScanModal }) {
 
             {/* Supporting Copy */}
             <p className="text-base sm:text-lg text-text-secondary leading-relaxed max-w-xl">
-              SecurePatch analyzes source code, correlates scanner findings, calculates business risk, and generates verified patches—before security weaknesses become production incidents.
+              SecurePatch analyzes source code, correlates scanner findings, calculates business risk, and drafts reviewable fixes—before security weaknesses become production incidents.
             </p>
 
             {/* CTAs */}
@@ -60,7 +60,7 @@ export function HeroSection({ onOpenScanModal }) {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[#60A5FA]">●</span>
-                <span className="text-text-secondary font-medium">Semgrep + Bandit + Trivy + ZAP</span>
+                <span className="text-text-secondary font-medium">Semgrep · Bandit · Credential patterns</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-white/40">●</span>

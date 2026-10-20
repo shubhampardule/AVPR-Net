@@ -1,14 +1,31 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, ArrowRight, ShieldCheck } from 'lucide-react';
 import { GithubIcon } from '../ui/GithubIcon';
 import { API_BASE_URL } from '../../config/api';
 
 export function ScanModal({ isOpen, onClose, defaultTab = 'scan' }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    const previous = document.activeElement;
+    const key = event => {
+      if (event.key === "Escape") onClose();
+      if (event.key !== "Tab") return;
+      const items = dialog.current?.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex="0"]');
+      if (!items?.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    dialog.current?.querySelector("button")?.focus();
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); previous?.focus?.(); };
+  }, [isOpen, onClose]);
   if (!isOpen) return null;
   const login = defaultTab === 'login';
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
-      <section role="dialog" aria-modal="true" aria-labelledby="scan-dialog-title" onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0D0F12] text-left shadow-2xl">
+      <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="scan-dialog-title" onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[#0D0F12] text-left shadow-2xl">
         <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
           <ShieldCheck className="h-5 w-5 text-[#4ADE80]" />
           <button type="button" aria-label="Close dialog" onClick={onClose} className="rounded-lg p-1 text-text-muted hover:text-white"><X className="h-5 w-5" /></button>

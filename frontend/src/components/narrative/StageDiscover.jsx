@@ -35,7 +35,7 @@ export function StageDiscover() {
       file: 'config/mailer.js',
       line: 19,
       severity: 'High',
-      scanner: 'Trivy',
+      scanner: 'Credential patterns',
       message: 'Detected high-entropy AWS API secret token in committed source',
       engineRule: 'secret-aws-access-key-id'
     },
@@ -46,7 +46,7 @@ export function StageDiscover() {
       file: 'routers/webhooks.py',
       line: 43,
       severity: 'High',
-      scanner: 'OWASP ZAP',
+      scanner: 'SAST example',
       message: 'Unvalidated external URL parameter invoked without private IP checks',
       engineRule: 'zap-ssrf-rule-90021'
     }
@@ -62,11 +62,11 @@ export function StageDiscover() {
       <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
         <div className="flex items-center gap-2 font-mono text-xs text-text-secondary">
           <Code2 className="w-4 h-4 text-[#60A5FA]" />
-          <span>Multi-Scanner Normalization Pipeline</span>
+          <span>Illustrative scanner findings · sample data</span>
         </div>
 
         <div className="flex items-center gap-1.5 font-mono text-[11px] bg-black/40 p-1 rounded-lg border border-white/[0.06]">
-          {['all', 'Semgrep', 'Bandit', 'Trivy', 'OWASP ZAP'].map((s) => (
+          {['all', 'Semgrep', 'Bandit', 'Credential patterns', 'SAST example'].map((s) => (
             <button
               key={s}
               onClick={() => setSelectedScanner(s)}
@@ -129,7 +129,7 @@ export function StageDiscover() {
           <span className="w-2 h-2 rounded-full bg-[#4ADE80] animate-pulse" />
           <span>Raw scanner streams normalized to common AST schema</span>
         </div>
-        <span className="text-text-secondary">4 Scanners · 19 Findings Normalized</span>
+        <span className="text-text-secondary">Illustration only · see actual scan coverage</span>
       </div>
     </div>
   );

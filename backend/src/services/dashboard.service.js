@@ -73,9 +73,12 @@ class DashboardService {
           .lean(),
       ]);
 
-    const repositories = organization.githubInstallationId
-      ? await getRepositories(organization.githubInstallationId)
-      : null;
+    let repositories = null;
+    let integrationWarning = null;
+    if (organization.githubInstallationId) {
+      try { repositories = await getRepositories(organization.githubInstallationId); }
+      catch { integrationWarning = "GitHub is temporarily unavailable. Stored scan data remains available."; }
+    }
 
     const riskDistribution = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const group of riskGroups) {
@@ -121,6 +124,7 @@ class DashboardService {
             : null,
       })),
       priorityFindings,
+      integrationWarning,
       scannerStatus,
     };
   }

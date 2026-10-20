@@ -1,6 +1,7 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+:focus-visible { outline: 2px solid #4ade80; outline-offset: 3px; }
 
 :root {
   --bg-primary: #08090B;

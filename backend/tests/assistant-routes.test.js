@@ -12,7 +12,8 @@ beforeEach(() => {
 });
 function app(options = {}) {
   const instance = express(); instance.use(express.json({ limit: "24kb" }));
-  instance.use("/org/:organizationId/ai", createAssistantRouter({ service, rag, provider, ...options }));
+  instance.use("/org/:organizationId/ai", createAssistantRouter({ service, rag, provider,
+    budget: { consume: async () => {}, reserveSlots: async () => async () => {} }, ...options }));
   return instance;
 }
 const auth = (req, res, next) => { req.user = { _id: "user-1", status: "active" }; next(); };

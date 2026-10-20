@@ -40,7 +40,7 @@ export function ArchitectureGrid() {
             Engineered for precision. Built for developer trust.
           </h2>
           <p className="text-base text-text-secondary leading-relaxed">
-            SecurePatch eliminates scanner alert noise and protects code integrity through isolated sandbox verification and non-destructive Git workflows.
+            SecurePatch brings scanner evidence, explicit coverage, weighted risk and reviewable changes into one workspace.
           </p>
         </div>
 
@@ -81,14 +81,14 @@ export function ArchitectureGrid() {
                 Scheduled scans execute whether your laptop is open or closed.
               </h3>
               <p className="text-xs sm:text-sm text-text-secondary leading-relaxed">
-                Persistent Redis/BullMQ worker pipelines trigger weekly and monthly repository evaluations in the cloud. New commits, vulnerable dependency releases, or reintroduced weaknesses are identified continuously.
+                Enable weekly or monthly scans on the cloud worker. Signed GitHub events can trigger scans when the App webhook is configured. Dependency advisory checks are optional.
               </p>
             </div>
 
             <div className="lg:col-span-4 p-4 rounded-xl bg-[#111419] border border-white/[0.06] font-mono text-xs space-y-2">
               <div className="flex items-center justify-between text-text-muted pb-1 border-b border-white/[0.04]">
                 <span>SCHEDULE SPEC</span>
-                <span className="text-[#4ADE80]">ACTIVE</span>
+                <span className="text-[#4ADE80]">OPT-IN</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-text-secondary">Frequency:</span>
@@ -100,7 +100,7 @@ export function ArchitectureGrid() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-text-secondary">Host Security:</span>
-                <span className="text-[#4ADE80]">Hardened Sandbox</span>
+                <span className="text-[#4ADE80]">Bounded Static Analysis</span>
               </div>
             </div>
           </div>

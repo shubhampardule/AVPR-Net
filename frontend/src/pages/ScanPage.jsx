@@ -1,435 +1,112 @@
-import React, { useEffect, useState, useRef } from "react";
-import {
-  useNavigate,
-  useOutletContext,
-  useParams,
-  Link,
-} from "react-router-dom";
-import {
-  ArrowLeft,
-  ScanLine,
-  RefreshCw,
-  ShieldCheck,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Filter,
-  ExternalLink,
-  ShieldAlert,
-} from "lucide-react";
-import { motion } from "framer-motion";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { API_BASE_URL } from "../config/api";
-import { ScanStatusBadge } from "../components/ui/ScanStatusBadge";
 import { FindingCard } from "../components/ui/FindingCard";
-
+import { ScanStatusBadge } from "../components/ui/ScanStatusBadge";
+const panel = "rounded-xl border border-white/10 bg-[#0D0F12] p-5";
+const button = "rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40 hover:border-green-400";
 export default function ScanPage() {
   const { owner, repo } = useParams();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { selectedOrg } = useOutletContext();
-
-  const organizationId =
-    selectedOrg?._id ||
-    selectedOrg?.id ||
-    selectedOrg?.organization?._id ||
-    selectedOrg?.organization?.id;
-
-  const [activeScan, setActiveScan] = useState(null);
-  const [scanHistory, setScanHistory] = useState([]);
-  const [findings, setFindings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [triggering, setTriggering] = useState(false);
-  const [error, setError] = useState(null);
-  const [filterSeverity, setFilterSeverity] = useState("all");
-
-  const pollIntervalRef = useRef(null);
-
-  const fetchScanHistory = async () => {
-    if (!organizationId || !owner || !repo) return;
-    try {
-      const res = await fetch(
-        `${API_BASE_URL}/scans/organizations/${organizationId}/repositories/${encodeURIComponent(
-          owner
-        )}/${encodeURIComponent(repo)}`,
-        { credentials: "include" }
-      );
-      const data = await res.json();
-      if (res.ok && data.data?.scans) {
-        setScanHistory(data.data.scans);
-        if (data.data.scans.length > 0 && !activeScan) {
-          setActiveScan(data.data.scans[0]);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch scan history:", err);
-    }
-  };
-
-  const fetchScanDetails = async (scanId) => {
+  const org = selectedOrg?.id || selectedOrg?._id;
+  const scope = `${org}/${owner}/${repo}`;
+  const current = useRef(scope); current.current = scope;
+  const [history, setHistory] = useState([]), [scanId, setScanId] = useState("");
+  const [scan, setScan] = useState(null), [findings, setFindings] = useState([]);
+  const [page, setPage] = useState(1), [pagination, setPagination] = useState(null);
+  const [risk, setRisk] = useState("all"), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [comparison, setComparison] = useState(null);
+  const [refresh, setRefresh] = useState(0), [supplyChain, setSupplyChain] = useState(false);
+  const endpoint = `${API_BASE_URL}/scans`;
+  async function json(path, options = {}) {
+    const r = await fetch(`${endpoint}${path}`, { credentials: "include", ...options });
+    const b = await r.json();
+    if (!r.ok) throw new Error(b.error?.message || b.message || "Scan request failed");
+    return b.data;
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    setHistory([]); setScanId(""); setScan(null); setFindings([]); setPagination(null);
+    setComparison(null); setError(""); setPage(1); setRisk("all");
+    if (org) json(`/organizations/${org}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { signal: controller.signal })
+      .then(data => { if (!controller.signal.aborted) { setHistory(data.scans); setScanId(searchParams.get("scanId") || data.scans[0]?._id || ""); } })
+      .catch(e => { if (e.name !== "AbortError") setError(e.message); });
+    return () => controller.abort();
+  }, [scope]);
+  useEffect(() => {
     if (!scanId) return;
+    const controller = new AbortController(); let timer;
+    setFindings([]); setComparison(null); setPagination(null);
+    async function load() {
+      try {
+        const [status, result] = await Promise.all([
+          json(`/${scanId}`, { signal: controller.signal }),
+          json(`/${scanId}/findings?page=${page}&limit=25${risk === "all" ? "" : `&riskCategory=${risk}`}`, { signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted) return;
+        if (status.owner && (status.owner.toLowerCase() !== owner.toLowerCase() || status.repo.toLowerCase() !== repo.toLowerCase() || String(status.organization) !== String(org))) throw new Error("Scan does not belong to this repository and organization");
+        setScan(status); setHistory(items => items.map(item => String(item._id) === String(status._id) ? { ...item, ...status } : item));
+        setFindings(result.findings); setPagination(result.pagination); setError("");
+        if (["queued", "running"].includes(status.status)) timer = setTimeout(load, 3000);
+      } catch (e) { if (e.name !== "AbortError") setError(e.message); }
+    }
+    load(); return () => { controller.abort(); clearTimeout(timer); };
+  }, [scanId, page, risk, scope, refresh]);
+  async function start() {
+    if (!org || busy) return;
+    const startedFor = scope; setBusy(true); setError("");
     try {
-      const [statusRes, findingsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/scans/${scanId}`, { credentials: "include" }),
-        fetch(`${API_BASE_URL}/scans/${scanId}/findings?limit=100`, {
-          credentials: "include",
-        }),
-      ]);
-
-      const statusData = await statusRes.json();
-      const findingsData = await findingsRes.json();
-
-      if (statusRes.ok && statusData.data) {
-        setActiveScan(statusData.data);
-      }
-
-      if (findingsRes.ok && findingsData.data?.findings) {
-        setFindings(findingsData.data.findings);
-      }
-    } catch (err) {
-      console.error("Failed to fetch scan details:", err);
-    }
-  };
-
-  // Start polling if scan is running or queued
-  useEffect(() => {
-    if (activeScan && (activeScan.status === "queued" || activeScan.status === "running")) {
-      pollIntervalRef.current = setInterval(() => {
-        fetchScanDetails(activeScan._id || activeScan.id);
-      }, 3000);
-    } else {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    }
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, [activeScan?.status, activeScan?._id]);
-
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await fetchScanHistory();
-      setLoading(false);
-    };
-    init();
-  }, [organizationId, owner, repo]);
-
-  useEffect(() => {
-    if (activeScan?._id) {
-      fetchScanDetails(activeScan._id);
-    }
-  }, [activeScan?._id]);
-
-  const handleStartScan = async () => {
-    if (!organizationId) {
-      setError("Please select an active organization first.");
-      return;
-    }
-
-    try {
-      setTriggering(true);
-      setError(null);
-
-      const res = await fetch(
-        `${API_BASE_URL}/scans/organizations/${organizationId}/repositories/${encodeURIComponent(
-          owner
-        )}/${encodeURIComponent(repo)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        }
-      );
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || data.error?.message || "Failed to trigger scan");
-      }
-
-      // 202 Accepted returned with scanId
-      const newScan = {
-        _id: data.data.scanId,
-        id: data.data.scanId,
-        status: data.data.status,
-        owner,
-        repo,
-        summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0 },
-        createdAt: new Date().toISOString(),
-      };
-
-      setActiveScan(newScan);
-      setFindings([]);
-      setScanHistory((prev) => [newScan, ...prev]);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setTriggering(false);
-    }
-  };
-
-  const filteredFindings = findings.filter((f) => {
-    if (filterSeverity === "all") return true;
-    return f.riskCategory?.toLowerCase() === filterSeverity.toLowerCase();
-  });
-
-  return (
-    <div className="min-h-screen bg-[#08090B] text-[#F5F7FA]">
-      {/* Top Header */}
-      <header className="border-b border-white/[0.08] bg-[#0A0C0F]/90 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigate(`/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`)}
-                className="p-2 rounded-lg bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] text-text-muted hover:text-white transition"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-text-muted">Repository /</span>
-                  <span className="text-sm font-semibold text-text-primary font-mono">
-                    {owner}/{repo}
-                  </span>
-                </div>
-                <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 mt-0.5">
-                  <ScanLine className="w-5 h-5 text-[#4ADE80]" />
-                  Security Scan Pipeline
-                </h1>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => activeScan && fetchScanDetails(activeScan._id)}
-                disabled={loading || triggering}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-xs font-mono text-text-secondary hover:text-white transition disabled:opacity-50"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Refresh
-              </button>
-
-              <button
-                onClick={handleStartScan}
-                disabled={triggering || activeScan?.status === "running" || activeScan?.status === "queued"}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4ADE80] text-[#08090B] hover:bg-[#3ecb72] text-xs font-mono font-semibold transition disabled:opacity-50 shadow-sm cursor-pointer"
-              >
-                {triggering ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    Enqueuing...
-                  </>
-                ) : (
-                  <>
-                    <ScanLine className="w-3.5 h-3.5" />
-                    New Security Scan
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Error Notification */}
-        {error && (
-          <div className="p-4 rounded-xl border border-rose-500/20 bg-rose-500/10 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="text-xs font-mono font-semibold text-rose-300">Scan Pipeline Notice</h4>
-              <p className="text-xs text-rose-200 mt-1 leading-relaxed">{error}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Active Scan Status Banner */}
-        {activeScan && (
-          <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0D0F12]">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/[0.06]">
-              <div className="flex items-center gap-3">
-                <ScanStatusBadge status={activeScan.status} />
-                <span className="text-xs font-mono text-text-muted">
-                  Scan ID: <span className="text-text-primary">{activeScan._id || activeScan.id}</span>
-                </span>
-                {activeScan.jobId && (
-                  <span className="text-xs font-mono text-text-muted">
-                    Job: <span className="text-text-secondary">{activeScan.jobId}</span>
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-4 text-xs font-mono text-text-muted">
-                {activeScan.startedAt && (
-                  <span>
-                    Started: {new Date(activeScan.startedAt).toLocaleTimeString()}
-                  </span>
-                )}
-                {activeScan.completedAt && (
-                  <span>
-                    Finished: {new Date(activeScan.completedAt).toLocaleTimeString()}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* In-Progress Notification */}
-            {(activeScan.status === "queued" || activeScan.status === "running") && (
-              <div className="py-6 flex flex-col items-center justify-center text-center">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-3">
-                  <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
-                </div>
-                <h3 className="text-sm font-semibold text-white">
-                  {activeScan.status === "queued" ? "Waiting for scan worker" : "Scanning repository"}
-                </h3>
-                <p className="text-xs text-text-muted max-w-md mt-1 leading-relaxed">
-                  {activeScan.status === "queued" ? "Your scan is queued. Results will appear here when processing starts." : "Checking the authorized repository with Semgrep and Bandit security rules..."}
-                </p>
-              </div>
-            )}
-
-            {/* Error Message if Failed */}
-            {activeScan.status === "failed" && activeScan.errorMessage && (
-              <div className="py-4 text-xs font-mono text-rose-400 bg-rose-500/5 p-3 rounded-lg border border-rose-500/10 mt-3">
-                Failure Reason: {activeScan.errorMessage}
-              </div>
-            )}
-
-            {activeScan.scannerErrors?.length > 0 && (
-              <div className="py-4 text-xs text-amber-200 bg-amber-500/5 p-3 rounded-lg border border-amber-500/10 mt-3">
-                <p className="font-semibold">Some scanners failed. These results may be incomplete.</p>
-                {activeScan.scannerErrors.map(({ scanner, message }) => (
-                  <p key={scanner} className="mt-1 font-mono text-amber-100/80">
-                    {scanner}: {message}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {/* Metric Summary Cards */}
-            {activeScan.summary && (
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-4">
-                <div className="p-3 rounded-xl bg-[#111419] border border-white/[0.06]">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted block">
-                    Total Findings
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-white mt-1 block">
-                    {activeScan.summary.total || 0}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-rose-500/5 border border-rose-500/10">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 block">
-                    Critical Risk
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-rose-400 mt-1 block">
-                    {activeScan.summary.critical || 0}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/10">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-orange-400 block">
-                    High Risk
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-orange-400 mt-1 block">
-                    {activeScan.summary.high || 0}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/10">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 block">
-                    Medium Risk
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-amber-400 mt-1 block">
-                    {activeScan.summary.medium || 0}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-[#4ADE80]/5 border border-[#4ADE80]/10">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#4ADE80] block">
-                    Low Risk
-                  </span>
-                  <span className="text-2xl font-bold font-mono text-[#4ADE80] mt-1 block">
-                    {activeScan.summary.low || 0}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Findings List Section */}
-        {activeScan && activeScan.status === "completed" && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-orange-400" />
-                  Prioritized Vulnerabilities
-                </h2>
-                <p className="text-xs text-text-muted mt-0.5">
-                  Ordered by deterministic risk score (Severity, Exploitability, Occurrence, Business Impact)
-                </p>
-              </div>
-
-              {/* Filter Tabs */}
-              <div className="flex items-center gap-1.5 p-1 rounded-lg bg-[#111419] border border-white/[0.06] text-xs font-mono">
-                {["all", "critical", "high", "medium", "low"].map((sev) => (
-                  <button
-                    key={sev}
-                    onClick={() => setFilterSeverity(sev)}
-                    className={`px-2.5 py-1 rounded capitalize transition ${
-                      filterSeverity === sev
-                        ? "bg-white/[0.1] text-white font-medium"
-                        : "text-text-muted hover:text-white"
-                    }`}
-                  >
-                    {sev}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {filteredFindings.length === 0 ? (
-              <div className="p-8 rounded-2xl border border-white/[0.08] bg-[#0D0F12] text-center">
-                <CheckCircle2 className="w-8 h-8 text-[#4ADE80] mx-auto mb-2" />
-                <h4 className="text-sm font-semibold text-white">No Vulnerabilities in this Category</h4>
-                <p className="text-xs text-text-muted mt-1">
-                  The scanned codebase does not have findings matching '{filterSeverity}'.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredFindings.map((finding) => (
-                  <FindingCard key={finding._id || finding.fingerprint} finding={finding} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* No Scans Initial State */}
-        {!loading && !activeScan && (
-          <div className="p-12 rounded-2xl border border-white/[0.08] bg-[#0D0F12] text-center max-w-lg mx-auto">
-            <div className="w-12 h-12 rounded-xl bg-[#111419] border border-white/[0.08] flex items-center justify-center mx-auto mb-4">
-              <ScanLine className="w-6 h-6 text-[#4ADE80]" />
-            </div>
-            <h3 className="text-lg font-bold text-white">No Security Scans Run Yet</h3>
-            <p className="text-xs text-text-muted mt-2 leading-relaxed">
-              Launch your first security scan against {owner}/{repo}. SecurePatch will fetch an authorized ephemeral repository archive, run Semgrep and Bandit, and calculate audit-ready risk scores.
-            </p>
-            <button
-              onClick={handleStartScan}
-              disabled={triggering}
-              className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#4ADE80] text-[#08090B] font-mono text-xs font-bold hover:bg-[#3ecb72] transition"
-            >
-              <ScanLine className="w-4 h-4" />
-              Start Security Scan
-            </button>
-          </div>
-        )}
-      </main>
-    </div>
-  );
+      const data = await json(`/organizations/${org}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ includeDependencies: supplyChain }),
+      });
+      if (current.current !== startedFor) return;
+      setPage(1); setScanId(data.scanId); setScan({ ...data, _id: data.scanId });
+      setHistory(h => [{ ...data, _id: data.scanId }, ...h]);
+    } catch (e) { if (current.current === startedFor) setError(e.message); }
+    finally { if (current.current === startedFor) setBusy(false); }
+  }
+  async function cancel() {
+    try { await json(`/${scanId}/cancel`, { method: "POST" }); setRefresh(n => n + 1); }
+    catch (e) { setError(e.message); }
+  }
+  async function compare() {
+    const startedFor = scope;
+    try { const data = await json(`/${scanId}/comparison`); if (current.current === startedFor) setComparison(data); }
+    catch (e) { setError(e.message); }
+  }
+  const active = ["queued", "running"].includes(scan?.status);
+  return <main className="mx-auto max-w-6xl p-5 space-y-5 text-white">
+    <Link className="text-green-300 text-sm" to={`/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>← Repository</Link>
+    <header className="flex flex-wrap items-center justify-between gap-4"><div>
+      <p className="text-sm text-slate-400">{owner}/{repo}</p><h1 className="text-2xl font-semibold">Security scans</h1>
+    </div><div className="flex gap-2"><button className={button} disabled={busy || active || !org} onClick={start}>{busy ? "Queuing…" : "New scan"}</button>
+      {active && <button className={button} onClick={cancel}>Cancel scan</button>}</div></header>
+    <label className="text-sm text-slate-400 block"><input type="checkbox" checked={supplyChain} onChange={e => setSupplyChain(e.target.checked)} /> Include dependency advisories (package names/versions are sent to OSV). Credential pattern checks run locally.</label>
+    {error && <p role="alert" className="rounded-lg border border-red-400/40 p-4 text-red-200">{error} <button className="underline" onClick={() => setRefresh(n => n + 1)}>Retry</button></p>}
+    <label className="block text-sm">Scan history<select aria-label="Scan history" className="ml-3 bg-[#151820] border border-white/20 p-2 rounded max-w-full" value={scanId} onChange={e => { setScanId(e.target.value); setPage(1); setScan(null); }}>
+      <option value="">Select a scan</option>{history.map(s => <option key={s._id} value={s._id}>{new Date(s.createdAt).toLocaleString()} · {s.status} · {s.commitSha?.slice(0, 7) || "legacy"}</option>)}</select></label>
+    {scan && <section className={`${panel} space-y-4`}>
+      <div className="flex flex-wrap gap-4 items-center"><ScanStatusBadge status={scan.status} /><span className="text-sm text-slate-400">{scan.summary?.total || 0} findings</span>
+        {scan.commitSha && <a className="text-xs text-green-300 break-all" href={`https://github.com/${owner}/${repo}/commit/${scan.commitSha}`} target="_blank" rel="noreferrer">Commit {scan.commitSha}</a>}</div>
+      {active && <p aria-live="polite" className="text-amber-200 text-sm">{scan.status === "queued" ? "Waiting for the worker…" : "Scanning the pinned commit…"}</p>}
+      {scan.errorMessage && <p className="text-red-200 text-sm">{scan.errorMessage}</p>}
+      {scan.scannerErrors?.length > 0 && <div className="text-amber-200 text-sm"><strong>Incomplete scanner coverage</strong>{scan.scannerErrors.map((e, i) => <p key={i}>{e.scanner}: {e.message}</p>)}</div>}
+      <details><summary className="text-sm cursor-pointer">Scanner coverage and provenance</summary><pre className="text-xs whitespace-pre-wrap mt-2 text-slate-400">{JSON.stringify({ coverage: scan.coverage, rulesHash: scan.rulesHash }, null, 2)}</pre></details>
+      <div className="flex flex-wrap gap-2"><a className={button} href={`${endpoint}/${scanId}/export?format=json`}>Export JSON</a><a className={button} href={`${endpoint}/${scanId}/export?format=sarif`}>Export SARIF</a>
+        <button className={button} disabled={scan.status !== "completed"} onClick={compare}>Compare with previous scan</button></div>
+    </section>}
+    {comparison && <section className={`${panel} text-sm space-y-3`}>
+      <h2 className="font-semibold">Changes since the previous successful scan</h2>
+      <p>New: {comparison.new.length} · Persistent: {comparison.persistent.length} · Fixed: {comparison.canInferFixed ? comparison.fixed.length : "not inferred (coverage differs)"}</p>
+      <p className="text-slate-400">{comparison.limitation}</p>
+      {["new", "persistent", "fixed"].map(kind => <details key={kind}><summary className="capitalize cursor-pointer">{kind}</summary>{comparison[kind].length > 100 && <p className="text-slate-400">Showing 100 of {comparison[kind].length}. Export JSON for complete evidence.</p>}<ul className="list-disc pl-5">{comparison[kind].slice(0, 100).map(f => <li key={f._id}>{f.filePath}:{f.startLine} · {f.title}</li>)}</ul></details>)}
+    </section>}
+    <section className="space-y-3"><div className="flex justify-between items-center"><h2 className="font-semibold">Findings</h2><label className="text-sm">Risk <select aria-label="Risk filter" className="ml-2 bg-[#151820] p-2 rounded" value={risk} onChange={e => { setRisk(e.target.value); setPage(1); }}>{["all", "critical", "high", "medium", "low"].map(v => <option key={v}>{v}</option>)}</select></label></div>
+      {findings.map(f => <FindingCard key={f._id} finding={f} organizationId={org} commitSha={scan?.commitSha} onReviewed={() => setRefresh(n => n + 1)} />)}
+      {!findings.length && pagination && <p className="text-slate-400">No findings match this filter. Check scanner coverage before drawing conclusions.</p>}
+      {!scanId && <p className="text-slate-400">Select an organization and run a scan to inspect results.</p>}
+      {pagination && <nav aria-label="Findings pagination" className="flex items-center justify-between gap-2"><button className={button} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</button><span className="text-sm text-slate-400">Page {page} of {pagination.totalPages} · {pagination.total} matching findings</span><button className={button} disabled={page >= pagination.totalPages} onClick={() => setPage(p => p + 1)}>Next</button></nav>}
+    </section>
+  </main>;
 }

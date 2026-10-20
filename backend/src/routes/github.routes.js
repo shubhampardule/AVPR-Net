@@ -184,6 +184,7 @@ router.get(
 
             const { owner, repo } = req.params;
             const { path: filePath } = req.query;
+            const ref = typeof req.query.ref === "string" && /^[a-f0-9]{40}$/.test(req.query.ref) ? req.query.ref : undefined;
 
             if (!filePath) {
                 return res.status(400).json({
@@ -199,7 +200,8 @@ router.get(
                 organization.githubInstallationId,
                 owner,
                 repo,
-                filePath
+                filePath,
+                ref
             );
 
             return res.status(200).json({

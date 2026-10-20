@@ -8,6 +8,7 @@ const scanRoutes = require("./scan.routes");
 const dashboardRoutes = require("./dashboard.routes");
 
 const router = express.Router();
+router.use(require("./automation.routes"));
 
 router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);

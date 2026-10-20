@@ -17,6 +17,7 @@ const app = express();
 if (env.nodeEnv === "production") app.set("trust proxy", 1);
 app.use((req, res, next) => {
   req.requestId = require("node:crypto").randomUUID();
+  res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Request-ID", req.requestId);
   next();
 });
@@ -44,7 +45,11 @@ app.use(
   })
 );
 
+app.use("/api/v1/webhooks/github", express.raw({ type: "application/json", limit: "256kb" }));
 app.use(express.json({ limit: "24kb", strict: true }));
+app.get("/api/v1/health/live", (req, res) => res.json({ success: true, data: {
+  status: "ok", revision: process.env.VERCEL_GIT_COMMIT_SHA || null,
+} }));
 
 if (!demoMode && env.nodeEnv !== "test") {
   app.use((req, res, next) => {

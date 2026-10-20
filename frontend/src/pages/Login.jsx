@@ -96,7 +96,7 @@ export default function Login() {
 
               <p className="mt-3 text-sm text-text-secondary leading-relaxed max-w-sm mx-auto">
                 Sign in to access your SecurePatch security workspace, repositories,
-                findings, and verified remediation workflows.
+                findings, and reviewable remediation workflows.
               </p>
             </div>
 

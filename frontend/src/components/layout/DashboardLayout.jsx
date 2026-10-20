@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import {
   ShieldCheck,
   LayoutDashboard,
@@ -16,6 +16,7 @@ import { API_BASE_URL } from "../../config/api";
 
 export default function DashboardLayout() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
 
   const [user, setUser] = useState(null);
   const [organizations, setOrganizations] = useState([]);
@@ -26,6 +27,12 @@ export default function DashboardLayout() {
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [orgError, setOrgError] = useState("");
   const [showOrgForm, setShowOrgForm] = useState(false);
+  const [contextError, setContextError] = useState("");
+  const desiredOrganization = searchParams.get("org");
+  useEffect(() => {
+    const desired = organizations.find(item => (item.id || item._id) === desiredOrganization);
+    if (desired) setSelectedOrg(desired);
+  }, [desiredOrganization, organizations]);
 
   const createOrganization = async (event) => {
     event.preventDefault();
@@ -57,6 +64,7 @@ export default function DashboardLayout() {
   }, [location.pathname]);
 
   const loadDashboardContext = async () => {
+    setContextError(""); setLoading(true);
     try {
       const [userResponse, orgResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/auth/me`, {
@@ -68,12 +76,13 @@ export default function DashboardLayout() {
         }),
       ]);
 
-      if (!userResponse.ok) {
+      if (userResponse.status === 401) {
         window.location.href = "/login";
         return;
       }
 
       const userData = await userResponse.json();
+      if (!userResponse.ok) throw new Error(userData.error?.message || "Unable to load your account.");
       const orgData = await orgResponse.json();
       if (!orgResponse.ok) throw new Error(orgData.error?.message || "Unable to load organizations.");
 
@@ -95,9 +104,11 @@ export default function DashboardLayout() {
       setOrganizations(normalizedOrganizations);
 
       if (normalizedOrganizations.length > 0) {
-        setSelectedOrg(normalizedOrganizations[0]);
+        const desired = searchParams.get("org") || sessionStorage.getItem(`securepatch-org:${currentUser?.id || currentUser?._id}`);
+        setSelectedOrg(normalizedOrganizations.find(item => (item.id || item._id) === desired) || normalizedOrganizations[0]);
       }
     } catch (error) {
+      setContextError(error.message || "Unable to load workspace context.");
       console.error(
         "Dashboard context loading failed:",
         error
@@ -116,18 +127,19 @@ export default function DashboardLayout() {
     );
 
     setSelectedOrg(organization || null);
+    if (organization) sessionStorage.setItem(`securepatch-org:${user?.id || user?._id}`, organizationId);
   };
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API_BASE_URL}/auth/logout`, {
+      const response = await fetch(`${API_BASE_URL}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
-    } catch (error) {
-      console.error("Logout failed:", error);
-    } finally {
+      if (!response.ok) throw new Error("Sign-out could not be confirmed. Please retry.");
       window.location.href = "/";
+    } catch (error) {
+      setContextError(error.message);
     }
   };
 
@@ -359,8 +371,8 @@ export default function DashboardLayout() {
               <SidebarItem
                 icon={ShieldAlert}
                 label="Findings"
-                badge="Soon"
-                disabled
+                to="/findings"
+                active={location.pathname === "/findings"}
               />
 
             </div>
@@ -388,8 +400,8 @@ export default function DashboardLayout() {
               <SidebarItem
                 icon={Settings}
                 label="Settings"
-                badge="Soon"
-                disabled
+                to="/settings"
+                active={location.pathname === "/settings"}
               />
 
             </div>
@@ -492,7 +504,7 @@ export default function DashboardLayout() {
                 <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
 
                 <span className="text-[9px] font-mono text-text-muted">
-                  SYSTEM OPERATIONAL
+                  AUTHENTICATED WORKSPACE
                 </span>
 
               </div>
@@ -511,7 +523,9 @@ export default function DashboardLayout() {
           {/* Page Content                                                  */}
           {/* ------------------------------------------------------------ */}
 
+          {contextError && <div role="alert" className="m-5 rounded-lg border border-red-400/30 p-4 text-sm text-red-200">{contextError} <button className="underline" onClick={loadDashboardContext}>Retry</button></div>}
           <Outlet
+            key={`${selectedOrg?.id || selectedOrg?._id}:${location.pathname}:${location.search}`}
             context={{
               user,
               organizations,

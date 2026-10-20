@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { API_BASE_URL } from "../config/api";
+import RepositoryAutomation from "../components/ui/RepositoryAutomation";
 
 export default function Repository() {
   const { owner, repo } = useParams();
@@ -171,6 +172,7 @@ export default function Repository() {
               .slice(0, index + 1)
               .join("/"),
             size: isFile ? file.size : null,
+            commitSha: isFile ? file.commitSha : null,
             children: isFile ? undefined : [],
           };
 
@@ -213,7 +215,7 @@ export default function Repository() {
         repository.owner
       )}/${encodeURIComponent(
         repository.name
-      )}/file?path=${encodeURIComponent(item.path)}`
+      )}/file?path=${encodeURIComponent(item.path)}${item.commitSha ? `&ref=${item.commitSha}` : ""}`
     );
   };
 
@@ -331,6 +333,7 @@ export default function Repository() {
           </div>
         )}
 
+        <RepositoryAutomation organization={selectedOrg} owner={decodedOwner} repo={decodedRepo} />
         {/* Explorer */}
         <section>
 

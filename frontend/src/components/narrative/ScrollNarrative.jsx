@@ -14,7 +14,7 @@ export function ScrollNarrative() {
       step: '01',
       title: 'DISCOVER',
       headline: "See what's hiding in your code.",
-      copy: "SecurePatch analyzes source code to identify security weaknesses before they become production incidents. Scans run with zero config across JavaScript and Python repositories.",
+      copy: "SecurePatch analyzes source code to identify security weaknesses before they become production incidents. Configured scanners report their coverage for each repository.",
       badge: 'Multi-Scanner Ingestion',
       component: <StageDiscover />
     },
@@ -23,7 +23,7 @@ export function ScrollNarrative() {
       step: '02',
       title: 'PRIORITIZE',
       headline: 'Not every vulnerability deserves the same urgency.',
-      copy: 'Correlate findings, reduce noise, and focus your team on the vulnerabilities that matter most. The M3 correlation engine eliminates duplicates while M4 computes explainable CVSS-aligned risk.',
+      copy: 'Correlate findings, reduce noise, and focus your team on the vulnerabilities that matter most. Deterministic fingerprints and an explainable weighted score help prioritize findings; scores are not CVSS or probabilities.',
       badge: 'M3 Deduplication & M4 Risk',
       component: <StagePrioritize />
     },
@@ -41,8 +41,8 @@ export function ScrollNarrative() {
       step: '04',
       title: 'VERIFY',
       headline: 'Fix it. Verify it. Move on.',
-      copy: 'Security remediation is complete only when the fix has been verified. Ephemeral Docker containers test syntax, run test suites, and rescan before certifying risk elimination.',
-      badge: 'Isolated Docker Verification',
+      copy: 'Check patch applicability and available syntax parsers, review suggested tests, then validate changes in trusted CI before merging.',
+      badge: 'Patch Checks & Human Review',
       component: <StageVerify />
     }
   ];
@@ -57,10 +57,10 @@ export function ScrollNarrative() {
             End-to-End Security Workflow
           </div>
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-[#F5F7FA]">
-            From raw repository to verified safe code.
+            From repository evidence to a reviewable fix.
           </h2>
           <p className="text-base sm:text-lg text-text-secondary leading-relaxed">
-            Four coordinated stages convert raw scanner output into verified, zero-regression security patches.
+            Four stages connect scanner evidence, explainable risk, proposed changes and independent review.
           </p>
 
           {/* Interactive Navigation Timeline / Stepper */}

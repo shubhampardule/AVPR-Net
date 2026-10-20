@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
+import { AppErrorBoundary } from './components/ui/AppErrorBoundary';
 
 import { Navbar } from './components/navbar/Navbar';
 import { HeroSection } from './components/hero/HeroSection';
@@ -10,14 +12,17 @@ import { FinalCtaSection } from './components/cta/FinalCtaSection';
 import { Footer } from './components/footer/Footer';
 import { ScanModal } from './components/modal/ScanModal';
 
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import GitHub from './pages/GitHub';
-import DashboardLayout from "./components/layout/DashboardLayout";
-import Repository from "./pages/Repository";
-import FileViewer from "./pages/FileViewer";
-import ScanPage from "./pages/ScanPage";
-import Assistant from "./pages/Assistant";
+const Login = lazy(() => import("./pages/Login"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const GitHub = lazy(() => import("./pages/GitHub"));
+const DashboardLayout = lazy(() => import("./components/layout/DashboardLayout"));
+const Repository = lazy(() => import("./pages/Repository"));
+const FileViewer = lazy(() => import("./pages/FileViewer"));
+const ScanPage = lazy(() => import("./pages/ScanPage"));
+const Assistant = lazy(() => import("./pages/Assistant"));
+
+const Settings = lazy(() => import("./pages/Settings"));
+const Findings = lazy(() => import("./pages/Findings"));
 
 function Home() {
   const [modalOpen, setModalOpen] = useState(false);
@@ -64,14 +69,14 @@ function Home() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
+    <AppErrorBoundary><MotionConfig reducedMotion="user"><BrowserRouter>
+      <Suspense fallback={<p role="status" className="p-8 text-slate-300">Loading workspace…</p>}><Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/assistant-demo" element={import.meta.env.PROD ? <Navigate to="/assistant" replace /> : <Assistant demo />} />
 
         <Route element={<DashboardLayout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/settings" element={<Settings />} /><Route path="/findings" element={<Findings />} /><Route path="/dashboard" element={<Dashboard />} />
           <Route path="/assistant" element={<Assistant />} />
 
           <Route path="/github" element={<GitHub />} />
@@ -91,7 +96,7 @@ export default function App() {
             element={<FileViewer />}
           />
         </Route>
-      </Routes>
-    </BrowserRouter>
+      <Route path="*" element={<main className="p-12 text-white"><h1>Page not found</h1><a href="/" className="text-green-300 underline">Return home</a></main>} /></Routes></Suspense>
+    </BrowserRouter></MotionConfig></AppErrorBoundary>
   );
 }

@@ -50,7 +50,7 @@ subprocess.run(safe_cmd, shell=False, check=True)`,
   const current = activeTab === 'sql' ? sqlScenario : cmdScenario;
 
   return (
-    <div className="space-y-4 text-left">
+    <div className="space-y-4 text-left"><p className="text-xs text-amber-200">Illustrative examples. Actual proposals require independent review and tests.</p>
       {/* Selector Tabs */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

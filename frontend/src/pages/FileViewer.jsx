@@ -34,6 +34,7 @@ export default function FileViewer() {
     selectedOrg?.organization?.id;
 
   const filePath = searchParams.get("path");
+  const ref = searchParams.get("ref");
 
   const decodedOwner = decodeURIComponent(owner || "");
   const decodedRepo = decodeURIComponent(repo || "");
@@ -57,7 +58,7 @@ export default function FileViewer() {
           decodedOwner
         )}/${encodeURIComponent(
           decodedRepo
-        )}/file?path=${encodeURIComponent(filePath)}`,
+        )}/file?path=${encodeURIComponent(filePath)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`,
         {
           credentials: "include",
         }
@@ -93,6 +94,7 @@ export default function FileViewer() {
     decodedOwner,
     decodedRepo,
     filePath,
+    ref,
   ]);
 
   const isImage = isImageFile(filePath);

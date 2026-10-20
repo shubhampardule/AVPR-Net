@@ -10,9 +10,26 @@ import {
 } from "lucide-react";
 import { RiskScoreBar } from "./RiskScoreBar";
 import { Link } from "react-router-dom";
+import { API_BASE_URL } from "../../config/api";
 
-export function FindingCard({ finding }) {
+export function FindingCard({ finding, organizationId, commitSha, onReviewed }) {
   const [expanded, setExpanded] = useState(false);
+  const [reviewStatus, setReviewStatus] = useState(finding.status || "open");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function saveReview(event) {
+    event.preventDefault(); setSaving(true); setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/scans/${finding.scan}/findings/${finding._id}`, {
+        method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: reviewStatus, reason }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "Review failed");
+      onReviewed?.();
+    } catch (e) { setError(e.message); } finally { setSaving(false); }
+  }
 
   const severityBadges = {
     critical: "bg-rose-500/10 text-rose-400 border-rose-500/20",
@@ -33,6 +50,8 @@ export function FindingCard({ finding }) {
     <div className="rounded-xl border border-white/[0.08] bg-[#0D0F12] overflow-hidden transition hover:border-white/[0.16]">
       {/* Header Row */}
       <div
+        role="button" tabIndex={0} aria-expanded={expanded}
+        onKeyDown={event => { if (event.target === event.currentTarget && ["Enter", " "].includes(event.key)) { event.preventDefault(); setExpanded(!expanded); } }}
         onClick={() => setExpanded(!expanded)}
         className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer select-none hover:bg-white/[0.01]"
       >
@@ -71,8 +90,10 @@ export function FindingCard({ finding }) {
             <h3 className="text-sm font-semibold text-text-primary tracking-tight">
               {finding.title}
             </h3>
-            {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}`}
+            {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId || finding.organization || "")}`}
               onClick={(event) => event.stopPropagation()} className="text-xs text-green-300 hover:underline">Explain with Nemotron →</Link>}
+            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs text-green-300 hover:underline">Draft a fix →</Link>}
+            <span className="ml-3 text-xs text-slate-400">{finding.status || "open"}</span>
 
             <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">
               <FileCode className="w-3.5 h-3.5 text-text-muted" />
@@ -97,6 +118,7 @@ export function FindingCard({ finding }) {
           </div>
 
           <button
+            aria-label={expanded ? "Collapse finding" : "Expand finding"} aria-expanded={expanded}
             type="button"
             className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-text-muted hover:text-white"
           >
@@ -112,6 +134,15 @@ export function FindingCard({ finding }) {
       {/* Expanded Details */}
       {expanded && (
         <div className="px-4 pb-5 pt-2 sm:px-5 border-t border-white/[0.06] bg-[#0A0B0E]/60 space-y-4">
+          {commitSha && <a className="text-xs text-green-300 underline" target="_blank" rel="noreferrer" href={`https://github.com/${finding.owner}/${finding.repo}/blob/${commitSha}/${finding.filePath.split("/").map(encodeURIComponent).join("/")}#L${finding.startLine}`}>View exact scanned source</a>}
+          {organizationId && <form onSubmit={saveReview} className="space-y-2">
+            <label className="block text-xs text-slate-300">Review status<select value={reviewStatus} onChange={e => setReviewStatus(e.target.value)} className="ml-2 bg-[#151820] p-2 rounded">{["open", "acknowledged", "dismissed", "resolved"].map(value => <option key={value}>{value}</option>)}</select></label>
+            <p className="text-xs text-slate-400">Review decisions are manual. A persisting issue marked resolved reopens on the next scan.</p>
+            <label className="block text-xs text-slate-300">Reason<textarea required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} className="block mt-2 w-full bg-black/30 border border-white/15 p-2 rounded" /></label>
+            <button disabled={saving} className="text-xs text-green-300 underline">{saving ? "Saving…" : "Save review"}</button>
+            {finding.statusReason && <p className="text-xs text-slate-400">Last review: {finding.statusReason}</p>}
+            {error && <p role="alert" className="text-xs text-red-200">{error}</p>}
+          </form>}
           {/* Description */}
           {finding.description && (
             <div>
@@ -179,7 +210,7 @@ export function FindingCard({ finding }) {
                 Suggested Remediation
               </h4>
               <a
-                href={finding.remediation}
+                href={/^https:\/\//.test(finding.remediation) ? finding.remediation : undefined}
                 className="text-xs text-text-secondary leading-relaxed hover:underline"
                 target="_blank"
                 rel="noopener noreferrer"

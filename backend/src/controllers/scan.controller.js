@@ -11,6 +11,7 @@ const enqueueScan = async (req, res, next) => {
       organizationId,
       owner,
       repo,
+      includeDependencies: req.body?.includeDependencies === true,
     });
 
     // Return 202 Accepted immediately as per async background architecture

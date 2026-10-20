@@ -54,6 +54,10 @@ class NvidiaService {
     const started = Date.now();
     for (let attempt = 0; attempt <= config.retries; attempt++) {
       const controller = new AbortController();
+      const parentSignal = require("./ai-context").getStore()?.signal;
+      const abort = () => controller.abort();
+      if (parentSignal?.aborted) controller.abort();
+      else parentSignal?.addEventListener("abort", abort, { once: true });
       let timer;
       // Non-streaming chat sends headers only after inference has completed.
       // Its first-byte wait belongs to the response budget, not a short connect budget.
@@ -115,7 +119,8 @@ class NvidiaService {
         const transient = ["NVIDIA_TIMEOUT", "NVIDIA_UNAVAILABLE", "NVIDIA_RATE_LIMIT"].includes(failure.code);
         this.log({ requestId, operation: endpoint, attempt, status: failure.code, durationMs: Date.now() - started });
         if (!transient || attempt === config.retries) throw failure;
-      } finally { clearTimeout(timer); }
+      } finally { clearTimeout(timer); parentSignal?.removeEventListener("abort", abort); }
+      if (parentSignal?.aborted) throw new NvidiaError("NVIDIA_TIMEOUT", "Assistant workflow deadline exceeded", requestId);
       await this.sleep(250 * 2 ** attempt);
     }
   }

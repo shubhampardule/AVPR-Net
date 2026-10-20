@@ -18,7 +18,7 @@ export function CodeScannerTerminal() {
     { id: 1, label: 'Detection', tag: 'CWE-89' },
     { id: 2, label: 'Risk Analysis', tag: 'Score 9.4' },
     { id: 3, label: 'Patch Generated', tag: 'Diff Ready' },
-    { id: 4, label: 'Verified', tag: 'Risk 0.0' },
+    { id: 4, label: 'Review', tag: 'Unexecuted' },
   ];
 
   return (
@@ -47,7 +47,7 @@ export function CodeScannerTerminal() {
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
             <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
-            Semgrep + Bandit Pipeline
+            Illustrative pipeline — not a live scan
           </span>
         </div>
       </div>
@@ -108,7 +108,7 @@ export function CodeScannerTerminal() {
                     Line 124 · Parameterized SQL Query (SecurePatch Automated Fix)
                   </span>
                   <span className="text-xs px-2 py-0.5 rounded bg-[#4ADE80]/20 text-[#4ADE80] font-mono font-semibold">
-                    Verified
+                    Review required
                   </span>
                 </div>
                 <div className="whitespace-pre">
@@ -176,7 +176,7 @@ export function CodeScannerTerminal() {
               <span className="text-text-muted font-mono text-[11px]">Branch: securepatch/fix-VUL-NODE-089</span>
             </div>
             <span className="text-[11px] font-mono text-[#4ADE80]">
-              Preserves 100% route signature & types
+              Independent compatibility review required
             </span>
           </div>
         )}
@@ -185,7 +185,7 @@ export function CodeScannerTerminal() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-text-secondary">
             <div className="flex items-center gap-2 text-[#4ADE80] font-mono text-xs">
               <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-              <span>Sandbox Verification Passed (Syntax · 18/18 Tests · 0 Rescan Findings)</span>
+              <span>Illustration only. Run independent tests before merging.</span>
             </div>
             <div className="font-mono text-[11px] bg-[#4ADE80]/10 text-[#4ADE80] px-2 py-0.5 rounded border border-[#4ADE80]/20">
               Risk Score: 9.4 → 0.0 (Resolved)

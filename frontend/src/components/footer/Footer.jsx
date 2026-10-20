@@ -17,11 +17,11 @@ export function Footer() {
               </span>
             </div>
             <p className="text-text-secondary text-[12px] leading-relaxed">
-              Software vulnerability detection, correlation, risk assessment, and verified patch generation platform.
+              Software vulnerability detection, correlation, risk assessment, and reviewable fix drafting platform.
             </p>
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-white/[0.03] border border-white/[0.06] text-[10px]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
-              <span>Scanning Engines Operational</span>
+              <span>Coverage reported per scan</span>
             </div>
           </div>
 
@@ -31,10 +31,10 @@ export function Footer() {
               Integrated Scanners
             </div>
             <ul className="space-y-2 text-text-secondary text-[11px]">
-              <li>Semgrep (SAST & Taint Analysis)</li>
+              <li>Semgrep (versioned SAST baseline)</li>
               <li>Bandit (Python Security AST)</li>
-              <li>Trivy (Vulnerabilities & Secrets)</li>
-              <li>OWASP ZAP (Baseline Assessment)</li>
+              <li>Credential pattern checks</li>
+              <li>OSV dependency advisories (opt-in)</li>
             </ul>
           </div>
 
@@ -47,7 +47,7 @@ export function Footer() {
               <li>M3 Correlation & Deduplication</li>
               <li>M4 Multi-Factor Risk Assessment</li>
               <li>Unified Diff Patch Generation</li>
-              <li>M7 Isolated Docker Verification</li>
+              <li>Patch Applicability & Syntax Checks</li>
               <li>Periodic Server-Side Schedules</li>
             </ul>
           </div>
@@ -60,8 +60,8 @@ export function Footer() {
             <ul className="space-y-2 text-text-secondary text-[11px]">
               <li>Node.js / Express & Python</li>
               <li>MERN Stack Architecture</li>
-              <li>Redis & BullMQ Job Workers</li>
-              <li>Docker Sandbox Isolation</li>
+              <li>Vercel Queues / local BullMQ</li>
+              <li>Temporary Source Workspaces</li>
             </ul>
           </div>
         </div>

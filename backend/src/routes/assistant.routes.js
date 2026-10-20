@@ -39,8 +39,19 @@ function createAssistantRouter(options = {}) {
 
   const handle = (fn, costly = false) => async (req, res) => {
     let acquired = false;
+    let release = null;
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 210000);
+    const disconnected = () => { if (!res.writableEnded) controller.abort(); };
+    res.once("close", disconnected);
     try {
       if (costly) {
+        if (!demo) {
+          const budget = options.budget || require("../services/budget.service");
+          await budget.consume(`ai-user:${req.user._id}`, 10, 60000);
+          await budget.consume(`ai-org:${req.params.organizationId}`, 100, 3600000);
+          release = await budget.reserveSlots(`ai-concurrent:${req.user._id}`);
+        }
         const now = Date.now();
         for (const [key, value] of counters) if (value.until < now) counters.delete(key);
         const key = demo ? "local-demo" : String(req.user._id);
@@ -50,19 +61,31 @@ function createAssistantRouter(options = {}) {
         }
         counter.count++; counters.set(key, counter); inFlight++; acquired = true;
       }
-      const result = await fn(req);
+      const result = await require("../services/ai-context").run({ signal: controller.signal }, () => fn(req));
       res.status(result.status === "unavailable" ? 503 : 200).json({ success: result.status !== "unavailable", data: result });
     } catch (error) {
       const inputError = error.code === "AI_INVALID_INPUT" || error.code === "RAG_INVALID_QUERY";
       res.status(error.statusCode || (inputError ? 400 : 503)).json({ success: false,
         error: { code: inputError ? error.code : "AI_UNAVAILABLE",
           message: inputError ? error.message : "Assistant unavailable; check configuration and knowledge index" } });
-    } finally { if (acquired) inFlight--; }
+    } finally {
+      clearTimeout(deadline); res.off("close", disconnected);
+      if (release) await release().catch(() => {});
+      if (acquired) inFlight--;
+    }
   };
 
   router.get("/health", handle(async () => ({ ...provider.health(), demo,
     languages: service.languages(), execution: "disabled" })));
   router.get("/knowledge", handle(async () => rag.diagnostics()));
+  if (!demo) router.get("/finding/:findingId", handle(async req => {
+    const { objectId, bad } = require("../utils/input");
+    objectId(req.params.findingId);
+    const finding = await require("../models/Finding").findOne({ _id: req.params.findingId, organization: req.params.organizationId }).lean();
+    if (!finding) throw bad("Finding not found", 404);
+    const scan = await require("../models/Scan").findById(finding.scan).lean();
+    return require("../services/remediation.service").source(scan, finding);
+  }));
   router.get("/fixtures", handle(async () => ({
     events: { suspicious: require("../../fixtures/events/suspicious.json"), benign: require("../../fixtures/events/benign.json") },
     code: Object.fromEntries(["python", "javascript", "typescript", "c", "cpp", "bash", "review"]
@@ -85,7 +108,18 @@ function createAssistantRouter(options = {}) {
     const findFinding = options.findFinding || ((filter) => require("../models/Finding").findOne(filter).lean());
     const finding = await findFinding({ _id: req.body.findingId, organization: req.params.organizationId });
     if (!finding) throw Object.assign(badInput("Finding unavailable for this organization"), { statusCode: 404 });
-    return service.analyzeFinding(finding);
+    if (options.findFinding) return service.analyzeFinding(finding);
+    const index = await rag.read();
+    const key = require("node:crypto").createHash("sha256").update(JSON.stringify({
+      organization: req.params.organizationId, finding, model: provider.health().chatModel,
+      corpus: index?.updatedAt, prompt: "finding-v2",
+    })).digest("hex");
+    const Cache = require("../models/AssistantCache");
+    const cached = await Cache.findOne({ _id: key, expires: { $gt: new Date() } }).lean();
+    if (cached) return { ...cached.result, cached: true };
+    const result = await service.analyzeFinding(finding);
+    if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { result, expires: new Date(Date.now() + 600000) } }, { upsert: true }).catch(() => {});
+    return result;
   }, true));
   router.post("/code", handle(async (req) => service.generateCode(req.body), true));
   return router;

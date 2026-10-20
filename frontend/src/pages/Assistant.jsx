@@ -30,6 +30,7 @@ export default function Assistant({ demo = false }) {
   const context = useOutletContext();
   const [params] = useSearchParams();
   const organizationId = context?.selectedOrg?._id || context?.selectedOrg?.id;
+  const canCreatePullRequest = ["owner", "admin"].includes(context?.selectedOrg?.role);
   const base = demo ? `${API_BASE_URL}/ai/demo` : organizationId ? `${API_BASE_URL}/organizations/${organizationId}/ai` : null;
   const [tab, setTab] = useState("investigate");
   const [health, setHealth] = useState(null);
@@ -45,6 +46,10 @@ export default function Assistant({ demo = false }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [draftContext, setDraftContext] = useState(null);
+  const [patchCheck, setPatchCheck] = useState(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [pullRequest, setPullRequest] = useState(null);
   const activeBase = useRef(base);
   const pendingRequest = useRef(null);
   activeBase.current = base;
@@ -64,11 +69,17 @@ export default function Assistant({ demo = false }) {
     const controller = new AbortController();
     setResult(null); setError(""); setHealth(null); setKnowledge(null); setBusy(false);
     Promise.all([api("health", undefined, controller.signal), api("knowledge", undefined, controller.signal),
-      api("fixtures", undefined, controller.signal)]).then(([h, k, f]) => {
+      api("fixtures", undefined, controller.signal)]).then(async ([h, k, f]) => {
       if (!live) return;
       setHealth(h); setKnowledge(k); setFixtures(f);
       setEventText(JSON.stringify(f.events.suspicious, null, 2));
       setRequest(f.code.javascript.request);
+      if (!demo && params.get("mode") === "review" && params.get("findingId")) {
+        const source = await api(`finding/${params.get("findingId")}`, undefined, controller.signal);
+        if (!live) return;
+        setDraftContext(source); setTab("code"); setLanguage(source.language); setMode("review");
+        setOriginalCode(source.originalCode); setRequest(source.request);
+      }
     }).catch((e) => { if (live) setError(demo ? `${e.message}. Start the backend with npm run demo.` : e.message); });
     return () => { live = false; controller.abort(); pendingRequest.current?.abort(); };
   }, [base]);
@@ -81,7 +92,7 @@ export default function Assistant({ demo = false }) {
   }
 
   async function run(event) {
-    event.preventDefault(); setBusy(true); setError(""); setResult(null);
+    event.preventDefault(); setBusy(true); setError(""); setResult(null); setPatchCheck(null); setPullRequest(null); setAcknowledged(false);
     const startedFor = base;
     const controller = new AbortController();
     pendingRequest.current = controller;
@@ -95,6 +106,25 @@ export default function Assistant({ demo = false }) {
       if (response.status === "unavailable") setError(response.error?.message || "AI assistance unavailable; original evidence is retained.");
     } catch (e) { if (activeBase.current === startedFor && e.name !== "AbortError") setError(e instanceof SyntaxError ? "Event must contain valid JSON." : e.message); }
     finally { if (activeBase.current === startedFor) setBusy(false); }
+  }
+
+  async function patchAction(action) {
+    if (!draftContext || !result?.proposal) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/scans/${draftContext.scanId}/findings/${draftContext.findingId}/${action}`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patch: result.proposal.code, acknowledged }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message || "Patch request failed");
+      if (action === "validate") setPatchCheck(body.data); else setPullRequest(body.data);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  function downloadProposal() {
+    const url = URL.createObjectURL(new Blob([result.proposal.code], { type: "text/plain" }));
+    const link = document.createElement("a"); link.href = url; link.download = result.proposal.format === "diff" ? "securepatch.patch" : "securepatch-proposal.txt";
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return <div className="min-h-screen bg-[#08090B] text-white px-4 py-8 sm:px-8">
@@ -180,6 +210,17 @@ export default function Assistant({ demo = false }) {
             <p className="text-xs font-mono text-green-300">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: not executed</p>
             {result.validation?.message && <p className="text-xs text-amber-200">{result.validation.message}</p>}
             <pre className="overflow-auto max-h-[32rem] rounded-lg bg-black/40 p-4 text-xs text-green-100"><code>{result.proposal.code}</code></pre>
+            <div className="flex gap-3"><button className="text-sm text-green-300 underline" onClick={downloadProposal}>Download proposal</button>
+              <button className="text-sm text-green-300 underline" onClick={() => navigator.clipboard.writeText(result.proposal.code).catch(() => setError("Clipboard unavailable. Download the proposal instead."))}>Copy proposal</button></div>
+            {draftContext && result.proposal.format === "diff" && <div className="space-y-3 rounded-lg border border-white/15 p-4 text-sm">
+              <p className="text-slate-400 break-all">Target: {draftContext.filePath} at {draftContext.commitSha.slice(0, 7)}</p>
+              <button disabled={busy} className="text-green-300 underline" onClick={() => patchAction("validate")}>Check patch against scanned source</button>
+              {patchCheck && <p className="text-amber-200">Patch applies. Syntax: {patchCheck.syntax.status}. Tests were not executed.</p>}
+              <label className="block text-slate-300"><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this patch and understand that tests were not executed.</label>
+              <button disabled={busy || !acknowledged || !patchCheck || Boolean(pullRequest) || !canCreatePullRequest} className={`${button} text-xs`} onClick={() => patchAction("pull-request")}>Create draft pull request</button>
+              <p className="text-xs text-slate-400">Owner/admin role and approved GitHub App write permissions required. The default branch must still match the scanned commit.</p>
+              {pullRequest && <a target="_blank" rel="noreferrer" href={pullRequest.url} className="block text-green-300 underline">Open draft pull request #{pullRequest.number}</a>}
+            </div>}
             {["assumptions", "dependencies", "security_considerations", "validation_instructions", "tests"].map((key) =>
               <TextList key={key} title={key === "tests" ? "Suggested tests · unexecuted" : key.replaceAll("_", " ")} items={result.proposal[key]} />)}
           </>}

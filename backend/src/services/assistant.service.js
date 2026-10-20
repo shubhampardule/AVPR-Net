@@ -42,7 +42,7 @@ function eventAdapter(event) {
 function findingAdapter(finding) {
   const keys = ["_id", "scanner", "ruleId", "cwe", "filePath", "startLine", "endLine", "severity",
     "riskScore", "riskFactors", "riskCategory", "title", "description", "evidenceSnippet", "remediation"];
-  if (!finding || !["semgrep", "bandit", "trivy"].includes(finding.scanner) || !isText(finding.ruleId) ||
+  if (!finding || !["semgrep", "bandit", "trivy", "secrets", "dependency"].includes(finding.scanner) || !isText(finding.ruleId) ||
     !Number.isFinite(finding.riskScore)) throw badInput("Finding must contain actual normalized scanner evidence");
   const original = Object.fromEntries(keys.filter((key) => finding[key] !== undefined)
     .map((key) => [key, key === "_id" ? String(finding[key]) : finding[key]]));
@@ -82,20 +82,27 @@ class AssistantService {
         { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
 Keep the entire response concise, preferably under 1000 tokens; suggest at most five tests.
 Return one JSON object, without markdown fences or surrounding text, with exactly these keys: ${CODE_FIELDS.join(", ")}.
-language must match the request. format is code or diff. For review mode return a
-unified diff in code beginning with --- a/source and +++ b/source, followed by an
-@@ hunk header and lines prefixed with space, + or -; never standalone source for reviews.
+language must match the request. For review mode return format code:
+return the complete corrected source file, preserving unrelated lines and public names.
+The application will compute the unified diff deterministically from originalCode.
+If returning format diff, use the target path in the request (otherwise a/source and b/source),
+with exact hunk counts and unchanged context. The patch must apply without fuzzy matching.
 For generate mode return standalone source code. code and tests
 are plain strings (no markdown fences). explanation is a short string. assumptions,
 dependencies, security_considerations, validation_instructions are arrays of short
 strings, or one short string when there is only one item. tests is a plain string or array of short strings containing a focused suggested test or regression test procedure, never a
 claim of test execution. Include expected inputs/outputs and compatibility limits.
 sources is an array of IDs found in retrieved_context. Do not invent sources or
-dependencies. ${retryInvalid ? "" : "A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs, and ensure reviews contain actual unified diff headers and hunks."}
+dependencies. ${retryInvalid ? "" : "A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs. For reviews use format code with complete corrected source; do not calculate diff hunks yourself."}
 UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
             retrieval_status: retrieval.status, retrieved_context: retrieval.sources })}` },
       ], { json: true });
       const proposal = parseObject(response.text, CODE_FIELDS);
+      if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16000)) {
+        const target = clean.request.match(/unified diff for a\/([\w./-]+) and b\/\1(?:[.\s]|$)/)?.[1] || "source";
+        proposal.code = require("diff").createTwoFilesPatch(`a/${target}`, `b/${target}`, clean.originalCode, proposal.code, "", "");
+        proposal.format = "diff";
+      }
       // Hosted responses sometimes encode a single textual item as a string.
       // Normalize only these known text-list fields; objects and oversized items still fail.
       for (const field of ["assumptions", "dependencies", "security_considerations", "validation_instructions"]) {
@@ -110,6 +117,15 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
         throw invalid();
       }
       if (proposal.format === "diff" && (!/^--- /m.test(proposal.code) || !/^\+\+\+ /m.test(proposal.code) || !/^@@ /m.test(proposal.code))) throw invalid();
+      if (input.mode === "review") {
+        try {
+          const { parsePatch, applyPatch } = require("diff");
+          const patches = parsePatch(proposal.code, { strict: true });
+          if (patches.length !== 1 || !patches[0].hunks.length) throw invalid();
+          const changed = applyPatch(clean.originalCode, patches[0], { fuzzFactor: 0 });
+          if (changed === false || changed === clean.originalCode || changed.length > 16000) throw invalid();
+        } catch { throw invalid(); }
+      }
       const sources = resolveSources(proposal.sources, retrieval.sources);
       const validation = await this.validator(input.language, proposal.code, proposal.format);
       return { status: "complete", advisory: true, language: input.language, mode: input.mode,
