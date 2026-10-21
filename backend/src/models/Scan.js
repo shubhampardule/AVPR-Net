@@ -12,6 +12,7 @@ const scanSchema = new mongoose.Schema(
     cancelledAt: { type: Date, default: null },
     coverage: { type: [mongoose.Schema.Types.Mixed], default: [] },
     rulesHash: { type: String, default: null },
+    normalizerHash: { type: String, default: null },
     organization: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",

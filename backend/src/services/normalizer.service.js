@@ -29,6 +29,21 @@ class NormalizerService {
     return rel;
   }
 
+  static isPythonTestFile(filePath) {
+    const normalizedPath = String(filePath || "").replace(/\\/g, "/").toLowerCase();
+    const segments = normalizedPath.split("/").filter(Boolean);
+    const fileName = segments.at(-1) || "";
+    const testDirectory = segments.slice(0, -1).some((segment) =>
+      ["test", "tests", "__tests__", "spec", "specs"].includes(segment)
+    );
+    const testFileName = /^(?:test|spec)\.py$/.test(fileName)
+      || /^(?:test|spec)_.*\.py$/.test(fileName)
+      || /.*_(?:test|spec)\.py$/.test(fileName)
+      || fileName === "conftest.py";
+
+    return fileName.endsWith(".py") && (testDirectory || testFileName);
+  }
+
   static normalizeSemgrep(results, workspacePath) {
     return results.map((item) => {
       const filePath = this.cleanFilePath(item.path, workspacePath);
@@ -83,7 +98,9 @@ class NormalizerService {
   }
 
   static normalizeBandit(results, workspacePath) {
-    return results.map((item) => {
+    return results.filter((item) =>
+      !(item.test_id === "B101" && this.isPythonTestFile(item.filename))
+    ).map((item) => {
       const filePath = this.cleanFilePath(item.filename, workspacePath);
       const startLine = item.line_number || 1;
       const endLine = item.line_range ? item.line_range[item.line_range.length - 1] : startLine;

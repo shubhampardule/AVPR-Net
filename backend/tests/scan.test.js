@@ -87,6 +87,32 @@ describe("Scan Pipeline Core Logic Unit Tests", () => {
       expect(normalized[0].cwe).toBe("CWE-79: Cross-site Scripting");
       expect(normalized[0].severity).toBe("critical");
     });
+
+    it("suppresses Bandit assert warnings in Python test files only", () => {
+      const findings = [
+        { test_id: "B101", filename: "/tmp/workspace/tests/test_auth.py", line_number: 3 },
+        { test_id: "B101", filename: "/tmp/workspace/src/parser_test.py", line_number: 8 },
+        { test_id: "B101", filename: "/tmp/workspace/src/auth.py", line_number: 12 },
+        { test_id: "B105", filename: "/tmp/workspace/tests/test_auth.py", line_number: 15 },
+      ];
+
+      const normalized = NormalizerService.normalize("bandit", findings, "/tmp/workspace");
+
+      expect(normalized.map(({ ruleId, filePath }) => ({ ruleId, filePath }))).toEqual([
+        { ruleId: "B101", filePath: expect.stringContaining("auth.py") },
+        { ruleId: "B105", filePath: expect.stringContaining("test_auth.py") },
+      ]);
+      expect(normalized[0].filePath.replace(/\\/g, "/")).toMatch(/src\/auth\.py$/);
+      expect(normalized[1].filePath.replace(/\\/g, "/")).toMatch(/tests\/test_auth\.py$/);
+    });
+
+    it("recognizes common Python test naming and directory conventions", () => {
+      expect(NormalizerService.isPythonTestFile("tests/test_auth.py")).toBe(true);
+      expect(NormalizerService.isPythonTestFile("src/parser_test.py")).toBe(true);
+      expect(NormalizerService.isPythonTestFile("C:\\repo\\specs\\auth.py")).toBe(true);
+      expect(NormalizerService.isPythonTestFile("src/auth.py")).toBe(false);
+      expect(NormalizerService.isPythonTestFile("src/latest.py")).toBe(false);
+    });
   });
 
   describe("DeduplicatorService", () => {

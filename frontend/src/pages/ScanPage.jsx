@@ -92,7 +92,7 @@ export default function ScanPage() {
       {active && <p aria-live="polite" className="text-amber-200 text-sm">{scan.status === "queued" ? "Waiting for the worker…" : "Scanning the pinned commit…"}</p>}
       {scan.errorMessage && <p className="text-red-200 text-sm">{scan.errorMessage}</p>}
       {scan.scannerErrors?.length > 0 && <div className="text-amber-200 text-sm"><strong>Incomplete scanner coverage</strong>{scan.scannerErrors.map((e, i) => <p key={i}>{e.scanner}: {e.message}</p>)}</div>}
-      <details><summary className="text-sm cursor-pointer">Scanner coverage and provenance</summary><pre className="text-xs whitespace-pre-wrap mt-2 text-slate-400">{JSON.stringify({ coverage: scan.coverage, rulesHash: scan.rulesHash }, null, 2)}</pre></details>
+      <details><summary className="text-sm cursor-pointer">Scanner coverage and provenance</summary><pre className="text-xs whitespace-pre-wrap mt-2 text-slate-400">{JSON.stringify({ coverage: scan.coverage, rulesHash: scan.rulesHash, normalizerHash: scan.normalizerHash }, null, 2)}</pre></details>
       <div className="flex flex-wrap gap-2"><a className={button} href={`${endpoint}/${scanId}/export?format=json`}>Export JSON</a><a className={button} href={`${endpoint}/${scanId}/export?format=sarif`}>Export SARIF</a>
         <button className={button} disabled={scan.status !== "completed"} onClick={compare}>Compare with previous scan</button></div>
     </section>}

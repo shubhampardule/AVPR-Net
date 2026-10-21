@@ -90,11 +90,21 @@ const processScanJobInternal = async (job, controller) => {
     scan.scannerErrors = scannerErrors;
     scan.coverage = coverage;
     scan.rulesHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../scanners/rules.yml"))).digest("hex");
+    scan.normalizerHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../services/normalizer.service.js"))).digest("hex");
 
     // Step 4: Normalize raw findings from all scanners
     let allNormalized = [];
     for (const res of results) {
       const normalized = NormalizerService.normalize(res.scanner, res.findings, workspacePath);
+      const coverageEntry = scan.coverage.find((entry) => entry.scanner === res.scanner);
+      if (coverageEntry) {
+        coverageEntry.rawFindings = res.findings.length;
+        coverageEntry.retainedFindings = normalized.length;
+        coverageEntry.suppressedFindings = Math.max(0, res.findings.length - normalized.length);
+        coverageEntry.suppressionPolicy = res.scanner === "bandit"
+          ? "Bandit B101 findings in recognized Python test files are suppressed."
+          : "none";
+      }
       console.info(
         `[ScanWorker] ${res.scanner}: raw=${res.findings.length} normalized=${normalized.length}`
       );
@@ -191,6 +201,7 @@ const processScanJobInternal = async (job, controller) => {
     const finalized = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
       { $set: { status: scan.status, completedAt: scan.completedAt, summary, coverage: scan.coverage,
         scannersUsed: scan.scannersUsed, scannerErrors: scan.scannerErrors, rulesHash: scan.rulesHash,
+        normalizerHash: scan.normalizerHash,
         commitSha: scan.commitSha, activeKey: null, leaseUntil: null, leaseToken: null } });
     if (!finalized) throw new Error("Scan was cancelled before completion");
 

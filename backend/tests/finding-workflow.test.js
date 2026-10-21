@@ -3,7 +3,7 @@ jest.mock("../src/models/Finding", () => ({ find: jest.fn() }));
 const Scan = require("../src/models/Scan"), Finding = require("../src/models/Finding");
 const { compare, exportScan } = require("../src/services/finding-workflow.service");
 const coverage = [{ scanner: "semgrep", version: "1", scanned: 10, skipped: null, filesHash: "same-files" }];
-const scan = { _id: "current", organization: "org", owner: "owner", repo: "repo", status: "completed", createdAt: new Date(), commitSha: "a".repeat(40), scannersUsed: ["semgrep"], scannerErrors: [], rulesHash: "rules", coverage };
+const scan = { _id: "current", organization: "org", owner: "owner", repo: "repo", status: "completed", createdAt: new Date(), commitSha: "a".repeat(40), scannersUsed: ["semgrep"], scannerErrors: [], rulesHash: "rules", normalizerHash: "normalizer-v1", coverage };
 const chain = data => ({ sort() { return this; }, limit() { return this; }, lean: async () => data });
 beforeEach(() => jest.resetAllMocks());
 test("comparison identifies fixed issues only with matching successful coverage", async () => {
@@ -19,6 +19,14 @@ test("a partial scan cannot report missing issues as fixed", async () => {
   Scan.findOne.mockReturnValue(chain({ ...scan, _id: "previous" }));
   Finding.find.mockReturnValueOnce(chain([])).mockReturnValueOnce(chain([{ fingerprint: "old" }]));
   const result = await compare("current"); expect(result.canInferFixed).toBe(false); expect(result.fixed).toEqual([]);
+});
+test("a changed normalization policy cannot classify filtered findings as fixed", async () => {
+  Scan.findById.mockReturnValue({ lean: async () => scan });
+  Scan.findOne.mockReturnValue(chain({ ...scan, _id: "previous", normalizerHash: "normalizer-v0" }));
+  Finding.find.mockReturnValueOnce(chain([])).mockReturnValueOnce(chain([{ fingerprint: "filtered-by-new-policy" }]));
+  const result = await compare("current");
+  expect(result.canInferFixed).toBe(false);
+  expect(result.fixed).toEqual([]);
 });
 test("SARIF retains exact source provenance and scanner risk separately", async () => {
   Scan.findById.mockReturnValue({ lean: async () => scan });

@@ -14,7 +14,10 @@ async function compare(scanId) {
   const current = await records(scanId), before = previous ? await records(previous._id) : [];
   const key = f => f.correlationKey || f.fingerprint;
   const currentKeys = new Set(current.map(key)), previousKeys = new Set(before.map(key));
-  const coverageMatches = previous && JSON.stringify([...(scan.scannersUsed || [])].sort()) === JSON.stringify([...(previous.scannersUsed || [])].sort()) && scan.rulesHash && scan.rulesHash === previous.rulesHash;
+  const coverageMatches = previous
+    && JSON.stringify([...(scan.scannersUsed || [])].sort()) === JSON.stringify([...(previous.scannersUsed || [])].sort())
+    && scan.rulesHash && scan.rulesHash === previous.rulesHash
+    && scan.normalizerHash && scan.normalizerHash === previous.normalizerHash;
   const completeCoverage = previous && (scan.coverage || []).length > 0 && (scan.coverage || []).every(current => {
     const old = previous.coverage?.find(item => item.scanner === current.scanner);
     return old && old.version === current.version && current.filesHash && current.filesHash === old.filesHash;
@@ -23,7 +26,7 @@ async function compare(scanId) {
   return { scanId, commitSha: scan.commitSha, previousScanId: previous?._id || null, canInferFixed,
     new: current.filter(f => !previousKeys.has(key(f))), persistent: current.filter(f => previousKeys.has(key(f))),
     fixed: canInferFixed ? before.filter(f => !currentKeys.has(key(f))) : [],
-    limitation: "Comparison uses evidence identities; moved or edited code can change identity. Missing issues are only classified fixed with matching successful scanner/rules coverage." };
+    limitation: "Comparison uses evidence identities; moved or edited code can change identity. Missing issues are only classified fixed when successful scanner, rules, file, and normalization-policy coverage match." };
 }
 async function exportScan(scanId, format) {
   const scan = await Scan.findById(scanId).lean();
