@@ -74,6 +74,10 @@ export default function Assistant({ demo = false }) {
   const [query, setQuery] = useState("Repeated SSH authentication failures");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [loadBusy, setLoadBusy] = useState(false);
+  const [loadRevision, setLoadRevision] = useState(0);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [draftContext, setDraftContext] = useState(null);
   const [patchCheck, setPatchCheck] = useState(null);
@@ -124,17 +128,23 @@ export default function Assistant({ demo = false }) {
   }
 
   useEffect(() => {
+    eventTextEdited.current = false;
+    requestEdited.current = false;
+    setResult(null); setError(""); setLoadError(""); setHealth(null); setPolicy(null); setKnowledge(null); setFixtures(null);
+    setBusy(false); setPatchCheck(null); setPullRequest(null); setAcknowledged(false); setConsentFor(null);
+    setLoadBusy(false); setFindingPreview(null); setFindingPreviewError(""); setDraftContext(null);
+    setEventText(""); setRequest("");
+  }, [base]);
+
+  useEffect(() => {
     if (!base) return;
     let live = true;
     const controller = new AbortController();
-    eventTextEdited.current = false;
-    requestEdited.current = false;
-    setResult(null); setError(""); setHealth(null); setPolicy(null); setKnowledge(null); setBusy(false);
-    setEventText(""); setRequest("");
+    setLoadError(""); setLoadBusy(true);
     Promise.all([api("health", undefined, controller.signal), api("knowledge", undefined, controller.signal),
       api("fixtures", undefined, controller.signal), demo ? Promise.resolve({ hostedAiEnabled: true }) : api("policy", undefined, controller.signal)]).then(async ([h, k, f, p]) => {
       if (!live) return;
-      setHealth(h); setPolicy(p); setKnowledge(k); setFixtures(f);
+      setHealth(h); setPolicy(p); setKnowledge(k); setFixtures(f); setLoadError("");
       if (!eventTextEdited.current) setEventText(JSON.stringify(f.events.suspicious, null, 2));
       if (!requestEdited.current) setRequest(f.code.javascript.request);
       if (!demo && params.get("mode") === "review" && params.get("findingId")) {
@@ -144,9 +154,12 @@ export default function Assistant({ demo = false }) {
         setOriginalCode(source.originalCode);
         if (!requestEdited.current) setRequest(source.request);
       }
-    }).catch((e) => { if (live) setError(demo ? `${e.message}. Start the backend with npm run demo.` : e.message); });
+    }).catch((e) => { if (live) {
+      const message = demo ? `${e.message}. Start the backend with npm run demo.` : e.message;
+      setLoadError(message); setError("");
+    } }).finally(() => { if (live) setLoadBusy(false); });
     return () => { live = false; controller.abort(); pendingRequest.current?.abort(); };
-  }, [base]);
+  }, [base, loadRevision]);
 
   useEffect(() => {
     if (demo || !base || !/^[a-f0-9]{24}$/i.test(findingId.trim())) {
@@ -160,7 +173,7 @@ export default function Assistant({ demo = false }) {
       .then(value => { if (live) setFindingPreview(value); })
       .catch(e => { if (live && e.name !== "AbortError") setFindingPreviewError(e.message); }), 250);
     return () => { live = false; clearTimeout(timer); controller.abort(); };
-  }, [base, findingId, demo]);
+  }, [base, findingId, demo, previewRevision]);
 
   function loadCode(name) {
     const fixture = fixtures?.code[name];
@@ -229,7 +242,7 @@ export default function Assistant({ demo = false }) {
         </Link>
         <div className="flex items-center gap-3">
           <span className="text-xs text-[#89968F]">{demo ? "Sample-data demo" : "Organization assistant"}</span>
-          <ThemeToggle />
+          {demo && <ThemeToggle />}
         </div>
       </div>
       <header className="space-y-4 border-b border-white/[0.08] pb-6 pt-2">
@@ -254,7 +267,10 @@ export default function Assistant({ demo = false }) {
             aria-current={tab === id ? "page" : undefined}
             className={`-mb-px border-b-2 px-1 py-3 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#A2C7AE] ${tab === id ? "border-[#78A88B] font-semibold text-[#E8EEEB]" : "border-transparent text-[#9BA8A1] hover:text-[#E8EEEB] disabled:opacity-50"}`}>{label}</button>)}
       </nav>
-      {error && <p role="alert" className="rounded-md border border-rose-400/30 bg-rose-400/10 p-4 text-sm text-rose-200">{error}</p>}
+      {(loadError || error) && <div role="alert" className="rounded-md border border-rose-400/30 bg-rose-400/10 p-4 text-sm text-rose-200">
+        <p>{loadError || error}</p>
+        {loadError && <button type="button" disabled={loadBusy} className="mt-3 rounded border border-rose-100/25 px-3 py-1.5 text-xs font-semibold hover:bg-rose-100/10 disabled:opacity-50" onClick={() => setLoadRevision(value => value + 1)}>{loadBusy ? "Retrying setup…" : "Retry setup"}</button>}
+      </div>}
       {!demo && !organizationId && <p className="text-sm text-amber-200">Select an organization to use the assistant.</p>}
       {!demo && organizationId && policy && hostedAiBlocked && <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100">Hosted AI is disabled for this organization. An owner or admin can enable it in <Link className="underline" to="/settings">Workspace settings</Link>.</p>}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -266,7 +282,9 @@ export default function Assistant({ demo = false }) {
             </label>}
             {findingIdFormatInvalid && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding ID must contain exactly 24 hexadecimal characters.</p>}
             {findingId.trim() && !demo && findingPreviewPending && !findingPreviewError && <p role="status" className="text-xs text-[#9BA8A1]">Loading sanitized finding preview…</p>}
-            {findingPreviewError && tab === "investigate" && <p role="alert" className="text-xs text-rose-200">Finding preview: {findingPreviewError}</p>}
+            {findingPreviewError && tab === "investigate" && <div role="alert" className="text-xs text-rose-200">Finding preview: {findingPreviewError}
+              <button type="button" className="ml-2 underline underline-offset-2" onClick={() => setPreviewRevision(value => value + 1)}>Retry preview</button>
+            </div>}
             <div className="flex gap-2">{["suspicious", "benign"].map((name) => <button key={name} type="button" disabled={!fixtures || busy}
               onClick={() => { setEventText(JSON.stringify(fixtures.events[name], null, 2)); setFindingId(""); }}
               className="rounded-md border border-white/15 px-3 py-1.5 text-xs capitalize transition-colors hover:border-white/30 hover:bg-white/[0.03] disabled:opacity-50">{name} fixture</button>)}</div>

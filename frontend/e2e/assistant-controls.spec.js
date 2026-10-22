@@ -5,12 +5,20 @@ const findingId = "64b64c0f8bd4f4f86f39b123";
 const originalCode = "export function parsePort(value) { return parseInt(value, 10); }\n";
 const proposalCode = "export function parsePort(value) {\n  if (!/^\\d+$/.test(value)) throw new Error('invalid port');\n  return Number(value);\n}\n";
 
-async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured" } = {}) {
+async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0 } = {}) {
+  let healthFailureCount = 0;
+  let previewFailureCount = 0;
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
     let data = {};
+
+    if (path.endsWith("/ai/health") && healthFailureCount < healthFailures) {
+      healthFailureCount += 1;
+      await route.fulfill({ status: 503, json: { success: false, error: { message: "Provider health check timed out." } } });
+      return;
+    }
 
     if (path.endsWith("/auth/me")) data = { user: { id: "assistant-test-user", name: "Assistant Test" } };
     else if (path.endsWith("/organizations")) data = { organizations: [{ id: "assistant-org", name: "Assistant Test Org", role: "owner" }] };
@@ -33,6 +41,11 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
       },
       provenance: "Synthetic assistant-control fixture",
     };
+    else if (path.endsWith(`/ai/preview/finding/${findingId}`) && previewFailureCount < previewFailures) {
+      previewFailureCount += 1;
+      await route.fulfill({ status: 503, json: { success: false, error: { message: "Finding preview service unavailable." } } });
+      return;
+    }
     else if (path.endsWith(`/ai/preview/finding/${findingId}`)) data = {
       findingId, original: { title: "Unsafe port parsing", scanner: "semgrep", filePath: "src/ports.js", startLine: 4 },
     };
@@ -78,6 +91,24 @@ async function approve(page) {
   await consent.check();
   return consent;
 }
+
+test("signed-in assistant exposes one working theme toggle at desktop and mobile widths", async ({ page }) => {
+  await mockAssistant(page);
+  await page.goto("/assistant");
+  const themeToggle = page.getByRole("button", { name: /^Use (light|dark) appearance$/ });
+
+  await expect(themeToggle).toHaveCount(1);
+  const before = await themeToggle.getAttribute("aria-label");
+  await themeToggle.click();
+  await expect(themeToggle).not.toHaveAttribute("aria-label", before);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(themeToggle).toHaveCount(1);
+  const mobileBefore = await themeToggle.getAttribute("aria-label");
+  await themeToggle.click();
+  await expect(themeToggle).not.toHaveAttribute("aria-label", mobileBefore);
+  await expect(themeToggle).toHaveCount(1);
+});
 
 test("assistant investigation fixtures, tabs, evidence details, consent and submission work", async ({ page }) => {
   const pageErrors = [];
@@ -165,6 +196,26 @@ test("assistant reports the provider connected after a successful request", asyn
   await page.getByRole("button", { name: "Analyze evidence" }).click();
   await expect(page.getByText("Synthetic evidence reviewed.")).toBeVisible();
   await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
+});
+
+test("assistant setup failures offer a working retry", async ({ page }) => {
+  // React StrictMode intentionally runs the initial effect twice in development.
+  await mockAssistant(page, { healthFailures: 2 });
+  await page.goto("/assistant");
+  await expect(page.getByRole("alert")).toContainText("Provider health check timed out.");
+  await page.getByRole("button", { name: "Retry setup" }).click();
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("assistant finding preview failures offer a working retry", async ({ page }) => {
+  await mockAssistant(page, { previewFailures: 1 });
+  await page.goto("/assistant");
+  await page.getByLabel("Finding ID").fill(findingId);
+  await expect(page.getByRole("alert")).toContainText("Finding preview service unavailable.");
+  await page.getByRole("button", { name: "Retry preview" }).click();
+  await expect(page.getByLabel("Sanitized data preview")).toContainText("Unsafe port parsing");
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("assistant code controls submit the selected review, copy and download the proposal", async ({ page }) => {
