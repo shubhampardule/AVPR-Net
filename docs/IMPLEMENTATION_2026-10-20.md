@@ -153,5 +153,31 @@ Backend tests cover removed, live, and temporarily unavailable installations;
 a browser journey verifies the reconnection flow. After this follow-up the
 local run passed 32 backend suites / 259 tests, 5 frontend unit-test files / 12
 tests, and 64 Playwright journeys. The production build and frontend plus
-production dependency audits passed. CI and production deployment checks for
-this follow-up are pending its push.
+production dependency audits passed. At the time of that entry, CI and
+production deployment checks were pending; the final result is recorded below.
+
+## Final production and CI verification (2026-10-21)
+
+The CI workflow now pins `actions/checkout`, `actions/setup-node`, and the
+failure-only artifact upload action to verified immutable release SHAs. Both
+jobs use Ubuntu 24.04 explicitly to avoid changing runner images during the
+Ubuntu 26 migration. The final run for `77df690` passed 32 backend suites /
+259 tests, 5 frontend test files / 12 tests, the frontend build, production
+dependency audits, the tracked-file secret-pattern check, all 64 Playwright
+journeys, and the isolated scanner contract. The former Node 20 and
+`ubuntu-latest` migration annotations are gone.
+
+Vercel completed the deployment for `77df690`; the production health endpoint
+reported that exact revision, a connected MongoDB database, and NVIDIA as
+configured (provider reachability is not reported by the health endpoint).
+The signed-in production owner workspace reloaded successfully with the two
+authorized repositories. The repository-access dialog refreshed access and
+confirmed the same list; the assistant appearance toggle switched to light
+and back to the original dark setting. No production browser console warnings
+or errors were reported.
+
+The backend's full development audit still includes the previously recorded
+moderate `sprintf-js` advisory through Jest; npm offers no compatible fix, and
+the production-only audits remain clean. A fresh non-owner OAuth and GitHub
+App installation journey still requires a separate test account and has not
+been represented as verified by the owner-account smoke checks.
