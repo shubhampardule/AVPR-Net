@@ -1,6 +1,8 @@
-# SecurePatch: move from prototype to private beta
+# AVPR-Net: move from prototype to private beta
 
-SecurePatch already has a real product path: GitHub and Google sign-in, team
+> Status reconciliation, 22 October 2026: use the [17 consolidated remaining work packages](../plan.md#consolidated-remaining-work--reconciled-22-october-2026) as the current backlog. This document groups overlapping beta criteria; its GitHub settings observations need live rechecking. Account and organization deletion are now implemented locally, with live acceptance and production release still pending. Local inference is outside the current scope.
+
+AVPR-Net already has a real product path: GitHub and Google sign-in, team
 workspaces, an installed GitHub App, private-repository scans, a persistent
 worker, findings with commit provenance, review status, JSON/SARIF exports and
 NVIDIA-backed assistance. The deployed app was verified against a real private
@@ -27,6 +29,9 @@ push/pull-request rescans are not live.
   Handle installation permission updates and declined requests clearly.
 - Exercise installation selection, revocation, branch protection and retries
   against a disposable repository before enabling this for external teams.
+- Surface GitHub primary and secondary rate limits as retryable responses with
+  the reset or `Retry-After` delay. Do not automatically retry requests while
+  GitHub is limiting the App.
 
 ### 2. Measure scanner quality before making coverage claims
 
@@ -56,16 +61,35 @@ precision or recall on real projects. See the [rule inventory and limitations](S
 Team settings now create seven-day, single-use invitation links. Only a hash is
 stored; the recipient must sign in with the exact verified email, and acceptance
 and membership activation happen in one transaction. Owners and admins can see
-open invitations and revoke them. Link delivery is manual because no mail
-provider is configured.
+open invitations and revoke them. Manual link delivery remains the default. An optional Resend adapter is now implemented locally with explicit sender opt-in and safe provider-acceptance status; verified sender configuration, live receipt and delivery/bounce callbacks remain pending. See [invitation email](INVITATION_EMAIL.md). Owners/admins can review recent organization activity
+for invitation creation, acceptance, and revocation; mail delivery status remains
+unavailable. **Ownership transfer is implemented:** an owner selects an active
+admin or developer, confirms the exact organization name, and transfers both
+roles in one MongoDB transaction. The former owner becomes an admin, the new
+owner is recorded in the security activity log, and the settings page refreshes
+the caller's permissions.
 
-- Add a mail provider with delivery status, expiry, resend and invitation audit
-  history. Do not add passwords when OAuth is already used.
+An active non-owner can leave from workspace settings after typing the exact
+organization name. The membership is suspended in a transaction, and the API
+requires an active owner to remain. An owner must transfer ownership before
+leaving. The exit is recorded in the organization activity log.
+
+Owners/admins can also download a JSON export of organization membership,
+invitations, repository automation settings, scan/finding summaries and review
+history, audit events, and remediation verification records. Source files,
+dedicated evidence snippets, raw scanner stderr, OAuth/session credentials,
+GitHub installation IDs, and invitation token hashes are omitted. A synchronous
+export is limited to 25,000 records and fails clearly instead of returning a
+truncated file.
+
+- Configure and live-test the optional mail provider, then add delivery/bounce
+  confirmation. Link expiry, rotation and email cooldown are implemented.
+  Do not add passwords when OAuth is already used.
 - Test joining, leaving, removal, owner transfer, account linking and re-entry
-  across multiple organizations.
-- Add account and organization deletion/export flows with a documented data
-  retention period for scans, source excerpts, findings, AI request metadata
-  and backups.
+  across multiple organizations with a live non-owner account.
+- Account and organization deletion are implemented locally. Complete live
+  acceptance and release validation, and finalize retention for scans, source
+  excerpts, findings, AI request metadata, logs, and backups.
 
 ### 4. Explain customer data handling before they connect a repository
 

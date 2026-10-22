@@ -1,4 +1,4 @@
-# SecurePatch - Security Scanning Pipeline Setup & Architecture Guide
+# AVPR-Net - Security Scanning Pipeline Setup & Architecture Guide
 
 Optional hosted NVIDIA integration: see [provider setup and diagnostics](docs/NVIDIA_PROVIDER.md)
 and the [repository audit and phased implementation status](docs/NVIDIA_HACKATHON_PLAN.md).
@@ -66,7 +66,7 @@ or provider credentials in a VITE_ variable.
 
 ## Overview
 
-SecurePatch features an asynchronous, orchestrated security scan pipeline powered by:
+AVPR-Net features an asynchronous, orchestrated security scan pipeline powered by:
 - **GitHub App Installation-Scoped Authentication**: Ephemerally downloads authorized repository zipballs via Octokit (no `git clone`, no permanent source code stored in MongoDB).
 - **Ephemeral Workspace Execution**: Extracts code to a temporary directory (`os.tmpdir()`), runs scanners, and cleans up completely in a `finally` block.
 - **Scanner Orchestration Layer**: Pluggable adapters (`SemgrepAdapter`, `BanditAdapter`) executed independently of web request controllers.
