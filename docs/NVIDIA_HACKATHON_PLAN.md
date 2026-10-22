@@ -2,6 +2,13 @@
 
 Audit date: 2026-10-19. Workspace: `C:\Users\shubh\Downloads\AVPR-Net`.
 
+> **Historical audit and implementation log.** Phase notes below describe the
+> workspace at the stated audit dates and are retained as project history; they
+> are not a current status report. For current behavior, deployment, and known
+> limits, use the [current architecture](CURRENT_ARCHITECTURE.md), the
+> [implementation and verification record](IMPLEMENTATION_2026-10-20.md), and
+> the [private-beta roadmap](PRODUCT_ROADMAP.md).
+
 ## Phase 0 — repository discovery (complete)
 
 The repository source is present. This directory is not a Git checkout: both

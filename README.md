@@ -14,15 +14,20 @@ Production: https://avpr-psi.vercel.app/
 
 See [audit remediation and new workflows](docs/IMPLEMENTATION_2026-10-20.md) for
 current capabilities, resource limits, verification and external setup.
+See the [current architecture and shipped-feature boundary](docs/CURRENT_ARCHITECTURE.md)
+for the implementation reference. The separate v1.0 specification archive is
+indexed as a proposed target in [its status page](docs/SPECIFICATION_ARCHIVE.md).
 See the [private beta roadmap](docs/PRODUCT_ROADMAP.md) for the concrete work
 needed before teams can rely on SecurePatch beyond an internal pilot.
 
 ## Architecture and responsibilities
 
-- **Scanning path:** React -> authenticated Express API -> Vercel Queues in production; local development uses BullMQ/Redis when `REDIS_URL` is set, otherwise an in-process worker -> authorized GitHub archive -> scanners
-  worker -> authorized GitHub archive -> Semgrep/Bandit -> normalization and
-  SHA-256 deduplication -> occurrence counts -> deterministic weighted risk ->
-  MongoDB findings. Temporary source workspaces are cleaned up by the worker.
+- **Scanning path:** React -> authenticated Express API -> Vercel Queues in
+  production (local BullMQ/Redis when configured, otherwise an in-process
+  worker) -> authorized GitHub archive pinned to a commit -> Semgrep/Bandit,
+  credential-pattern checks, and optional npm/OSV advisory checks -> finding
+  normalization, deduplication, occurrence and heuristic risk -> MongoDB.
+  Temporary source workspaces are cleaned up by the worker.
 - **AI path:** authorized finding or supplied structured event/code request ->
   best-effort minimization -> NVIDIA query embeddings -> local cosine retrieval
   -> retrieved excerpts and original evidence -> hosted Nemotron chat -> bounded

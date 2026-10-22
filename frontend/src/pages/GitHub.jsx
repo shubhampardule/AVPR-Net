@@ -21,6 +21,7 @@ export default function GitHub() {
   const [connected, setConnected] = useState(false);
   const [installations, setInstallations] = useState([]);
   const [selectedInstallation, setSelectedInstallation] = useState("");
+  const [installationRevoked, setInstallationRevoked] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [installAppUrl, setInstallAppUrl] = useState(null);
 
@@ -50,6 +51,7 @@ const fetchGitHubStatus = async (isRefresh = false) => {
 
     const isConnected = Boolean(body.data?.connected);
     const connectedInstallation = body.data?.installation || null;
+    setInstallationRevoked((current) => Boolean(body.data?.revoked || (current && !isConnected)));
     setConnected(isConnected);
     setInstallation(connectedInstallation);
     setInstallationUrl(connectedInstallation?.htmlUrl || null);
@@ -73,8 +75,12 @@ const fetchGitHubStatus = async (isRefresh = false) => {
     ]);
     const [installData, appData] = await Promise.all([installResponse.json(), appResponse.json()]);
     if (!installResponse.ok || !appResponse.ok) throw new Error("Unable to load GitHub App access.");
-    setInstallations(installData.data || []);
-    setSelectedInstallation(installData.data?.[0]?.id?.toString() || "");
+    const revokedId = body.data?.revokedInstallationId;
+    const availableInstallations = (installData.data || []).filter((item) =>
+      revokedId == null || String(item.id) !== String(revokedId)
+    );
+    setInstallations(availableInstallations);
+    setSelectedInstallation(availableInstallations[0]?.id?.toString() || "");
     setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
     return { connected: false, account: null, repositories: [] };
   } catch (err) {
@@ -103,6 +109,7 @@ useEffect(() => {
     setError(null);
     setStatusUnavailable(false);
     setConnected(false);
+    setInstallationRevoked(false);
     setInstallation(null);
     setInstallationUrl(null);
     setRepositories([]);
@@ -211,6 +218,7 @@ const connectInstallation = async () => {
           <section className="mb-6 rounded-xl border border-border-subtle bg-bg-secondary p-6">
             <h2 className="font-semibold">Connect your GitHub account</h2>
             <p className="mt-2 text-sm text-text-secondary">Sign in with GitHub to authorize your identity. App installation is separate: if no installation is listed, install AVPR-Net on the GitHub account that owns the repositories, then return and connect it here.</p>
+            {installationRevoked && <p role="status" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-100">GitHub reports that AVPR-Net was removed from this organization. Reinstall the app, then connect its new installation here.</p>}
             <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-black"><GithubIcon className="h-4 w-4" /> Sign in with GitHub</a>
             {installAppUrl && <a href={installAppUrl} className="ml-4 inline-flex items-center gap-2 text-sm text-accent-blue">Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
             {installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">

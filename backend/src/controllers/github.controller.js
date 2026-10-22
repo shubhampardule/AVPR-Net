@@ -89,12 +89,29 @@ const getGitHubStatus = async (req, res, next) => {
       });
     }
 
-    const { data: installation } = await githubApp.octokit.request(
-      "GET /app/installations/{installation_id}",
-      {
-        installation_id: organization.githubInstallationId,
+    let installation;
+    try {
+      ({ data: installation } = await githubApp.octokit.request(
+        "GET /app/installations/{installation_id}",
+        { installation_id: organization.githubInstallationId }
+      ));
+    } catch (error) {
+      if (error.status !== 404) throw error;
+
+      const revokedInstallationId = String(organization.githubInstallationId);
+      organization.githubInstallationId = null;
+      await organization.save();
+      if (Array.isArray(req.session?.githubAccess?.installations)) {
+        req.session.githubAccess.installations = req.session.githubAccess.installations
+          .filter((item) => String(item.id) !== revokedInstallationId);
+        await new Promise((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
       }
-    );
+      return res.status(200).json({
+        success: true,
+        data: { connected: false, installation: null, revoked: true, revokedInstallationId },
+        message: "GitHub App access was removed. Reinstall it to restore repository access.",
+      });
+    }
 
     return res.status(200).json({
       success: true,

@@ -51,6 +51,10 @@ changes, not a rewrite of the original assessment or project history.
 - Weekly/monthly scans are opt-in and dispatched by the existing cloud worker.
 - Signed push/PR webhooks retain a bounded queue of commit SHAs; deliveries are
   deduplicated. Defaults are off. GitHub App webhook configuration is required.
+- If GitHub reports that a connected installation no longer exists, the status
+  route clears the stale organization binding and cached user authorization,
+  reports the revocation, and lets an owner/admin connect a replacement. A
+  transient GitHub API failure preserves the existing connection for retry.
 - Local credential pattern checks omit matched values. Optional npm lockfile
   v2/v3 advisory checks send package names/versions to OSV only when selected.
   Advisory matches use an explicitly unassessed medium baseline, not invented CVSS.
@@ -116,3 +120,38 @@ CI browser tests use explicit mocked API fixtures, without real OAuth credential
 or provider calls. Real production authentication and integration checks are
 separate from those deterministic tests. Do not describe mocked tests as proof
 of a live external permission or service.
+
+## Verification refresh (2026-10-21)
+
+After the workflow and assistant-control updates, the local verification suite
+passed: backend Jest 31 suites / 256 tests, frontend Vitest 5 files / 12 tests,
+Playwright 63 journeys, frontend production build, and `git diff --check`. The
+secret-pattern check covered 231 tracked files. The frontend full audit and
+both frontend/backend production-only audits reported zero vulnerabilities.
+The backend full development audit still reports the previously documented
+moderate `sprintf-js` advisory through Jest; there is no compatible fix in the
+current dependency chain, and Jest was not downgraded to silence the report.
+
+The live health endpoint was rechecked on revision `911d98f` and reported the
+MongoDB database connected and NVIDIA configured. Health configuration does
+not prove a provider request by itself; a separate production assistant smoke
+request with synthetic sample data succeeded during this verification period.
+The currently served production revision predates the latest frontend changes,
+so the single-toggle fix is not live until the following deployment completes.
+The latest GitHub Actions run for `911d98f` passed. The local Docker engine is
+unavailable on this machine, so the scanner-contract container was not rerun
+locally during this refresh; its latest CI run on that revision passed.
+
+## GitHub installation revocation follow-up (2026-10-21)
+
+The installation status route now treats GitHub's definitive 404 as a removed
+installation, clears the organization binding and the matching cached user
+authorization, and returns a recoverable disconnected state. Other GitHub API
+errors preserve the binding. The UI removes the revoked installation option,
+explains what changed, and allows an owner/admin to select a replacement.
+Backend tests cover removed, live, and temporarily unavailable installations;
+a browser journey verifies the reconnection flow. After this follow-up the
+local run passed 32 backend suites / 259 tests, 5 frontend unit-test files / 12
+tests, and 64 Playwright journeys. The production build and frontend plus
+production dependency audits passed. CI and production deployment checks for
+this follow-up are pending its push.

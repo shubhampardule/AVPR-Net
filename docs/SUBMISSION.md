@@ -5,6 +5,11 @@ prioritize findings and review proposed fixes. Production is available at
 https://avpr-psi.vercel.app/. The application is static analysis plus hosted AI
 assistance; it is not a trained network detector.
 
+For the current implementation boundary and service/data flow, see the
+[current architecture reference](CURRENT_ARCHITECTURE.md). The separate v1.0
+specification archive describes proposed target capabilities and is indexed
+in [the archive status page](SPECIFICATION_ARCHIVE.md).
+
 React/Vite and Express deploy under one Vercel domain. MongoDB stores sessions,
 organizations, evidence and review decisions. Vercel Queues and an unprivileged
 cloud daemon perform bounded, immutable-commit scans. Local operation can use

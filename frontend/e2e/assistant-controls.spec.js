@@ -14,10 +14,14 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     const path = url.pathname;
     let data = {};
 
-    if (path.endsWith("/ai/health") && healthFailureCount < healthFailures) {
-      healthFailureCount += 1;
-      await route.fulfill({ status: 503, json: { success: false, error: { message: "Provider health check timed out." } } });
-      return;
+    if (path.endsWith("/ai/health")) {
+      const shouldFailHealth = typeof healthFailures === "function"
+        ? await healthFailures(healthFailureCount++)
+        : healthFailureCount++ < healthFailures;
+      if (shouldFailHealth) {
+        await route.fulfill({ status: 503, json: { success: false, error: { message: "Provider health check timed out." } } });
+        return;
+      }
     }
 
     if (path.endsWith("/auth/me")) data = { user: { id: "assistant-test-user", name: "Assistant Test" } };
@@ -199,12 +203,13 @@ test("assistant reports the provider connected after a successful request", asyn
 });
 
 test("assistant setup failures offer a working retry", async ({ page }) => {
-  // React StrictMode intentionally runs the initial effect twice in development.
-  await mockAssistant(page, { healthFailures: 2 });
+  let retryEnabled = false;
+  await mockAssistant(page, { healthFailures: () => !retryEnabled });
   await page.goto("/assistant");
   await expect(page.getByRole("alert")).toContainText("Provider health check timed out.");
+  retryEnabled = true;
   await page.getByRole("button", { name: "Retry setup" }).click();
-  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible({ timeout: 15000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 

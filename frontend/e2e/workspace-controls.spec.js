@@ -35,6 +35,8 @@ function installWorkspaceApi(page, overrides = {}) {
     invitations: [{ id: "invite-1", email: "pending@example.com", role: "developer", status: "pending", expiresAt: "2026-10-27T00:00:00.000Z" }],
     hostedAiEnabled: true,
     connected: true,
+    revoked: false,
+    revokedInstallationId: 10,
     installations: [{ id: 10, account: "team" }, { id: 11, account: "team-labs" }],
     repositories: [{ id: 42, owner: "team", name: "project", fullName: "team/project", defaultBranch: "main", private: true }],
     files: [
@@ -103,13 +105,15 @@ function installWorkspaceApi(page, overrides = {}) {
         };
       }
     } else if (/\/github\/organizations\/[^/]+\/status$/.test(pathname)) {
-      if (!failOnce("githubStatus")) data = { connected: state.connected, installation: state.connected ? { htmlUrl: "https://github.com/settings/installations/10" } : null };
+      if (!failOnce("githubStatus")) data = state.revoked
+        ? { connected: false, installation: null, revoked: true, revokedInstallationId: state.revokedInstallationId }
+        : { connected: state.connected, installation: state.connected ? { htmlUrl: "https://github.com/settings/installations/10" } : null };
     } else if (/\/github\/organizations\/[^/]+\/repositories$/.test(pathname)) {
       if (!failOnce("repositories")) data = { repositories: state.repositories };
     } else if (pathname.endsWith("/github/installations")) data = state.installations;
     else if (pathname.endsWith("/github/test")) data = { slug: "avpr-net" };
     else if (/\/github\/organizations\/[^/]+\/connect$/.test(pathname) && method === "POST") {
-      if (!failOnce("connect")) { state.connected = true; data = { connected: true }; }
+      if (!failOnce("connect")) { state.connected = true; state.revoked = false; data = { connected: true }; }
     } else if (pathname.endsWith("/repositories/team/project/files")) {
       if (!failOnce("files")) data = { files: state.files };
     } else if (pathname.endsWith("/repositories/team/project/file")) {
@@ -334,6 +338,21 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(dialog).toBeVisible();
     await page.locator("div.fixed.inset-0").filter({ has: dialog }).click({ position: { x: 4, y: 4 } });
     await expect(dialog).toBeHidden();
+  });
+
+  test("a revoked installation is clearly explained and can be replaced", async ({ page }) => {
+    const state = installWorkspaceApi(page, { connected: false, revoked: true, revokedInstallationId: 10 });
+    await page.goto("/github");
+
+    await expect(page.getByRole("status")).toContainText("AVPR-Net was removed from this organization");
+    const installationOptions = await page.locator("#github-installation option").allTextContents();
+    expect(installationOptions).toEqual(["team-labs"]);
+    await page.getByLabel("GitHub installation").selectOption("11");
+    await page.getByRole("button", { name: "Connect installation" }).click();
+
+    await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+    expect(state.connected).toBe(true);
+    expect(state.revoked).toBe(false);
   });
 
   test("repository refresh, folder tree, file copy, automation edits, and scan navigation", async ({ page }) => {
