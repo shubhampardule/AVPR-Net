@@ -27,15 +27,15 @@ export default function Login() {
   };
 
   return (
-    <main className="min-h-screen bg-[#101416] text-[#E8EEEB]">
-      <header className="border-b border-white/[0.08]">
+    <main className="review-login min-h-screen bg-bg-primary text-text-primary">
+      <header className="border-b border-text-primary/[0.08]">
         <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
-          <a href="/" className="inline-flex items-center gap-2.5 text-[#E8EEEB]" aria-label="SecurePatch home">
+          <a href="/" className="inline-flex items-center gap-2.5 text-text-primary" aria-label="AVPR-Net home">
             <BrandLockup wordmarkClassName="text-base" />
           </a>
           <div className="flex items-center gap-4">
             <ThemeToggle />
-            <a href="/" className="inline-flex items-center gap-2 text-sm font-medium text-[#AEB9B3] transition-colors hover:text-white">
+            <a href="/" className="inline-flex items-center gap-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Return home
             </a>
           </div>
@@ -44,34 +44,35 @@ export default function Login() {
 
       <section className="mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl items-center gap-12 px-5 py-12 sm:px-8 lg:grid-cols-12 lg:gap-16 lg:px-10">
         <div className="max-w-xl space-y-6 lg:col-span-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#A8B9AF]">SecurePatch workspace</p>
-          <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] text-[#E8EEEB] sm:text-4xl lg:text-5xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-secondary">AVPR-Net workspace</p>
+          <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] text-text-primary sm:text-4xl lg:text-5xl">
             Review repository security in one workspace.
           </h1>
-          <p className="max-w-lg text-base leading-7 text-[#AEB9B3]">
+          <p className="max-w-lg text-base leading-7 text-text-secondary">
             Sign in with GitHub or Google, then choose an organization and authorize its repositories.
           </p>
         </div>
 
         <div className="mx-auto w-full max-w-md lg:col-span-6 lg:justify-self-end">
-          <div className="rounded-xl border border-white/[0.1] bg-[#171D1F] p-6 shadow-card sm:p-8">
-            <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#E8EEEB]">Sign in to SecurePatch</h2>
-            <p className="mt-2 text-sm leading-6 text-[#AEB9B3]">Choose an account to continue.</p>
+          <div className="rounded-xl border border-text-primary/[0.1] bg-bg-secondary p-6 shadow-card sm:p-8">
+            <h2 className="text-xl font-semibold tracking-[-0.02em] text-text-primary">Sign in to AVPR-Net</h2>
+            <p className="mt-2 text-sm leading-6 text-text-secondary">Choose an account to continue.</p>
 
-            {errorCode && <p role="alert" className="mt-5 rounded-md border border-red-400/25 bg-red-400/[0.06] p-3 text-sm leading-5 text-red-200">{errors[errorCode] || 'Sign-in failed. Please try again.'}</p>}
+            {query.get("account") === "deleted" && <p role="status" className="mt-5 rounded-md border border-text-primary/15 p-3 text-sm text-text-secondary">Your account was deleted. Signing in again creates a new account without your previous memberships.</p>}
+            {errorCode && <p role="alert" className="mt-5 rounded-md border border-severity-critical/25 bg-severity-critical/[0.06] p-3 text-sm leading-5 text-severity-critical">{errors[errorCode] || 'Sign-in failed. Please try again.'}</p>}
 
             <div className="mt-6 space-y-3">
-              <button type="button" disabled={isLoading} onClick={() => startSignIn('github')} className="flex h-11 w-full items-center justify-center gap-3 rounded-md border border-white/[0.16] bg-[#202729] text-sm font-semibold text-[#E8EEEB] transition-colors hover:bg-[#263032] disabled:cursor-wait disabled:opacity-60">
+              <button type="button" disabled={isLoading} onClick={() => startSignIn('github')} className="flex h-11 w-full items-center justify-center gap-3 rounded-md border border-accent-security bg-accent-security text-sm font-semibold text-on-accent transition-colors disabled:cursor-wait disabled:opacity-60">
                 <GithubIcon className="h-4 w-4" aria-hidden="true" /> Continue with GitHub
               </button>
-              <button type="button" disabled={isLoading} onClick={() => startSignIn('google')} className="flex h-11 w-full items-center justify-center gap-3 rounded-md bg-white text-sm font-semibold text-[#202729] transition-colors hover:bg-[#E8EEEB] disabled:cursor-wait disabled:opacity-60">
+              <button type="button" disabled={isLoading} onClick={() => startSignIn('google')} className="flex h-11 w-full items-center justify-center gap-3 rounded-md border border-border-light bg-bg-elevated text-sm font-semibold text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-wait disabled:opacity-60">
                 <GoogleIcon /> Continue with Google
               </button>
             </div>
 
-            <div className="mt-6 border-t border-white/[0.08] pt-5">
-              <p className="text-xs leading-5 text-[#89968F]">Repository access is controlled by each organization’s GitHub App installation.</p>
-              <p className="mt-4 text-xs font-medium text-[#A8B9AF]" role={isLoading ? 'status' : undefined}>{isLoading ? 'Connecting to your account…' : 'You can choose a repository after signing in.'}</p>
+            <div className="mt-6 border-t border-text-primary/[0.08] pt-5">
+              <p className="text-xs leading-5 text-text-muted">Repository access is controlled by each organization’s GitHub App installation.</p>
+              <p className="mt-4 text-xs font-medium text-text-secondary" role={isLoading ? 'status' : undefined}>{isLoading ? 'Connecting to your account…' : 'You can choose a repository after signing in.'}</p>
             </div>
           </div>
         </div>

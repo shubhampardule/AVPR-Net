@@ -37,6 +37,16 @@ function installWorkspaceApi(page, overrides = {}) {
     connected: true,
     revoked: false,
     revokedInstallationId: 10,
+    dashboardCurrentFindingsStatus: { repositoriesWithScans: 1, repositoriesWithSuccessfulBaseline: 1, repositoriesUsingEarlierSuccessfulResult: 0, repositoriesWithoutSuccessfulBaseline: 0 },
+    findingsFreshness: { repositoriesWithSuccessfulBaseline: 1, repositoriesUsingEarlierSuccessfulResult: 0, repositoriesWithoutSuccessfulBaseline: 0 },
+    auditEvents: [{ _id: "audit-1", actorLabel: "Demo Reviewer", action: "finding.reviewed", target: "finding/finding-1",
+      details: { repository: "team/project", status: "acknowledged" }, createdAt: "2026-10-21T10:00:00.000Z" }],
+    auditWriteFailed: false,
+    notifications: [{ _id: "notification-1", type: "scan.partial", title: "Scan needs review", body: "Some scanner coverage is missing. Review the scan before treating the repository as clean.",
+      href: "/github/team/project/scan?scanId=scan-1", scan: "scan-1", repository: "team/project", createdAt: "2026-10-21T10:00:00.000Z", readAt: null },
+      { _id: "notification-0", type: "scan.completed", title: "Scan completed", body: "2 findings detected · 0 critical · 1 high.",
+        href: "/github/team/project/scan?scanId=scan-0", scan: "scan-0", repository: "team/project", createdAt: "2026-10-20T10:00:00.000Z", readAt: "2026-10-20T10:05:00.000Z" }],
+    scanNotificationsEnabled: true,
     installations: [{ id: 10, account: "team" }, { id: 11, account: "team-labs" }],
     repositories: [{ id: 42, owner: "team", name: "project", fullName: "team/project", defaultBranch: "main", private: true }],
     files: [
@@ -100,7 +110,9 @@ function installWorkspaceApi(page, overrides = {}) {
         const name = state.organizations.find(org => org.id === pathname.split("/").at(-1))?.name || "Demo Team";
         data = {
           organization: { id: pathname.split("/").at(-1), name }, repositories: { connected: true, total: 1 },
-          totals: { scans: 2, findings: 2, criticalAndHigh: 1 }, riskDistribution: { critical: 0, high: 1, medium: 1, low: 0 },
+          totals: { scans: 2, findings: 2, criticalAndHigh: 1, currentFindings: 2, currentCriticalAndHigh: 1 }, riskDistribution: { critical: 0, high: 1, medium: 1, low: 0 },
+          currentRiskDistribution: { critical: 0, high: 1, medium: 1, low: 0 },
+          currentFindingsStatus: state.dashboardCurrentFindingsStatus,
           recentScans: [state.scans[0]], priorityFindings: [finding()], scannerStatus: { semgrep: { status: "completed", scanAt: "2026-10-20T00:00:00.000Z" } },
         };
       }
@@ -125,6 +137,14 @@ function installWorkspaceApi(page, overrides = {}) {
       if (status < 400) data = { settings: state.automation.settings, webhookReady: state.automation.webhookReady };
     } else if (pathname.endsWith("/organizations/org-a/members") && method === "GET") {
       if (!failOnce("members")) data = { members: state.members };
+    } else if (pathname.endsWith("/organizations/org-a/ownership-transfer") && method === "POST") {
+      if (!failOnce("ownershipTransfer")) {
+        const { newOwnerId } = JSON.parse(request.postData());
+        state.organizations = state.organizations.map(org => org.id === "org-a" ? { ...org, role: "admin" } : org);
+        state.members = state.members.map(member => member.user.id === "test-user" ? { ...member, role: "admin" }
+          : member.user.id === newOwnerId ? { ...member, role: "owner" } : member);
+        data = { newOwner: { userId: newOwnerId, role: "owner" }, currentUserRole: "admin" };
+      }
     } else if (pathname.match(/\/organizations\/org-a\/members\/member-1\/role$/) && method === "PATCH") {
       if (!failOnce("memberRole")) {
         const role = JSON.parse(request.postData()).role;
@@ -148,6 +168,26 @@ function installWorkspaceApi(page, overrides = {}) {
         if (!failOnce("aiSettings")) state.hostedAiEnabled = JSON.parse(request.postData()).hostedAiEnabled;
       }
       if (status < 400) data = { hostedAiEnabled: state.hostedAiEnabled };
+    } else if (pathname.endsWith("/organizations/org-a/audit-events")) {
+      data = { events: state.auditEvents, pagination: { page: 1, limit: 20, total: state.auditEvents.length, totalPages: 1 } };
+    } else if (pathname.endsWith("/organizations/org-a/notifications/read-all") && method === "PATCH") {
+      if (!failOnce("notificationReadAll")) {
+        state.notifications = state.notifications.map(item => item.readAt ? item : { ...item, readAt: new Date().toISOString() });
+        data = { markedRead: state.notifications.filter(item => item.readAt).length };
+      }
+    } else if (pathname.match(/\/organizations\/org-a\/notifications\/[^/]+\/read$/) && method === "PATCH") {
+      const id = pathname.split("/").at(-2);
+      const item = state.notifications.find(notification => notification._id === id);
+      if (item && !item.readAt) item.readAt = new Date().toISOString();
+      data = { notification: item };
+    } else if (pathname.endsWith("/organizations/org-a/notifications") && method === "GET") {
+      if (!failOnce("notifications")) data = { notifications: state.notifications, unreadCount: state.notifications.filter(item => !item.readAt).length,
+        preferences: { scanResults: state.scanNotificationsEnabled }, pagination: { page: 1, limit: 10, total: state.notifications.length, totalPages: 1 } };
+    } else if (pathname.endsWith("/organizations/org-a/notification-preferences") && method === "PATCH") {
+      if (!failOnce("notificationPreference")) state.scanNotificationsEnabled = JSON.parse(request.postData()).scanResults;
+      if (status < 400) data = { preferences: { scanResults: state.scanNotificationsEnabled } };
+    } else if (pathname.endsWith("/organizations/org-a/notification-preferences") && method === "GET") {
+      data = { preferences: { scanResults: state.scanNotificationsEnabled } };
     } else if (pathname.endsWith("/scans/organizations/org-a/repositories/team/project") && method === "GET") {
       if (!failOnce("scanHistory")) data = { scans: state.scans };
     } else if (pathname.endsWith("/scans/organizations/org-a/repositories/team/project") && method === "POST") {
@@ -160,7 +200,7 @@ function installWorkspaceApi(page, overrides = {}) {
     } else if (/\/scans\/[^/]+\/cancel$/.test(pathname) && method === "POST") {
       if (!failOnce("scanCancel")) { const scan = state.scans.find(item => item._id === pathname.split("/").at(-2)); if (scan) scan.status = "failed"; data = scan || {}; }
     } else if (/\/scans\/[^/]+\/comparison$/.test(pathname)) {
-      if (!failOnce("comparison")) data = { new: [finding("finding-new")], persistent: [finding()], fixed: [], canInferFixed: true, limitation: "Same scanner coverage." };
+      if (!failOnce("comparison")) data = { new: [finding("finding-new")], persistent: [finding()], fixed: [], canCompare: true, canInferFixed: true, limitation: "Same scanner coverage." };
     } else if (/\/scans\/[^/]+\/export$/.test(pathname)) {
       if (state.failNext.export) {
         failOnce("export");
@@ -192,7 +232,7 @@ function installWorkspaceApi(page, overrides = {}) {
         const pageNumber = Number(searchParams.get("page") || 1);
         const items = pageNumber === 1 ? [finding()] : [finding("finding-2")];
         for (const item of items) Object.assign(item, state.reviewDecisions.get(item._id));
-        data = { findings: items, latestScans: [{ scan: "scan-1", commitSha: "abc123456789" }], pagination: { page: pageNumber, total: 30, totalPages: 2 } };
+        data = { findings: items, latestScans: [{ scan: "scan-1", commitSha: "abc123456789" }], latestFindingsFreshness: state.findingsFreshness, pagination: { page: pageNumber, total: 30, totalPages: 2 } };
       }
     } else if (/\/scans\/[^/]+$/.test(pathname)) {
       if (!failOnce("scanStatus")) data = state.scans.find(scan => scan._id === pathname.split("/").at(-1)) || state.scans[0];
@@ -201,16 +241,20 @@ function installWorkspaceApi(page, overrides = {}) {
     const scanDelay = pathname.endsWith("/scans/scan-1/findings") ? state.scanFindingsDelayMs
       : pathname.endsWith("/scans/organizations/org-a/repositories/team/project") && method === "GET" ? state.scanHistoryDelayMs : 0;
     if (scanDelay) await new Promise(resolve => setTimeout(resolve, scanDelay));
-    await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status >= 400 ? { success: false, ...data } : { success: true, data }) });
+    await route.fulfill({ status, contentType: "application/json",
+      headers: state.auditWriteFailed && method !== "GET" ? { "X-SecurePatch-Audit-Recorded": "false" } : undefined,
+      body: JSON.stringify(status >= 400 ? { success: false, ...data } : { success: true, data }) });
   });
   return state;
 }
 
 test.describe("workspace controls, with mocked APIs", () => {
   test("dashboard refresh, workspace selector, organization form, retry, and mobile navigation", async ({ page }) => {
-    const state = installWorkspaceApi(page, { failNext: { dashboard: "Dashboard temporarily unavailable", createOrganization: "Organization create failed" } });
+    const state = installWorkspaceApi(page, { failNext: { createOrganization: "Organization create failed" } });
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Demo Team" })).toBeVisible();
+    await expect(page.getByText("Current unresolved")).toBeVisible();
+    await expect(page.getByText("Current critical + high")).toBeVisible();
 
     const orgSelector = page.getByRole("combobox").first();
     await orgSelector.selectOption("org-b");
@@ -244,6 +288,29 @@ test.describe("workspace controls, with mocked APIs", () => {
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.getByRole("navigation").getByRole("link", { name: "Repositories" }).click();
     await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
+  });
+
+  test("dashboard preserves the full-scan baseline and identifies repositories without one", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    state.dashboardCurrentFindingsStatus = {
+      repositoriesWithScans: 2,
+      repositoriesWithSuccessfulBaseline: 1,
+      repositoriesUsingEarlierSuccessfulResult: 1,
+      repositoriesWithoutSuccessfulBaseline: 2,
+    };
+    await page.goto("/dashboard");
+    await expect(page.getByText(/Newer scans are partial, failed, or still running for 1 repository/)).toBeVisible();
+    await expect(page.getByText(/2 repositories have no full-coverage scan yet and are excluded from current findings/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Prioritized findings" })).toBeVisible();
+  });
+
+  test("organization findings explain stale baselines and repositories without a complete scan", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    state.findingsFreshness = { repositoriesWithSuccessfulBaseline: 1, repositoriesUsingEarlierSuccessfulResult: 1, repositoriesWithoutSuccessfulBaseline: 1 };
+    await page.goto("/findings");
+    await expect(page.getByRole("status").filter({ hasText: "Newer scans are partial or failed for 1 repository" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "1 repository has no complete scan baseline yet" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Findings" })).toBeVisible();
   });
 
   test("settings controls change member access, create and revoke invitations, copy links, and update AI privacy", async ({ page }) => {
@@ -291,6 +358,49 @@ test.describe("workspace controls, with mocked APIs", () => {
     await hostedAi.click();
     await expect(hostedAi).not.toBeChecked();
     expect(state.hostedAiEnabled).toBe(false);
+  });
+
+  test("owner can transfer ownership only after selecting an active teammate and confirming the organization name", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Transfer ownership" })).toBeVisible();
+    const target = page.getByLabel("New owner");
+    const confirmation = page.getByRole("textbox", { name: "Confirm organization name" });
+    const submit = page.getByRole("button", { name: "Transfer ownership" });
+    await expect(target.locator("option")).toHaveText(["Select an active teammate", "Teammate · developer"]);
+    await expect(submit).toBeDisabled();
+    await target.selectOption("member-1");
+    await confirmation.fill("Different Team");
+    await expect(submit).toBeDisabled();
+    await confirmation.fill("Demo Team");
+    await submit.click();
+
+    await expect(page.getByRole("status").filter({ hasText: "Ownership transferred to Teammate. Your role is now admin." })).toBeVisible();
+    await expect(page.getByText("Demo Team · Your role: admin")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Transfer ownership" })).toHaveCount(0);
+    expect(state.organizations.find(org => org.id === "org-a").role).toBe("admin");
+    expect(state.members.find(member => member.user.id === "member-1").role).toBe("owner");
+    expect(state.calls.find(call => call.pathname.endsWith("/ownership-transfer"))).toMatchObject({
+      method: "POST", body: { newOwnerId: "member-1", confirmation: "Demo Team" },
+    });
+  });
+
+  test("workspace settings show actor, action, target, and time in the security activity log", async ({ page }) => {
+    installWorkspaceApi(page);
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Recent security activity" })).toBeVisible();
+    await expect(page.getByText("Demo Reviewer marked a finding acknowledged in team/project.")).toBeVisible();
+    await expect(page.locator("time[datetime='2026-10-21T10:00:00.000Z']")).toBeVisible();
+  });
+
+  test("settings explain when a change saves but the audit record is unavailable", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    state.auditWriteFailed = true;
+    await page.goto("/settings");
+    await page.getByLabel("Email address").fill("new@example.test");
+    await page.getByRole("button", { name: "Create invite link" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Your change was saved, but its activity record could not be written" })).toBeVisible();
+    expect(state.invitations.some(invitation => invitation.email === "new@example.test")).toBe(true);
   });
 
   test("GitHub install selection, connect errors, refresh, repository cards, and modal controls", async ({ page }) => {
@@ -370,9 +480,10 @@ test.describe("workspace controls, with mocked APIs", () => {
     await push.check(); await pullRequest.check();
     await page.getByLabel("Schedule").selectOption("monthly");
     await page.getByRole("button", { name: "Save automation" }).click();
-    await expect(page.getByRole("alert")).toHaveText("Automation save failed");
+    await expect(page.getByRole("alert")).toContainText("Automation save failed");
     await page.getByRole("button", { name: "Save automation" }).click();
     expect(state.automation.settings).toEqual({ push: true, pullRequest: true, frequency: "monthly" });
+    await expect(page.getByRole("status")).toHaveText("Automation settings saved.");
 
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect.poll(() => state.calls.filter(call => call.pathname.endsWith("/repositories/team/project/files")).length).toBeGreaterThan(1);
@@ -460,7 +571,8 @@ test.describe("workspace controls, with mocked APIs", () => {
     }
 
     await page.getByRole("button", { name: "Compare with previous scan" }).click();
-    await expect(page.getByRole("heading", { name: "Changes since the previous successful scan" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Scan comparison" })).toBeVisible();
+    await expect(page.getByText(/Changes since the previous successful scan · New: 1 · Persistent: 1 · Fixed: 0/)).toBeVisible();
     for (const kind of ["new", "persistent", "fixed"]) {
       const summary = page.locator("summary").filter({ hasText: new RegExp(`^${kind}$`, "i") });
       await summary.click();
@@ -680,11 +792,142 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(page.getByRole("heading", { name: "project", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Use light appearance" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(245, 247, 245)");
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(246, 246, 245)");
     await expect(page.getByRole("button", { name: "Use dark appearance" })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "Use dark appearance" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });
+
+  test("scan notifications open, mark as read, and persist the member's scan preference", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/dashboard");
+    const button = page.getByRole("button", { name: "Notifications, 1 unread" });
+    await expect(button).toBeVisible();
+    await button.click();
+    const panel = page.getByRole("dialog", { name: "Notifications" });
+    await expect(panel.getByText("Scan needs review")).toBeVisible();
+    await expect(panel.getByText(/Some scanner coverage is missing/)).toBeVisible();
+    await expect(panel.getByText("in-app only")).toBeVisible();
+
+    const preference = panel.getByRole("checkbox", { name: "Notify me about scan results" });
+    await expect(preference).toBeChecked();
+    await preference.uncheck();
+    await expect(preference).not.toBeChecked();
+    expect(state.scanNotificationsEnabled).toBe(false);
+
+    await panel.getByRole("button", { name: "Mark all read" }).click();
+    await expect(page.getByRole("button", { name: "Notifications" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await expect(page.getByRole("dialog", { name: "Notifications" }).getByRole("checkbox", { name: "Notify me about scan results" })).not.toBeChecked();
+    await expect(page.getByRole("dialog", { name: "Notifications" }).getByRole("button", { name: "Mark all read" })).toBeDisabled();
+  });
+
+  test("opening a scan notification leads to its exact scan and recovers after a notification request failure", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: "Notifications, 1 unread" })).toBeVisible();
+    state.failNext.notifications = "Notification service unavailable.";
+    await page.getByRole("button", { name: "Notifications" }).click();
+    const panel = page.getByRole("dialog", { name: "Notifications" });
+    await expect(panel.getByRole("alert")).toContainText("Notification service unavailable.");
+    await panel.getByRole("button", { name: "Retry" }).click();
+    await expect(panel.getByText("Scan needs review")).toBeVisible();
+    await panel.getByRole("link", { name: /Scan needs review/ }).click();
+    await expect(page).toHaveURL(/\/github\/team\/project\/scan\?scanId=scan-1$/);
+    expect(state.calls.some(call => call.pathname.endsWith("/notifications/notification-1/read"))).toBe(true);
+  });
+
+  test("notification center stays inside a narrow screen and follows the light theme", async ({ page }) => {
+    installWorkspaceApi(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: "Use light appearance" })).toBeVisible();
+    await page.getByRole("button", { name: "Use light appearance" }).click();
+    await page.getByRole("button", { name: "Notifications, 1 unread" }).click();
+
+    const panel = page.getByRole("dialog", { name: "Notifications" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("checkbox", { name: "Notify me about scan results" })).toBeVisible();
+    const box = await panel.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    await expect.poll(() => panel.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(253, 253, 252)");
+  });
+  test("repository access dialog traps focus, closes with Escape, and restores its trigger", async ({ page }) => {
+    installWorkspaceApi(page);
+    await page.goto("/github");
+    const trigger = page.getByRole("button", { name: "Add repository", exact: true }).first();
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "Add repository", exact: true });
+    const close = dialog.getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.getByRole("button", { name: "I’ve updated access — refresh" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
+  test("missing file paths stop loading and failed file requests offer a working retry", async ({ page }) => {
+    installWorkspaceApi(page, { failNext: { file: "File load failed" } });
+    await page.goto("/github/team/project/file");
+    await expect(page.getByRole("alert")).toContainText("Select a file");
+    await page.goto("/github/team/project/file?path=src%2Findex.js");
+    await expect(page.getByRole("alert")).toContainText("File load failed");
+    await page.getByRole("button", { name: "Retry file" }).click();
+    await expect(page.getByRole("button", { name: "Copy file to clipboard" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("main")).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "Repositories", exact: true })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("settings section links target their sections and invite copying gives feedback", async ({ page }) => {
+    installWorkspaceApi(page);
+    await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable:true, value:{ writeText:async()=>{} } }));
+    await page.goto("/settings");
+    const nav = page.getByRole("navigation", { name: "Settings sections" });
+    for (const [label,id] of [["Team","team"],["Activity","activity"],["AI privacy","privacy"],["Data","data"],["Account controls","account"]]) {
+      await expect(nav.getByRole("link", { name:label,exact:true })).toHaveAttribute("href",`#${id}`);
+      await expect(page.locator(`#${id}`)).toHaveCount(1);
+    }
+    await page.getByLabel("Email address").fill("invite@example.com");
+    await page.getByRole("button", { name:"Create invite link" }).click();
+    await page.getByRole("button", { name:"Copy link",exact:true }).click();
+    await expect(page.getByRole("button", { name:"Copied",exact:true })).toBeVisible();
+  });
+
 });
+
+
+for (const emailStatus of ["accepted", "failed", "unknown"]) {
+  test(`optional invitation email ${emailStatus} preserves manual sharing`, async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => { window.__clipboardText = text; } } }));
+    installWorkspaceApi(page);
+    let submitted;
+    await page.route("**/organizations/org-a/invitations", async route => {
+      if (route.request().method() === "POST") {
+        submitted = route.request().postDataJSON();
+        return route.fulfill({ json: { success: true, data: { invitation: { id: "email-invite", url: "https://example.test/invite/accept?token=fixture-token", emailDelivery: { status: emailStatus } } } } });
+      }
+      return route.fulfill({ json: { success: true, data: { invitations: [], emailDeliveryAvailable: true } } });
+    });
+    await page.goto("/settings");
+    await page.getByLabel("Email address").fill("invitee@example.test");
+    await expect(page.getByLabel("Email this invitation")).not.toBeChecked();
+    await page.getByLabel("Email this invitation").check();
+    await page.getByRole("button", { name: "Create and email invite" }).click();
+    await expect(page.getByRole("textbox", { name: "Invitation link" })).toHaveValue(/fixture-token/);
+    expect(submitted).toMatchObject({ email: "invitee@example.test", role: "developer", sendEmail: true });
+    const text = emailStatus === "accepted" ? "Email accepted by the provider; inbox delivery is not confirmed." : emailStatus === "failed" ? "Email could not be sent. Share the invitation link securely instead." : "Email status could not be confirmed. Share the link if needed; creating another invite replaces this link.";
+    await expect(page.getByText(text, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Copy link", exact: true }).click();
+    expect(await page.evaluate(() => window.__clipboardText)).toContain("fixture-token");
+  });
+}

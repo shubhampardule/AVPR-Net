@@ -1,9 +1,11 @@
 import React from "react";
+import { useTheme } from "../../context/ThemeContext";
 
 export function BrandMark({ className = "" }) {
+  const { theme } = useTheme();
   return (
     <img
-      src="/securepatch-favicon.png?v=1"
+      src={theme === "light" ? "/favicon-light.svg?v=3" : "/favicon.svg?v=3"}
       alt=""
       aria-hidden="true"
       draggable="false"
@@ -25,10 +27,10 @@ export function BrandLockup({
       <BrandMark />
       <span className="inline-flex min-w-0 flex-col justify-center">
         <span className={`font-sans font-semibold leading-none tracking-[-0.035em] text-text-primary ${wordmarkClassName}`}>
-          Secure<span className="text-accent-security">Patch</span>
+          AVPR<span className="text-accent-security">-Net</span>
         </span>
         {descriptor && (
-          <span className="mt-1 font-mono text-[8px] uppercase tracking-[0.14em] text-text-muted">
+          <span className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-text-muted">
             Security review
           </span>
         )}

@@ -64,20 +64,28 @@ test.beforeEach(async ({ page }) => {
 test("appearance toggle changes the palette smoothly and remembers the choice", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/favicon.svg?v=3");
+  await expect(page.locator("header img")).toHaveAttribute("src", "/favicon.svg?v=3");
   await page.evaluate(() => document.documentElement.classList.add("theme-changing"));
   expect(await page.locator("h1").evaluate(element => getComputedStyle(element).transitionDuration)).toContain("0.28s");
   await page.evaluate(() => document.documentElement.classList.remove("theme-changing"));
 
   await page.getByRole("button", { name: "Use light appearance" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(245, 247, 245)");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/favicon-light.svg?v=3");
+  await expect(page.locator("header img")).toHaveAttribute("src", "/favicon-light.svg?v=3");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(246, 246, 245)");
   await expect(page.getByRole("button", { name: "Use dark appearance" })).toHaveAttribute("aria-pressed", "true");
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/favicon-light.svg?v=3");
+  await expect(page.locator("header img")).toHaveAttribute("src", "/favicon-light.svg?v=3");
   await page.getByRole("button", { name: "Use dark appearance" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(16, 20, 22)");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/favicon.svg?v=3");
+  await expect(page.locator("header img")).toHaveAttribute("src", "/favicon.svg?v=3");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(16, 16, 19)");
 });
 
 test("home and sign-in stay within narrow mobile and desktop viewports", async ({ page }) => {
@@ -96,14 +104,14 @@ test("home and sign-in stay within narrow mobile and desktop viewports", async (
   expect(signInWidth.body).toBeLessThanOrEqual(320);
 });
 
-test("compact pixel-art SecurePatch robot mark loads in public and sign-in headers", async ({ page }) => {
-  const icon = await page.request.get("/securepatch-favicon.png?v=1");
+test("compact pixel-art AVPR-Net robot mark loads in public and sign-in headers", async ({ page }) => {
+  const icon = await page.request.get("/favicon.svg?v=3");
   expect(icon.ok()).toBeTruthy();
-  expect(icon.headers()["content-type"]).toContain("image/png");
+  expect(icon.headers()["content-type"]).toContain("image/svg+xml");
 
   await page.goto("/");
-  const publicBrand = page.locator('header a[aria-label="SecurePatch home"]');
-  await expect(publicBrand).toContainText("SecurePatch");
+  const publicBrand = page.locator('header a[aria-label="AVPR-Net home"]');
+  await expect(publicBrand).toContainText("AVPR-Net");
   const publicMark = publicBrand.locator("img");
   await expect(publicMark).toBeVisible();
   await expect.poll(() => publicMark.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
@@ -111,8 +119,8 @@ test("compact pixel-art SecurePatch robot mark loads in public and sign-in heade
   await expect.poll(() => publicMark.evaluate((image) => getComputedStyle(image).width)).toBe("24px");
 
   await page.goto("/login");
-  const signInBrand = page.locator('header a[aria-label="SecurePatch home"]');
-  await expect(signInBrand).toContainText("SecurePatch");
+  const signInBrand = page.locator('header a[aria-label="AVPR-Net home"]');
+  await expect(signInBrand).toContainText("AVPR-Net");
   const signInMark = signInBrand.locator("img");
   await expect(signInMark).toBeVisible();
   await expect.poll(() => signInMark.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
@@ -134,14 +142,14 @@ test("desktop navigation, hero links, and logo anchors reach their destinations"
 
   await nav.getByRole("link", { name: "AI assistant", exact: true }).click();
   await expect(page).toHaveURL(/\/assistant-demo$/);
-  await expect(page.getByRole("heading", { name: "Evidence before action." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI assistant" })).toBeVisible();
 
   await page.goto("/");
   await page.locator("header").getByRole("link", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/");
-  await page.locator("header").getByRole("link", { name: "Connect a repository", exact: true }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.locator("header").getByRole("link", { name: "Connect a repository", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Connect a repository", exact: true })).toHaveCount(1);
 
   await page.goto("/");
   await page.getByRole("link", { name: "View an example" }).click();
@@ -179,8 +187,8 @@ test("mobile navigation opens, closes, and follows every menu link", async ({ pa
   await page.goto("/");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await page.locator("header").getByRole("link", { name: "Connect a repository", exact: true }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.locator("header").getByRole("link", { name: "Connect a repository", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Connect a repository", exact: true })).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 
@@ -193,11 +201,8 @@ test("hero links lead to sign-in or the sample and preview data is labeled", asy
   await expect(page.getByRole("heading", { name: "Review repository security in one workspace." })).toBeVisible();
 
   await page.goto("/");
-  const preview = page.getByRole("region", { name: "Sample repository overview" });
-  await expect(preview.getByText("Example data · no live scan")).toBeVisible();
-  await expect(preview.getByText("Missing authorization check")).toBeVisible();
-  await expect(preview.getByText("Insecure cookie settings")).toBeVisible();
-  await expect(preview.getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Sample repository overview" })).toHaveCount(0);
+  await expect(page.locator("#playground").getByText(/No repository scan runs here/)).toBeVisible();
   await page.getByRole("link", { name: "View an example" }).click();
   await expect(page).toHaveURL(/#playground$/);
   expect(errors).toEqual([]);
@@ -262,17 +267,14 @@ test("final call-to-action goes straight to sign-in without an extra dialog", as
   expect(errors).toEqual([]);
 });
 
-test("footer links reach each section and offer direct sign-in", async ({ page }) => {
-  const errors = capturePageErrors(page);
+test("footer stays minimal without repeated navigation, branding, or sign-in", async ({ page }) => {
   await page.goto("/");
   const footer = page.locator("footer");
-  for (const [label, hash] of [["Product", "#product"], ["Workflow", "#workflow"], ["Example", "#playground"], ["Capabilities", "#capabilities"]]) {
-    await footer.getByRole("link", { name: label, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`${hash.replace("#", "\\#")}$`));
-  }
-  await footer.getByRole("link", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/login$/);
-  expect(errors).toEqual([]);
+  await expect(footer).toHaveText(`© ${new Date().getFullYear()} AVPR-Net`);
+  await expect(footer.getByRole("link")).toHaveCount(0);
+  await expect(footer.getByRole("navigation")).toHaveCount(0);
+  await expect(footer.locator("img")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Continue to sign in", exact: true })).toHaveCount(1);
 });
 
 test("both login providers start mocked OAuth handoffs and return-home links work", async ({ page }) => {

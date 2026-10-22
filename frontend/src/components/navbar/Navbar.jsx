@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { BrandLockup } from '../ui/BrandLogo';
@@ -22,26 +22,23 @@ export function Navbar() {
   }, []);
 
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 border-b transition-colors duration-200 ${scrolled ? 'border-white/[0.08] bg-[#101416]/95 backdrop-blur-md' : 'border-transparent bg-[#101416]/70'}`}>
+    <header className={`fixed inset-x-0 top-0 z-50 border-b transition-colors duration-200 ${scrolled ? 'border-text-primary/[0.08] bg-bg-primary/95 backdrop-blur-md' : 'border-transparent bg-bg-primary/70'}`}>
       <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
-        <Link to="/" aria-label="SecurePatch home" className="group inline-flex items-center gap-2.5">
+        <Link to="/" aria-label="AVPR-Net home" className="group inline-flex items-center gap-2.5">
           <BrandLockup wordmarkClassName="text-lg" />
         </Link>
 
         <nav aria-label="Main navigation" className="hidden items-center gap-6 lg:flex">
           {navLinks.map((link) => (
-            <a key={link.label} href={link.href} className="text-[13px] font-medium text-[#AFBAB4] transition-colors hover:text-[#E8EEEB]">
+            <a key={link.label} href={link.href} className="text-[13px] font-medium text-text-secondary transition-colors hover:text-text-primary">
               {link.label}
             </a>
           ))}
         </nav>
 
         <div className="hidden items-center gap-5 lg:flex">
-          <Link to="/login" className="text-[13px] font-medium text-[#AFBAB4] transition-colors hover:text-[#E8EEEB]">Sign in</Link>
+          <Link to="/login" className="text-[13px] font-medium text-text-secondary transition-colors hover:text-text-primary">Sign in</Link>
           <ThemeToggle />
-          <Link to="/login" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#78A88B] px-3.5 text-[13px] font-semibold text-[#101916] transition-colors hover:bg-[#8DB89C]">
-            Connect a repository <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Link>
         </div>
 
         <div className="flex items-center gap-2 lg:hidden">
@@ -49,7 +46,7 @@ export function Navbar() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen((open) => !open)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/[0.12] text-[#E8EEEB] transition-colors hover:bg-white/[0.05]"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-text-primary/[0.12] text-text-primary transition-colors hover:bg-text-primary/[0.05]"
             aria-label="Toggle navigation menu"
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-navigation"
@@ -60,17 +57,16 @@ export function Navbar() {
       </div>
 
       {mobileMenuOpen && (
-        <div id="mobile-navigation" className="border-t border-white/[0.08] bg-[#151B1D] px-5 pb-5 pt-3 lg:hidden">
+        <div id="mobile-navigation" className="border-t border-text-primary/[0.08] bg-bg-secondary px-5 pb-5 pt-3 lg:hidden">
           <nav aria-label="Mobile navigation" className="mx-auto flex max-w-7xl flex-col">
             {navLinks.map((link) => (
-              <a key={link.label} href={link.href} onClick={() => setMobileMenuOpen(false)} className="border-b border-white/[0.06] py-3 text-sm font-medium text-[#C6D0CA] transition-colors hover:text-white">
+              <a key={link.label} href={link.href} onClick={() => setMobileMenuOpen(false)} className="border-b border-text-primary/[0.06] py-3 text-sm font-medium text-text-primary transition-colors hover:text-text-primary">
                 {link.label}
               </a>
             ))}
           </nav>
           <div className="mx-auto flex max-w-7xl gap-3 pt-4">
-            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="inline-flex h-10 flex-1 items-center justify-center rounded-md border border-white/[0.12] text-sm font-medium text-[#E8EEEB]">Sign in</Link>
-            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-[#78A88B] text-sm font-semibold text-[#101916]">Connect a repository <ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
+            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="inline-flex h-10 flex-1 items-center justify-center rounded-md border border-text-primary/[0.12] text-sm font-medium text-text-primary">Sign in</Link>
           </div>
         </div>
       )}

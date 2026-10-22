@@ -7,12 +7,14 @@ test.beforeEach(async ({ page }) => {
     const url = new URL(route.request().url()); let data;
     if (url.pathname.endsWith("/auth/me")) data = { user: { id: "test-user", name: "Demo Reviewer" } };
     else if (url.pathname.endsWith("/organizations") && route.request().method() === "POST") data = { organization: { id: "created-org", name: JSON.parse(route.request().postData()).name }, role: "owner" };
-    else if (url.pathname.endsWith("/organizations")) data = { organizations: [{ id: "test-org", name: "Demo Team", role: "owner" }] };
+    else if (url.pathname.endsWith("/organizations")) data = { organizations: [{ id: "test-org", name: "Demo Team", slug: "demo-team", role: "owner" }] };
     else if (url.pathname.includes("/dashboard/organizations/")) data = {
       organization: { id: "test-org", name: "Demo Team" }, repositories: { connected: true, total: 1 },
-      totals: { scans: 1, findings: 1, criticalAndHigh: 1 },
+      totals: { scans: 1, findings: 1, criticalAndHigh: 1, currentFindings: 1, currentCriticalAndHigh: 1 },
       riskDistribution: { critical: 0, high: 1, medium: 0, low: 0 },
-      recentScans: [latestScan], priorityFindings: [{ _id: "finding-1", owner: "team", repo: "project", filePath: "src/index.js", startLine: 3, cwe: "CWE-89", scanner: "semgrep", severity: "high", title: "Unsafe query", riskScore: 8.2, riskCategory: "high" }],
+      currentRiskDistribution: { critical: 0, high: 1, medium: 0, low: 0 },
+      currentFindingsStatus: { repositoriesWithScans: 1, repositoriesWithSuccessfulBaseline: 1, repositoriesUsingEarlierSuccessfulResult: 0, repositoriesWithoutSuccessfulBaseline: 0 },
+      recentScans: [latestScan], priorityFindings: [{ _id: "finding-1", scan: "scan-1", owner: "team", repo: "project", filePath: "src/index.js", startLine: 3, cwe: "CWE-89", scanner: "semgrep", severity: "high", title: "Unsafe query", riskScore: 8.2, riskCategory: "high" }],
       scannerStatus: { semgrep: { status: "completed", scanAt: "2026-10-20T00:00:00Z" } },
     };
     else if (url.pathname.endsWith("/github/organizations/test-org/status")) data = { connected: true, installation: { htmlUrl: "https://github.com/settings/installations/1" } };
@@ -29,7 +31,7 @@ test.beforeEach(async ({ page }) => {
       data = { scanId: latestScan._id, status: latestScan.status, createdAt: latestScan.createdAt, summary: { total: 0 } };
     }
     else if (url.pathname.endsWith("/scans/organizations/test-org/repositories/team/project")) data = { scans: [latestScan] };
-    else if (url.pathname.endsWith(`/scans/${latestScan._id}/comparison`)) data = { new: [], persistent: [], fixed: [], canInferFixed: true, limitation: "Synthetic fixture" };
+    else if (url.pathname.endsWith(`/scans/${latestScan._id}/comparison`)) data = { new: [], persistent: [], fixed: [], canCompare: true, canInferFixed: true, limitation: "Synthetic fixture" };
     else if (url.pathname.endsWith(`/scans/${latestScan._id}/cancel`) && route.request().method() === "POST") { latestScan = { ...latestScan, status: "failed" }; data = latestScan; }
     else if (url.pathname.endsWith(`/scans/${latestScan._id}/findings`)) data = { findings: [{ _id: "finding-1", scan: latestScan._id, organization: "test-org", owner: "team", repo: "project", title: "Unsafe query", severity: "high", riskCategory: "high", riskScore: 8.2, scanner: "semgrep", cwe: "CWE-89", filePath: "src/index.js", startLine: 3, status: "open", description: "Untrusted input reaches a query.", evidenceSnippet: "db.query(input)", remediation: "Use parameterized queries." }], pagination: { page: 1, total: 1, totalPages: 1 } };
     else if (url.pathname.endsWith(`/scans/${latestScan._id}`)) data = latestScan;
@@ -37,6 +39,11 @@ test.beforeEach(async ({ page }) => {
     else if (url.pathname.endsWith("/ai-settings")) {
       if (route.request().method() === "PATCH") hostedAiEnabled = JSON.parse(route.request().postData()).hostedAiEnabled;
       data = { hostedAiEnabled };
+    }
+    else if (url.pathname.endsWith("/organizations/test-org/export")) {
+      await route.fulfill({ status: 200, headers: { "Content-Type": "application/json", "Content-Disposition": "attachment; filename=securepatch-demo-team-export-2026-10-22.json" },
+        body: JSON.stringify({ format: "securepatch-organization-export", counts: { total: 0 }, data: { scans: [], findings: [] } }) });
+      return;
     }
     else if (url.pathname.endsWith("/members")) data = { members: [{ user: { id: "test-user", name: "Demo Reviewer", email: "test@example.com" }, role: "owner" }] };
     else if (url.pathname.endsWith("/invitations") && route.request().method() === "POST") data = { invitation: { id: "invite-1", email: "new@example.com", role: "developer", status: "pending", expiresAt: "2026-10-27T00:00:00.000Z", url: "http://127.0.0.1:5174/invite/accept?token=fixture-token" } };
@@ -87,11 +94,72 @@ test("workspace navigation exposes team settings and current findings", async ({
   await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
   await expect(page.getByText("No findings in this view")).toBeVisible();
 });
+
+test("workspace settings download the organization JSON export", async ({ page }) => {
+  await page.goto("/settings");
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download JSON export" }).click();
+  expect((await download).suggestedFilename()).toBe("securepatch-demo-team-export.json");
+  await expect(page.getByRole("status").filter({ hasText: "Organization export downloaded" })).toBeVisible();
+});
+
+test("workspace export reports a size-limit failure and can be retried", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/v1/organizations/test-org/export", async route => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 413, json: { success: false, error: { message: "This organization has more than 25,000 exportable records." } } });
+      return;
+    }
+    await route.fulfill({ status: 200, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format: "securepatch-organization-export", counts: { total: 1 }, data: {} }) });
+  });
+  await page.goto("/settings");
+  const button = page.getByRole("button", { name: "Download JSON export" });
+  await button.click();
+  await expect(page.getByRole("alert")).toContainText("25,000 exportable records");
+  await expect(button).toBeEnabled();
+  const download = page.waitForEvent("download");
+  await button.click();
+  expect((await download).suggestedFilename()).toBe("securepatch-demo-team-export.json");
+  await expect(page.getByRole("status").filter({ hasText: "Organization export downloaded" })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test("a non-owner can leave only after confirming the organization name", async ({ page }) => {
+  let active = true;
+  let leaveRequestCount = 0;
+  await page.route("**/api/v1/organizations", async route => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ json: { success: true, data: { organizations: active
+      ? [{ id: "test-org", name: "Demo Team", slug: "demo-team", role: "developer" }]
+      : [] } } });
+  });
+  await page.route("**/api/v1/organizations/test-org/members/me", async route => {
+    expect(route.request().method()).toBe("DELETE");
+    leaveRequestCount += 1;
+    active = false;
+    await route.fulfill({ json: { success: true, data: { organizationId: "test-org", status: "suspended" } } });
+  });
+
+  await page.goto("/settings");
+  const section = page.getByRole("region", { name: "Leave organization" });
+  await expect(section).toBeVisible();
+  const leave = section.getByRole("button", { name: "Leave organization" });
+  await expect(leave).toBeDisabled();
+  await section.getByLabel("Confirm organization name to leave").fill("Wrong name");
+  await expect(leave).toBeDisabled();
+  await section.getByLabel("Confirm organization name to leave").fill("Demo Team");
+  await expect(leave).toBeEnabled();
+  await leave.click();
+  await expect(page).toHaveURL(/\/$/);
+  expect(leaveRequestCount).toBe(1);
+});
 test("workspace owners can create a shareable invitation link", async ({ page }) => {
   await page.goto("/settings");
   await page.getByLabel("Email address").fill("new@example.com");
   await page.getByRole("button", { name: "Create invite link" }).click();
-  await expect(page.getByText("Invite link created. Anyone with this link can use it once before it expires.")).toBeVisible();
+  await expect(page.getByText("Invite link created. Only the invited person’s verified email can accept it before it expires.")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Invitation link" })).toHaveValue(/invite\/accept\?token=fixture-token/);
 });
 test("workspace owner can disable and re-enable hosted AI", async ({ page }) => {
@@ -106,7 +174,7 @@ test("workspace owner can disable and re-enable hosted AI", async ({ page }) => 
 test("workspace can create and select an organization", async ({ page }) => {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Create organization" }).click();
-  await page.getByLabel("Organization name").fill("College Security Team");
+  await page.getByLabel("Organization name", { exact: true }).fill("College Security Team");
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByText("College Security Team · Your role: owner")).toBeVisible();
   await expect(page.getByRole("combobox").first()).toHaveValue("created-org");
@@ -125,7 +193,7 @@ test("hosted assistant shows a sanitized data preview and requires per-request a
     await route.fulfill({ json: { success: true, data: { status: "complete", analysis: { summary: "Synthetic evidence reviewed." }, retrieved_sources: [] } } });
   });
   await page.goto("/assistant");
-  await expect(page.getByRole("heading", { name: "Evidence before action." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI assistant" })).toBeVisible();
   await expect(page.getByLabel("Sanitized data preview")).toContainText("evt-1");
   const submit = page.getByRole("button", { name: "Analyze evidence" });
   await expect(submit).toBeDisabled();
@@ -137,7 +205,7 @@ test("hosted assistant shows a sanitized data preview and requires per-request a
 });
 test("unknown routes show a recoverable not-found page", async ({ page }) => {
   await page.goto("/missing-page"); await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Return to SecurePatch" })).toHaveAttribute("href", "/");
+  await expect(page.getByRole("link", { name: "Return to AVPR-Net" })).toHaveAttribute("href", "/");
 });
 test("invitation acceptance and missing-token states are recoverable", async ({ page }) => {
   await page.goto("/invite/accept?token=fixture-token");
@@ -152,16 +220,16 @@ test("all application routes render their intended page", async ({ page }) => {
   const routes = [
     ["/", /Review security findings in their source context/],
     ["/login", /Review repository security in one workspace/],
-    ["/invite/accept?token=fixture-token", /Join a SecurePatch workspace/],
+    ["/invite/accept?token=fixture-token", /Join a AVPR-Net workspace/],
     ["/dashboard", /Demo Team/],
-    ["/github", /^GitHub$/],
+    ["/github", /^Repositories$/],
     ["/github/team/project", /^project$/],
     ["/github/team/project/scan", /Security scans/],
     ["/github/team/project/file?path=src%2Findex.js", /src\/index\.js/],
     ["/findings", /^Findings$/],
     ["/settings", /Workspace settings/],
-    ["/assistant", /Evidence before action/],
-    ["/assistant-demo", /Evidence before action/],
+    ["/assistant", /^AI assistant$/],
+    ["/assistant-demo", /^AI assistant$/],
   ];
   for (const [path, heading] of routes) {
     await page.goto(path);
@@ -273,11 +341,11 @@ test("dashboard links through repository tree to a pinned source file and scan h
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: "Demo Team" })).toBeVisible();
-  await expect(page.getByText("Critical + high risk")).toBeVisible();
+  await expect(page.getByText("Current critical + high")).toBeVisible();
   await page.getByRole("button", { name: "Refresh" }).click();
 
   await page.getByRole("link", { name: "Repositories", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /team\/project/ }).click();
   await expect(page.getByRole("heading", { name: "project" })).toBeVisible();
 
@@ -298,7 +366,7 @@ test("dashboard links through repository tree to a pinned source file and scan h
   await expect(page.getByRole("heading", { name: "Security scans" })).toBeVisible();
   await expect(page.getByText("Commit abc123456789")).toBeVisible();
   await page.getByRole("button", { name: "Compare with previous scan" }).click();
-  await expect(page.getByRole("heading", { name: "Changes since the previous successful scan" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Scan comparison" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Export JSON" })).toHaveAttribute("href", "/api/v1/scans/scan-1/export?format=json");
   expect(pageErrors).toEqual([]);
 });

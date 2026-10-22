@@ -5,32 +5,32 @@ export function SeverityPill({ severity, size = 'md', className = '' }) {
   const configs = {
     Critical: {
       label: 'Critical',
-      badgeClass: 'bg-[#F87171]/10 text-[#F87171] border-[#F87171]/25',
-      dotClass: 'bg-[#F87171]',
+      badgeClass: 'bg-severity-critical/10 text-severity-critical border-severity-critical/25',
+      dotClass: 'bg-severity-critical',
       icon: AlertCircle,
     },
     High: {
       label: 'High',
-      badgeClass: 'bg-[#FB923C]/10 text-[#FB923C] border-[#FB923C]/25',
-      dotClass: 'bg-[#FB923C]',
+      badgeClass: 'bg-severity-high/10 text-severity-high border-severity-high/25',
+      dotClass: 'bg-severity-high',
       icon: AlertTriangle,
     },
     Medium: {
       label: 'Medium',
-      badgeClass: 'bg-[#FBBF24]/10 text-[#FBBF24] border-[#FBBF24]/25',
-      dotClass: 'bg-[#FBBF24]',
+      badgeClass: 'bg-severity-medium/10 text-severity-medium border-severity-medium/25',
+      dotClass: 'bg-severity-medium',
       icon: Info,
     },
     Low: {
       label: 'Low',
-      badgeClass: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/25',
-      dotClass: 'bg-[#78A88B]',
+      badgeClass: 'bg-severity-low/10 text-severity-low border-severity-low/25',
+      dotClass: 'bg-severity-low',
       icon: ShieldCheck,
     },
     Resolved: {
       label: 'Resolved',
-      badgeClass: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/30',
-      dotClass: 'bg-[#78A88B]',
+      badgeClass: 'bg-severity-low/10 text-severity-low border-severity-low/30',
+      dotClass: 'bg-severity-low',
       icon: ShieldCheck,
     }
   };
@@ -39,7 +39,7 @@ export function SeverityPill({ severity, size = 'md', className = '' }) {
   const IconComponent = config.icon;
 
   const sizeStyles = {
-    sm: 'text-[10px] px-2 py-0.5 gap-1',
+    sm: 'text-[11px] px-2 py-0.5 gap-1',
     md: 'text-xs px-2.5 py-1 gap-1.5',
     lg: 'text-sm px-3 py-1.5 gap-2',
   };

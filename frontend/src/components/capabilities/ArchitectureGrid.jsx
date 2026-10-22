@@ -1,39 +1,15 @@
 import React from 'react';
-import { ArrowUpRight } from 'lucide-react';
-import { ENTERPRISE_CAPABILITIES } from '../../data/scanners';
-
+const coverage = [
+  ['Semgrep', 'JavaScript, TypeScript, and Python patterns', 'Project-owned rules; not a complete application security assessment.'],
+  ['Bandit', 'Python source checks', 'Findings depend on covered files and enabled rules.'],
+  ['Credential patterns', 'Potential embedded credentials', 'Pattern matches require review; a match does not prove a live secret.'],
+  ['OSV advisories', 'npm lockfile v2/v3 dependencies', 'Optional. Sends package names and versions to OSV.'],
+];
 export function ArchitectureGrid() {
-  return (
-    <section id="capabilities" className="border-t border-white/[0.07] bg-[#101416] py-20 text-left sm:py-24">
-      <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
-        <div className="grid gap-10 lg:grid-cols-12 lg:gap-14">
-          <div className="lg:col-span-4">
-            <p className="text-sm font-medium text-[#A8B9AF]">Capabilities</p>
-            <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-[-0.035em] text-[#E8EEEB] sm:text-4xl">
-              Evidence and controls for each result.
-            </h2>
-            <p className="mt-5 max-w-md text-base leading-7 text-[#AEB9B3]">
-              Review the source, scanner context, and patch checks behind a finding.
-            </p>
-            <a href="#workflow" className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-[#A8C4B1] transition-colors hover:text-white">
-              See the workflow <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-            </a>
-          </div>
-
-          <dl className="grid gap-x-8 sm:grid-cols-2 lg:col-span-8">
-            {ENTERPRISE_CAPABILITIES.map((capability, index) => (
-              <div key={capability.title} className="border-t border-white/[0.1] py-5">
-                <dt className="flex items-baseline gap-3 text-sm font-semibold text-[#E8EEEB]">
-                  <span className="font-mono-code text-[11px] font-normal text-[#819087]">0{index + 1}</span>
-                  {capability.title}
-                </dt>
-                <dd className="mt-2 pl-8 text-sm leading-6 text-[#AEB9B3]">{capability.description}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-
-      </div>
-    </section>
-  );
+  return <section id="capabilities" className="border-t border-border-subtle bg-bg-primary py-16">
+    <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
+      <div className="mb-8 max-w-2xl"><h2 className="text-3xl font-semibold tracking-tight text-text-primary">Know what a scan covers.</h2><p className="mt-3 text-sm leading-6 text-text-secondary">Every result records its scanners, pinned commit, covered files, and failed checks. Partial coverage stays visible.</p></div>
+      <div className="coverage-table overflow-x-auto rounded-lg border border-border-light"><table className="w-full text-left text-sm"><caption className="sr-only">Supported scanners and their limits</caption><thead className="bg-bg-secondary text-xs text-text-muted"><tr><th scope="col" className="p-4 font-medium">Scanner</th><th scope="col" className="p-4 font-medium">Checks</th><th scope="col" className="p-4 font-medium">Limits</th></tr></thead><tbody>{coverage.map(([scanner,checks,limits]) => <tr key={scanner} className="border-t border-border-subtle"><th scope="row" className="p-4 align-top font-medium text-text-primary">{scanner}</th><td className="p-4 align-top text-text-secondary">{checks}</td><td className="p-4 align-top text-text-secondary">{limits}</td></tr>)}</tbody></table></div>
+    </div>
+  </section>;
 }

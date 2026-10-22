@@ -1,5 +1,5 @@
 export const SCANNER_ENGINES = [
- { name: "Semgrep", type: "Static analysis", role: "Versioned SecurePatch JavaScript, TypeScript and Python baseline", version: "1.181.0", icon: "Code2", badgeColor: "text-[#A8C4B1]", rulesCount: "12 baseline rules" },
+ { name: "Semgrep", type: "Static analysis", role: "Versioned AVPR-Net JavaScript, TypeScript and Python baseline", version: "1.181.0", icon: "Code2", badgeColor: "text-[#A8C4B1]", rulesCount: "12 baseline rules" },
  { name: "Bandit", type: "Python AST", role: "Python security checks with explicit scan errors", version: "1.9.4", icon: "ShieldAlert", badgeColor: "text-amber-300", rulesCount: "Installed Bandit checks" },
  { name: "Credential patterns", type: "Local pattern checks", role: "Possible token/key patterns, with values omitted from evidence", version: "v1", icon: "KeyRound", badgeColor: "text-blue-300", rulesCount: "4 patterns; unverified matches" },
  { name: "OSV (optional)", type: "Dependency advisories", role: "Opt-in npm lockfile package/version advisory matching", version: "API", icon: "Radio", badgeColor: "text-purple-300", rulesCount: "npm lockfile v2/v3" },

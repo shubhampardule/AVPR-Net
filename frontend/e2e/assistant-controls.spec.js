@@ -5,7 +5,14 @@ const findingId = "64b64c0f8bd4f4f86f39b123";
 const originalCode = "export function parsePort(value) { return parseInt(value, 10); }\n";
 const proposalCode = "export function parsePort(value) {\n  if (!/^\\d+$/.test(value)) throw new Error('invalid port');\n  return Number(value);\n}\n";
 
-async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0 } = {}) {
+function verificationFixture(action, syntaxStatus = "passed") {
+  return { _id: `verification-${action}`, action, createdAt: "2026-10-22T09:00:00.000Z", repository: "example/project",
+    targetPath: "src/ports.js", sourceCommitSha: "a".repeat(40), pullRequest: action === "draft_pr" ? { number: 42, url: "https://github.com/example/project/pull/42" } : null,
+    checks: [{ name: "patch_integrity", status: "passed" }, { name: "syntax", status: syntaxStatus },
+      { name: "allowed_tests", status: "unavailable" }, { name: "security_rescan", status: "unavailable" }] };
+}
+
+async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0, patchSyntaxStatus = "valid", verificationRecords = [] } = {}) {
   let healthFailureCount = 0;
   let previewFailureCount = 0;
   await page.route("**/api/v1/**", async route => {
@@ -57,6 +64,7 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
       scanId, findingId, filePath: "src/ports.js", commitSha: "a".repeat(40), language: "javascript", mode: "review",
       originalCode, request: "Review this port parser for unsafe input handling.",
     };
+    else if (path.endsWith(`/scans/${scanId}/findings/${findingId}/verifications`)) data = { verifications: verificationRecords };
     else if (path.endsWith("/ai/analyze") && request.method() === "POST") {
       await onAnalyze?.(request);
       data = { status: "complete", analysis: { summary: "Synthetic evidence reviewed." }, retrieved_sources: [{ id: "evidence-1", source: "approved-security-guide.md", startLine: 1, endLine: 4, score: 0.92, text: "Validate untrusted values before use." }] };
@@ -75,11 +83,11 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     }
     else if (path.endsWith(`/scans/${scanId}/findings/${findingId}/validate`) && request.method() === "POST") {
       await onPatchValidate?.(request);
-      data = { applies: true, syntax: { status: "valid" } };
+      data = { applies: true, syntax: { status: patchSyntaxStatus }, verification: verificationFixture("validation", patchSyntaxStatus === "valid" ? "passed" : patchSyntaxStatus) };
     }
     else if (path.endsWith(`/scans/${scanId}/findings/${findingId}/pull-request`) && request.method() === "POST") {
       await onPullRequest?.(request);
-      data = { number: 42, url: "https://github.com/example/project/pull/42", status: "draft" };
+      data = { number: 42, url: "https://github.com/example/project/pull/42", status: "draft", verification: verificationFixture("draft_pr"), verificationRecorded: true };
     }
     else if (path.endsWith("/findings")) data = { findings: [], pagination: { page: 1, total: 0, totalPages: 1 } };
 
@@ -120,7 +128,7 @@ test("assistant investigation fixtures, tabs, evidence details, consent and subm
   await mockAssistant(page, { onAnalyze: request => submittedBodies.push({ body: JSON.parse(request.postData()), headers: request.headers() }) });
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto("/assistant");
-  await expect(page.getByRole("heading", { name: "Evidence before action." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI assistant" })).toBeVisible();
   await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
 
   const preview = page.getByLabel("Sanitized data preview");
@@ -312,6 +320,10 @@ test("review deep link validates the proposed patch and creates an acknowledged 
   const validate = page.getByRole("button", { name: "Check patch against scanned source" });
   await validate.click();
   await expect(page.getByText("Patch applies. Syntax: valid. Tests were not executed.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Remediation verification history" })).toBeVisible();
+  await expect(page.getByText("Allowed project tests")).toBeVisible();
+  await expect(page.getByText("Security rescan")).toBeVisible();
+  await expect(page.getByText("Unavailable").first()).toBeVisible();
   expect(JSON.parse(validationRequest.postData())).toMatchObject({ patch: proposalCode, acknowledged: false });
 
   const createPr = page.getByRole("button", { name: "Create draft pull request" });
@@ -321,4 +333,16 @@ test("review deep link validates the proposed patch and creates an acknowledged 
   await createPr.click();
   await expect(page.getByRole("link", { name: "Open draft pull request #42" })).toHaveAttribute("href", "https://github.com/example/project/pull/42");
   expect(JSON.parse(pullRequestRequest.postData())).toMatchObject({ patch: proposalCode, acknowledged: true });
+});
+
+test("a syntax failure is recorded and blocks draft pull request creation", async ({ page }) => {
+  await mockAssistant(page, { patchSyntaxStatus: "failed" });
+  await page.goto(`/assistant?mode=review&findingId=${findingId}`);
+  await approve(page);
+  await page.getByRole("button", { name: "Draft proposal" }).click();
+  await page.getByRole("button", { name: "Check patch against scanned source" }).click();
+  await expect(page.getByRole("region", { name: "Remediation verification history" })).toBeVisible();
+  await expect(page.getByText("Failed").first()).toBeVisible();
+  await page.getByRole("checkbox", { name: /I reviewed this patch and understand/ }).check();
+  await expect(page.getByRole("button", { name: "Create draft pull request" })).toBeDisabled();
 });

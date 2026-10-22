@@ -64,19 +64,19 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
   }
 
   const severityBadges = {
-    critical: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-    high: "bg-orange-500/10 text-orange-400 border-orange-500/20",
-    medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    low: "bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/20",
-    info: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    critical: "bg-severity-critical/10 text-severity-critical border-severity-critical/20",
+    high: "bg-severity-high/10 text-severity-high border-severity-high/20",
+    medium: "bg-severity-medium/10 text-severity-medium border-severity-medium/20",
+    low: "bg-accent-security/10 text-accent-security border-accent-security/20",
+    info: "bg-severity-info/10 text-severity-info border-severity-info/20",
   };
 
   const badgeClass =
     severityBadges[finding.severity?.toLowerCase()] ||
-    "bg-white/[0.05] text-text-muted border-white/[0.1]";
+    "bg-text-primary/[0.05] text-text-muted border-text-primary/[0.1]";
   const riskCategoryClass =
     severityBadges[finding.riskCategory?.toLowerCase()] ||
-    "bg-white/[0.05] text-text-muted border-white/[0.1]";
+    "bg-text-primary/[0.05] text-text-muted border-text-primary/[0.1]";
   const guidance = findingGuidance(finding);
   const humanReviewState = finding.status === "acknowledged"
     ? "Human reviewed · confirmed"
@@ -87,39 +87,39 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
         : "Automated signal · not yet verified by a person";
 
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-[#171D1F] overflow-hidden transition hover:border-white/[0.16]">
+    <div className="rounded-xl border border-text-primary/[0.08] bg-bg-secondary overflow-hidden transition hover:border-text-primary/[0.16]">
       {/* Header Row */}
       <div
         className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none"
       >
         <div className="flex items-start gap-3.5">
-          <div className="mt-0.5 p-2 rounded-lg bg-[#202729] border border-white/[0.08] text-rose-400">
+          <div className="mt-0.5 p-2 rounded-lg bg-bg-elevated border border-text-primary/[0.08] text-severity-critical">
             <ShieldAlert className="w-4 h-4" />
           </div>
 
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-1.5">
               <span
-                className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border ${badgeClass}`}
+                className={`px-2 py-0.5 rounded text-[11px] font-mono uppercase font-semibold border ${badgeClass}`}
                 title={`Scanner severity: ${finding.severity}`}
               >
-                {finding.severity}
+                Severity: {finding.severity}
               </span>
 
               <span
-                className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border ${riskCategoryClass}`}
-                title="SecurePatch calculated risk category"
+                className={`px-2 py-0.5 rounded text-[11px] font-mono uppercase font-semibold border ${riskCategoryClass}`}
+                title="AVPR-Net calculated risk category"
               >
-                {finding.riskCategory} Risk
+                Risk: {finding.riskCategory}
               </span>
 
               {finding.cwe && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono text-text-muted bg-white/[0.04] border border-white/[0.06]">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono text-text-muted bg-text-primary/[0.04] border border-text-primary/[0.06]">
                   {finding.cwe}
                 </span>
               )}
 
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono text-text-muted bg-white/[0.04] border border-white/[0.06]">
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono text-text-muted bg-text-primary/[0.04] border border-text-primary/[0.06]">
                 {finding.scanner}
               </span>
             </div>
@@ -128,9 +128,9 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
               {finding.title}
             </h3>
             {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId || finding.organization || "")}`}
-              onClick={(event) => event.stopPropagation()} className="text-xs font-medium text-[#A8C4B1] hover:underline underline-offset-2">Explain with Nemotron →</Link>}
-            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-[#A8C4B1] hover:underline underline-offset-2">Draft a fix →</Link>}
-            <span className="ml-3 text-xs text-slate-400">{reviewLabels[finding.status || "open"] || "Needs human review"}</span>
+              onClick={(event) => event.stopPropagation()} className="text-xs font-medium text-accent-security hover:underline underline-offset-2">Explain with Nemotron →</Link>}
+            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-accent-security hover:underline underline-offset-2">Draft a fix →</Link>}
+            <span className="ml-3 text-xs text-text-muted">{reviewLabels[finding.status || "open"] || "Needs human review"}</span>
 
             <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">
               <FileCode className="w-3.5 h-3.5 text-text-muted" />
@@ -139,14 +139,14 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
                 {finding.startLine ? `:${finding.startLine}` : ""}
               </span>
             </div>
-            {finding.ruleId && <p className="mt-1 break-all font-mono-code text-[10px] text-text-muted">Rule: {finding.ruleId}</p>}
+            {finding.ruleId && <p className="mt-1 break-all font-mono-code text-[11px] text-text-muted">Rule: {finding.ruleId}</p>}
           </div>
         </div>
 
         {/* Risk Score and Accordion Toggle */}
-        <div className="flex items-center justify-between md:justify-end gap-6 pt-2 md:pt-0 border-t md:border-t-0 border-white/[0.06]">
+        <div className="flex items-center justify-between md:justify-end gap-6 pt-2 md:pt-0 border-t md:border-t-0 border-text-primary/[0.06]">
           <div className="flex flex-col items-start md:items-end">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted mb-1">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1">
               Risk Score
             </span>
             <RiskScoreBar
@@ -159,7 +159,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
             aria-label={expanded ? "Collapse finding" : "Expand finding"} aria-expanded={expanded}
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="p-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06] text-text-muted hover:text-white"
+            className="p-1.5 rounded-lg bg-text-primary/[0.04] border border-text-primary/[0.06] text-text-muted hover:text-text-primary"
           >
             {expanded ? (
               <ChevronUp className="w-4 h-4" />
@@ -172,27 +172,33 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
 
       {/* Expanded Details */}
       {expanded && (
-        <div className="px-4 pb-5 pt-2 sm:px-5 border-t border-white/[0.06] bg-[#0A0B0E]/60 space-y-4">
-          <section className="rounded-lg border border-[#A8C4B1]/15 bg-[#A8C4B1]/[0.04] p-4" aria-label="Finding interpretation">
+        <div className="px-4 pb-5 pt-2 sm:px-5 border-t border-text-primary/[0.06] bg-bg-primary/60 space-y-4">
+          <section className="rounded-lg border border-accent-security/15 bg-accent-security/[0.04] p-4" aria-label="Finding interpretation">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-sm font-medium text-text-primary">Why this matters</h4>
-              <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-300">{humanReviewState}</span>
+              <span className="rounded-full border border-text-primary/10 px-2 py-1 text-[11px] text-text-secondary">{humanReviewState}</span>
             </div>
             <p className="mt-2 text-xs leading-5 text-text-secondary">{guidance.risk}</p>
-            <h5 className="mt-4 text-xs font-semibold text-[#A8C4B1]">Suggested next step</h5>
+            <h5 className="mt-4 text-xs font-semibold text-accent-security">Suggested next step</h5>
             <p className="mt-1 text-xs leading-5 text-text-secondary">{guidance.next}</p>
-            <p className="mt-3 text-[11px] leading-5 text-slate-500">SecurePatch risk score ({finding.riskScore}/10) helps prioritize review; it is not a probability of exploitation. Verify the source and rule before treating this as confirmed.</p>
+            <p className="mt-3 text-[11px] leading-5 text-text-muted">AVPR-Net risk score ({finding.riskScore}/10) helps prioritize review; it is not a probability of exploitation. Verify the source and rule before treating this as confirmed.</p>
           </section>
-          {commitSha && <a className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://github.com/${finding.owner}/${finding.repo}/blob/${commitSha}/${finding.filePath.split("/").map(encodeURIComponent).join("/")}#L${finding.startLine}`}>View exact scanned source</a>}
+          {finding.remediationGuidance?.source === "deterministic" && Array.isArray(finding.remediationGuidance.steps) && <section className="rounded-lg border border-sky-400/15 bg-sky-400/[0.03] p-4" aria-label="Rule-based remediation guidance">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-medium text-text-primary">{finding.remediationGuidance.title}</h4><span className="rounded-full border border-sky-300/20 px-2 py-1 text-[11px] text-sky-200">Rule-based · {finding.remediationGuidance.version}</span></div>
+            <p className="mt-2 text-xs leading-5 text-text-secondary">{finding.remediationGuidance.summary}</p>
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs leading-5 text-text-secondary">{finding.remediationGuidance.steps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol>
+            <p className="mt-3 text-[11px] text-text-muted">This guidance is a fixed AVPR-Net rule result. It is separate from any AI-generated proposal and still needs review in your code context.</p>
+          </section>}
+          {commitSha && <a className="text-xs font-medium text-accent-security underline underline-offset-2" target="_blank" rel="noreferrer" href={`https://github.com/${finding.owner}/${finding.repo}/blob/${commitSha}/${finding.filePath.split("/").map(encodeURIComponent).join("/")}#L${finding.startLine}`}>View exact scanned source</a>}
           {organizationId && <form onSubmit={saveReview} className="space-y-2">
-            <label className="block text-xs text-slate-300">Record your decision<select aria-label="Review status" value={reviewStatus} onChange={e => setReviewStatus(e.target.value)} className="ml-2 bg-[#263032] p-2 rounded">{Object.entries(reviewLabels).map(([value, label]) => <option key={value} value={value}>{value === "open" ? "Open — needs review" : value === "acknowledged" ? "Confirm / acknowledge" : value === "dismissed" ? "Dismiss after review" : "Resolved"}</option>)}</select></label>
-            <p className="text-xs text-slate-400">Acknowledged means a person reviewed and confirmed the finding for follow-up. Dismissed records why it is not actionable. A persisting issue marked resolved reopens on the next scan.</p>
-            <label className="block text-xs text-slate-300">Reason<textarea required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} className="block mt-2 w-full bg-black/30 border border-white/15 p-2 rounded" /></label>
-            <button disabled={saving || !reason.trim()} className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2">{saving ? "Saving…" : "Save decision"}</button>
-            {saved && <p role="status" className="text-xs text-emerald-200">{saved}</p>}
-            {finding.reviewHistory?.length > 0 && <details className="pt-2"><summary className="cursor-pointer text-xs text-slate-300">Review history ({finding.reviewHistory.length})</summary><ol className="mt-2 space-y-2 border-l border-white/10 pl-3">{[...finding.reviewHistory].reverse().map((entry, index) => <li key={`${entry.reviewedAt || index}-${index}`} className="text-xs text-slate-400"><span className="font-medium text-slate-200">{reviewLabels[entry.status] || entry.status}</span><span> · {entry.reviewedBy?.name || "Workspace member"} · {entry.reviewedAt ? new Date(entry.reviewedAt).toLocaleString() : "time unavailable"}</span><p className="mt-1 whitespace-pre-wrap">{entry.reason}</p></li>)}</ol></details>}
-            {!finding.reviewHistory?.length && finding.statusReason && <p className="text-xs text-slate-400">Previous review: {finding.statusReason}{finding.reviewedAt ? ` · ${new Date(finding.reviewedAt).toLocaleString()}` : ""}</p>}
-            {error && <p role="alert" className="text-xs text-red-200">{error}</p>}
+            <label className="block text-xs text-text-secondary">Record your decision<select aria-label="Review status" value={reviewStatus} onChange={e => setReviewStatus(e.target.value)} className="ml-2 bg-bg-subtle p-2 rounded">{Object.entries(reviewLabels).map(([value, label]) => <option key={value} value={value}>{value === "open" ? "Open — needs review" : value === "acknowledged" ? "Confirm / acknowledge" : value === "dismissed" ? "Dismiss after review" : "Resolved"}</option>)}</select></label>
+            <p className="text-xs text-text-muted">Acknowledged means a person reviewed and confirmed the finding for follow-up. Dismissed records why it is not actionable. A persisting issue marked resolved reopens on the next scan.</p>
+            <label className="block text-xs text-text-secondary">Reason<textarea required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} className="block mt-2 w-full bg-bg-primary border border-text-primary/15 p-2 rounded" /></label>
+            <button disabled={saving || !reason.trim()} className="text-xs font-medium text-accent-security underline underline-offset-2">{saving ? "Saving…" : "Save decision"}</button>
+            {saved && <p role="status" className="text-xs text-severity-low">{saved}</p>}
+            {finding.reviewHistory?.length > 0 && <details className="pt-2"><summary className="cursor-pointer text-xs text-text-secondary">Review history ({finding.reviewHistory.length})</summary><ol className="mt-2 space-y-2 border-l border-text-primary/10 pl-3">{[...finding.reviewHistory].reverse().map((entry, index) => <li key={`${entry.reviewedAt || index}-${index}`} className="text-xs text-text-muted"><span className="font-medium text-text-primary">{reviewLabels[entry.status] || entry.status}</span><span> · {entry.reviewedBy?.name || "Workspace member"} · {entry.reviewedAt ? new Date(entry.reviewedAt).toLocaleString() : "time unavailable"}</span><p className="mt-1 whitespace-pre-wrap">{entry.reason}</p></li>)}</ol></details>}
+            {!finding.reviewHistory?.length && finding.statusReason && <p className="text-xs text-text-muted">Previous review: {finding.statusReason}{finding.reviewedAt ? ` · ${new Date(finding.reviewedAt).toLocaleString()}` : ""}</p>}
+            {error && <p role="alert" className="text-xs text-severity-critical">{error}</p>}
           </form>}
           {/* Description */}
           {finding.description && (
@@ -210,10 +216,10 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
           {finding.evidenceSnippet && (
             <div>
               <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-1.5 flex items-center gap-1.5">
-                <Terminal className="w-3 h-3 text-[#78A88B]" />
+                <Terminal className="w-3 h-3 text-accent-security" />
                 Vulnerable Code Evidence
               </h4>
-              <div className="p-3 rounded-lg bg-[#050607] border border-white/[0.08] overflow-x-auto font-mono text-xs text-text-primary">
+              <div className="p-3 rounded-lg bg-bg-primary border border-text-primary/[0.08] overflow-x-auto font-mono text-xs text-text-primary">
                 <pre>{finding.evidenceSnippet}</pre>
               </div>
             </div>
@@ -221,31 +227,31 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
 
           {/* Risk Factors Breakdown */}
           {finding.riskFactors && (
-            <div className="p-3 rounded-lg bg-[#202729] border border-white/[0.06]">
+            <div className="p-3 rounded-lg bg-bg-elevated border border-text-primary/[0.06]">
               <h4 className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-2">
                 Deterministic Risk Factors
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
                 <div>
-                  <span className="text-[10px] text-text-muted block">Severity</span>
+                  <span className="text-[11px] text-text-muted block">Severity</span>
                   <span className="font-semibold text-text-primary">
                     {finding.riskFactors.severity} / 10
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-text-muted block">Exploitability</span>
+                  <span className="text-[11px] text-text-muted block">Exploitability</span>
                   <span className="font-semibold text-text-primary">
                     {finding.riskFactors.exploitability} / 10
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-text-muted block">Occurrence</span>
+                  <span className="text-[11px] text-text-muted block">Occurrence</span>
                   <span className="font-semibold text-text-primary">
                     {finding.riskFactors.occurrence} / 10
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-text-muted block">Business Impact</span>
+                  <span className="text-[11px] text-text-muted block">Business Impact</span>
                   <span className="font-semibold text-text-primary">
                     {finding.riskFactors.businessImpact} / 10
                   </span>
@@ -257,7 +263,7 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
           {/* Remediation Guidance */}
           {finding.remediation && (
             <div>
-              <h4 className="text-[11px] font-mono uppercase tracking-wider text-[#78A88B] mb-1">
+              <h4 className="text-[11px] font-mono uppercase tracking-wider text-accent-security mb-1">
                 Suggested remediation · review before applying
               </h4>
               <a

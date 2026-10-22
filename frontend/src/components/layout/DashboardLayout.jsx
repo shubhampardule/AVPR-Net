@@ -14,6 +14,7 @@ import {
 import { API_BASE_URL } from "../../config/api";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { BrandLockup } from "../ui/BrandLogo";
+import NotificationCenter from "./NotificationCenter";
 
 export default function DashboardLayout() {
   const location = useLocation();
@@ -165,7 +166,8 @@ export default function DashboardLayout() {
     user ? displayName.charAt(0).toUpperCase() : loading ? "…" : "?";
 
   return (
-    <div className="min-h-screen bg-[#101416] text-[#E8EEEB]">
+    <div className="review-workspace min-h-screen bg-bg-primary text-text-primary">
+      <NotificationCenter organizationId={selectedOrg?._id || selectedOrg?.id} />
 
       {/* ---------------------------------------------------------------- */}
       {/* Background                                                      */}
@@ -175,7 +177,7 @@ export default function DashboardLayout() {
       {/* Mobile Header                                                   */}
       {/* ---------------------------------------------------------------- */}
 
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-[#101416] border-b border-white/[0.06]">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-bg-primary border-b border-text-primary/[0.06]">
 
         <div className="h-full px-4 flex items-center justify-between">
 
@@ -192,7 +194,7 @@ export default function DashboardLayout() {
             <ThemeToggle />
             <button
               onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-              className="p-2 rounded-lg bg-[#202729] border border-white/[0.08]"
+              className="p-2 rounded-lg bg-bg-elevated border border-text-primary/[0.08]"
               aria-label="Toggle navigation"
               aria-expanded={mobileSidebarOpen}
             >
@@ -209,6 +211,7 @@ export default function DashboardLayout() {
       {/* Application Shell                                               */}
       {/* ---------------------------------------------------------------- */}
 
+      <a className="skip-link" href="#workspace-content">Skip to content</a>
       <div className="relative z-10 min-h-screen">
 
 
@@ -220,8 +223,8 @@ export default function DashboardLayout() {
           className={`
             fixed lg:fixed top-0 left-0 z-40
             h-screen w-[250px]
-            bg-[#171D1F]
-            border-r border-white/[0.06]
+            bg-bg-secondary
+            border-r border-text-primary/[0.06]
             flex flex-col
             transition-transform duration-300
             ${
@@ -236,13 +239,13 @@ export default function DashboardLayout() {
           {/* Logo                                                         */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="h-16 px-5 flex items-center border-b border-white/[0.06]">
+          <div className="h-16 px-5 flex items-center border-b border-text-primary/[0.06]">
 
             <Link
               to="/dashboard"
               className="flex items-center gap-2.5"
             >
-              <BrandLockup wordmarkClassName="text-sm" descriptor />
+              <BrandLockup wordmarkClassName="text-sm" />
 
             </Link>
 
@@ -253,7 +256,7 @@ export default function DashboardLayout() {
           {/* Organization Selector                                        */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="p-4 border-b border-white/[0.06]">
+          <div className="p-4 border-b border-text-primary/[0.06]">
 
             <div className="mb-2 px-1 text-xs font-medium text-text-muted">
               Workspace
@@ -270,7 +273,7 @@ export default function DashboardLayout() {
                   ""
                 }
                 onChange={handleOrganizationChange}
-                className="appearance-none w-full rounded-md border border-white/[0.1] bg-[#202729] px-3 py-2.5 pr-8 text-sm text-text-primary focus:outline-none focus:border-[#78A88B]/60"
+                className="appearance-none w-full rounded-md border border-text-primary/[0.1] bg-bg-elevated px-3 py-2.5 pr-8 text-sm text-text-primary focus:outline-none focus:border-accent-security/60"
               >
 
                 {organizations.length === 0 ? (
@@ -293,13 +296,13 @@ export default function DashboardLayout() {
 
             </div>
 
-            {!contextError && organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-sm font-medium text-[#A8C4B1] hover:underline underline-offset-2">{showOrgForm ? "Cancel" : "Create organization"}</button>}
+            {!contextError && organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-sm font-medium text-accent-security hover:underline underline-offset-2">{showOrgForm ? "Cancel" : "Create organization"}</button>}
             {!contextError && (showOrgForm || (!loading && organizations.length === 0)) && (
               <form onSubmit={createOrganization} className="mt-3 space-y-2">
                 <label htmlFor="organization-name" className="block text-xs text-text-secondary">Organization name</label>
-                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-white/10 bg-[#202729] px-3 py-2 text-xs focus:border-[#78A88B] focus:outline-none" />
-                {orgError && <p role="alert" className="text-xs text-red-300">{orgError}</p>}
-                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-[#78A88B] px-3 py-2 text-xs font-semibold text-black disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
+                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-text-primary/10 bg-bg-elevated px-3 py-2 text-xs focus:border-accent-security focus:outline-none" />
+                {orgError && <p role="alert" className="text-xs text-severity-critical">{orgError}</p>}
+                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-accent-security px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
               </form>
             )}
 
@@ -310,7 +313,7 @@ export default function DashboardLayout() {
           {/* Navigation                                                    */}
           {/* ------------------------------------------------------------ */}
 
-          <nav className="flex-1 p-3 overflow-y-auto">
+          <nav aria-label="Workspace navigation" className="flex-1 p-3 overflow-y-auto">
 
             {/* Platform */}
 
@@ -321,7 +324,6 @@ export default function DashboardLayout() {
 
             <div className="space-y-1">
 
-              <SidebarItem icon={ShieldCheck} label="AI assistant" to="/assistant" active={location.pathname === "/assistant"} />
 
               <SidebarItem
                 icon={LayoutDashboard}
@@ -337,9 +339,7 @@ export default function DashboardLayout() {
                 icon={GitBranch}
                 label="Repositories"
                 to="/github"
-                active={
-                  location.pathname === "/github"
-                }
+                active={location.pathname.startsWith("/github")}
               />
 
 
@@ -349,6 +349,7 @@ export default function DashboardLayout() {
                 to="/findings"
                 active={location.pathname === "/findings"}
               />
+              <SidebarItem icon={ShieldCheck} label="AI assistant" to="/assistant" active={location.pathname === "/assistant"} />
 
             </div>
 
@@ -378,11 +379,11 @@ export default function DashboardLayout() {
           {/* User                                                         */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="p-3 border-t border-white/[0.06]">
+          <div className="p-3 border-t border-text-primary/[0.06]">
 
-            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-[#202729] border border-white/[0.06]">
+            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-bg-elevated border border-text-primary/[0.06]">
 
-              <div className="w-8 h-8 rounded-lg bg-[#78A88B]/10 border border-[#78A88B]/20 flex items-center justify-center text-xs font-mono font-bold text-[#78A88B]">
+              <div className="w-8 h-8 rounded-lg bg-accent-security/10 border border-accent-security/20 flex items-center justify-center text-xs font-mono font-bold text-accent-security">
                 {userInitial}
               </div>
 
@@ -408,7 +409,7 @@ export default function DashboardLayout() {
                 title={user ? "Sign out" : "Sign out is unavailable until your account loads"}
                 aria-label="Sign out"
                 disabled={!user}
-                className="p-1.5 text-text-muted hover:text-[#F87171] transition-colors"
+                className="p-1.5 text-text-muted hover:text-severity-critical transition-colors"
               >
 
                 <LogOut className="w-3.5 h-3.5" />
@@ -441,17 +442,17 @@ export default function DashboardLayout() {
         {/* Main                                                            */}
         {/* ---------------------------------------------------------------- */}
 
-        <main className="min-h-screen min-w-0 pt-16 lg:ml-[250px] lg:pt-0">
+        <div className="workspace-body min-h-screen min-w-0 pt-16 lg:ml-[250px] lg:pt-0">
 
           {/* ------------------------------------------------------------ */}
           {/* Desktop Topbar                                               */}
           {/* ------------------------------------------------------------ */}
 
-          <header className="hidden h-16 items-center justify-between border-b border-white/[0.06] bg-[#101416] px-8 lg:flex">
+          <header className="workspace-toolbar sticky top-0 z-30 hidden h-16 items-center justify-between border-b border-text-primary/[0.06] bg-bg-primary px-8 lg:flex">
 
             <div className="flex items-center gap-2 text-xs font-medium text-text-muted">
 
-              <span className="text-[#78A88B]">SecurePatch</span>
+              <Link to="/dashboard" className="hover:text-text-primary">Workspace</Link>
 
               <span>/</span>
 
@@ -465,11 +466,6 @@ export default function DashboardLayout() {
             <div className="flex items-center gap-3">
 
               <ThemeToggle />
-              <span className="text-xs text-text-muted">{user ? "Signed in" : loading ? "Loading account" : "Account unavailable"}</span>
-
-              <div title={user?.name || (loading ? "Loading account" : "Account unavailable")} className="w-8 h-8 rounded-full bg-[#202729] border border-white/[0.1] flex items-center justify-center text-xs font-medium text-[#D7DFDA]">
-                {userInitial}
-              </div>
 
             </div>
 
@@ -480,21 +476,23 @@ export default function DashboardLayout() {
           {/* Page Content                                                  */}
           {/* ------------------------------------------------------------ */}
 
-          {contextError && <section role="alert" className="mx-5 my-8 max-w-2xl rounded-xl border border-red-400/30 bg-red-400/[0.04] p-5 text-sm text-red-100 sm:p-6">
-            <p className="text-xs font-medium uppercase tracking-wide text-red-100/70">Workspace unavailable</p>
+          {contextError && <section role="alert" className="mx-5 my-8 max-w-2xl rounded-xl border border-severity-critical/30 bg-severity-critical/[0.04] p-5 text-sm text-severity-critical sm:p-6">
+            <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">Workspace unavailable</p>
             <h1 className="mt-2 text-xl font-semibold tracking-tight">We couldn’t load your account.</h1>
-            <p className="mt-2 leading-6 text-red-100/75">Try again. If this continues, contact your administrator with the technical details below.</p>
-            <details className="mt-4 text-xs text-red-100/70">
+            <p className="mt-2 leading-6 text-text-secondary">Try again. If this continues, contact your administrator with the technical details below.</p>
+            <details className="mt-4 text-xs text-text-secondary">
               <summary className="w-fit cursor-pointer underline underline-offset-2">Technical details</summary>
               <p className="mt-2 break-words font-mono-code">{contextError}</p>
             </details>
-            <button className="mt-5 rounded-md border border-red-100/20 px-3 py-2 text-xs font-semibold hover:bg-red-100/10" onClick={loadDashboardContext}>Retry</button>
+            <button className="mt-5 rounded-md border border-severity-critical/20 px-3 py-2 text-xs font-semibold hover:bg-severity-critical/10" onClick={loadDashboardContext}>Retry</button>
           </section>}
-          {signOutError && <div role="alert" className="m-5 rounded-lg border border-red-400/30 bg-red-400/[0.04] p-4 text-sm text-red-100">
+          {signOutError && <div role="alert" className="m-5 rounded-lg border border-severity-critical/30 bg-severity-critical/[0.04] p-4 text-sm text-severity-critical">
             <p className="font-medium">Sign-out could not be confirmed.</p>
-            <p className="mt-1 text-red-100/75">Please try again.</p>
-            <details className="pt-1 text-xs text-red-100/70"><summary className="w-fit cursor-pointer underline underline-offset-2">Technical details</summary><p className="mt-2 break-words font-mono-code">{signOutError}</p></details>
+            <p className="mt-1 text-text-secondary">Please try again.</p>
+            <details className="pt-1 text-xs text-text-secondary"><summary className="w-fit cursor-pointer underline underline-offset-2">Technical details</summary><p className="mt-2 break-words font-mono-code">{signOutError}</p></details>
           </div>}
+          {!contextError && searchParams.get("organizationDeleted") === "1" && <p role="status" className="mx-6 mt-6 rounded-md border border-text-primary/15 bg-bg-secondary p-4 text-sm text-text-secondary">Organization access has been removed. Data erasure is queued after a 24-hour settling period and runs when the worker is available.</p>}
+          <div id="workspace-content" tabIndex={-1}>
           {!contextError && <Outlet
             key={`${selectedOrg?.id || selectedOrg?._id}:${location.pathname}:${location.search}`}
             context={{
@@ -505,8 +503,9 @@ export default function DashboardLayout() {
               refreshContext: loadDashboardContext,
             }}
           />}
+          </div>
 
-        </main>
+        </div>
 
       </div>
 
@@ -532,8 +531,8 @@ function SidebarItem({
     text-left transition-all
     ${
       active
-        ? "bg-white/[0.06] text-text-primary border border-white/[0.07]"
-        : "text-text-muted hover:text-text-primary hover:bg-white/[0.035]"
+        ? "bg-text-primary/[0.06] text-text-primary border border-text-primary/[0.07]"
+        : "text-text-muted hover:text-text-primary hover:bg-text-primary/[0.035]"
     }
     ${
       disabled
@@ -544,7 +543,7 @@ function SidebarItem({
 
   if (disabled) {
     return (
-      <div className={className}>
+      <div className={className} aria-current={active ? "page" : undefined}>
 
         <Icon className="w-4 h-4" />
 
@@ -553,7 +552,7 @@ function SidebarItem({
         </span>
 
         {badge && (
-          <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-text-muted uppercase">
+          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-text-primary/[0.04] border border-text-primary/[0.06] text-text-muted uppercase">
             {badge}
           </span>
         )}
@@ -565,12 +564,12 @@ function SidebarItem({
   return (
     <Link
       to={to}
-      className={className}
+      className={className} aria-current={active ? "page" : undefined}
     >
 
       <Icon
         className={`w-4 h-4 ${
-          active ? "text-[#78A88B]" : ""
+          active ? "text-accent-security" : ""
         }`}
       />
 
@@ -579,7 +578,7 @@ function SidebarItem({
       </span>
 
       {badge && (
-        <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-text-muted uppercase">
+        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-text-primary/[0.04] border border-text-primary/[0.06] text-text-muted uppercase">
           {badge}
         </span>
       )}
@@ -594,12 +593,16 @@ function SidebarItem({
    ========================================================================== */
 
 function getPageLabel(pathname) {
+  if (pathname.startsWith("/github/")) return pathname.endsWith("/scan") ? "Security scans" : pathname.endsWith("/file") ? "Source file" : "Repository";
   switch (pathname) {
     case "/dashboard":
-      return "Dashboard";
+      return "Overview";
 
     case "/github":
-      return "GitHub";
+      return "Repositories";
+
+    case "/assistant":
+      return "AI assistant";
 
     case "/settings":
       return "Settings";
@@ -608,6 +611,6 @@ function getPageLabel(pathname) {
       return "Findings";
 
     default:
-      return "Dashboard";
+      return "Overview";
   }
 }

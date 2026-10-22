@@ -18,6 +18,19 @@ test("finding guidance explains a secret risk and a concrete first action", () =
   expect(guidance.next).toMatch(/revoke or rotate/i);
 });
 
+test("renders versioned deterministic remediation separately from AI proposals", async () => {
+  render(<MemoryRouter><FindingCard finding={{ ...sample, scanner: "semgrep", ruleId: "securepatch.js.sql-concatenation", remediationGuidance: {
+    source: "deterministic", version: "securepatch-guidance-v1", title: "Bind SQL parameters",
+    summary: "Building a query by concatenating values can let input change the SQL statement.",
+    steps: ["Use the database driver's parameterized query API."],
+  } }} /></MemoryRouter>);
+  await userEvent.click(screen.getByRole("button", { name: "Expand finding" }));
+  expect(screen.getByRole("region", { name: "Rule-based remediation guidance" })).toBeTruthy();
+  expect(screen.getByText("Rule-based · securepatch-guidance-v1")).toBeTruthy();
+  expect(screen.getByText(/parameterized query API/)).toBeTruthy();
+  expect(screen.getByText(/separate from any AI-generated proposal/)).toBeTruthy();
+});
+
 test("review decision requires a reason and saves it through the API", async () => {
   const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: { status: "dismissed" } }) }));
   vi.stubGlobal("fetch", fetchMock);

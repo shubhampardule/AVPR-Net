@@ -1,5 +1,5 @@
 /**
- * Real-world vulnerability scenarios aligned 1:1 with the SecurePatch PRD & MongoDB schema.
+ * Real-world vulnerability scenarios aligned 1:1 with the AVPR-Net PRD & MongoDB schema.
  * Covers supported categories:
  * 1. SQL Injection (CWE-89)
  * 2. Command Injection (CWE-78)

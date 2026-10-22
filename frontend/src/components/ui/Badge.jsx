@@ -2,13 +2,13 @@ import React from 'react';
 
 export function Badge({ children, variant = 'default', className = '' }) {
   const variants = {
-    default: 'bg-white/[0.04] text-text-secondary border-white/[0.08]',
-    security: 'bg-[#78A88B]/10 text-[#78A88B] border-[#78A88B]/20',
-    blue: 'bg-[#8AA7B2]/10 text-[#8AA7B2] border-[#8AA7B2]/20',
-    critical: 'bg-[#F87171]/10 text-[#F87171] border-[#F87171]/25',
-    high: 'bg-[#FB923C]/10 text-[#FB923C] border-[#FB923C]/25',
-    medium: 'bg-[#FBBF24]/10 text-[#FBBF24] border-[#FBBF24]/25',
-    subtle: 'bg-bg-card text-text-muted border-white/[0.06]',
+    default: 'bg-text-primary/[0.04] text-text-secondary border-text-primary/[0.08]',
+    security: 'bg-accent-security/10 text-accent-security border-accent-security/20',
+    blue: 'bg-accent-blue/10 text-accent-blue border-accent-blue/20',
+    critical: 'bg-severity-critical/10 text-severity-critical border-severity-critical/25',
+    high: 'bg-severity-high/10 text-severity-high border-severity-high/25',
+    medium: 'bg-severity-medium/10 text-severity-medium border-severity-medium/25',
+    subtle: 'bg-bg-card text-text-muted border-text-primary/[0.06]',
   };
 
   return (

@@ -7,7 +7,9 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      borderRadius: { lg: "0.5rem", xl: "0.625rem", "2xl": "0.75rem" },
       colors: {
+        "on-accent": "var(--on-accent)",
         bg: {
           primary: 'var(--bg-primary)',
           secondary: 'var(--bg-secondary)',
@@ -46,7 +48,7 @@ export default {
       boxShadow: {
         'subtle-glow': '0 0 0 1px rgba(120, 168, 139, 0.14)',
         'blue-glow': '0 0 0 1px rgba(138, 167, 178, 0.14)',
-        'card': '0 8px 28px 0 rgba(0, 0, 0, 0.18)',
+        'card': 'var(--shadow-card)',
         'elevated': '0 16px 40px -18px rgba(0, 0, 0, 0.5)',
       },
       animation: {

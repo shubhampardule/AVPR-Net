@@ -33,3 +33,17 @@ test("an old organization's late history response cannot replace the new context
   resolveOld({ ok: true, json: async () => ({ data: { scans: [{ _id: "old-private-scan", createdAt: new Date().toISOString() }] } }) });
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Scan history" }).options.length).toBe(1));
 });
+test("scan comparison explains when there is no baseline and avoids change counts", async () => {
+  vi.stubGlobal("fetch", vi.fn(url => {
+    const path = String(url);
+    if (path.includes("/organizations/")) return ok({ scans: [{ _id: "scan-one", status: "completed", createdAt: new Date().toISOString() }] });
+    if (path.endsWith("/comparison")) return ok({ canCompare: false, previousScanId: null, new: [], persistent: [], fixed: [], limitation: "No earlier completed scan with successful scanner runs is available. Findings are not labeled new, persistent, or fixed." });
+    if (path.includes("/findings")) return ok({ findings: [], pagination: { total: 0, totalPages: 1, page: 1 } });
+    return ok({ _id: "scan-one", status: "completed", summary: { total: 0 }, scannerErrors: [] });
+  }));
+  render(<Harness />);
+  await userEvent.click(await screen.findByRole("button", { name: "Compare with previous scan" }));
+  expect(await screen.findByText("Change labels are unavailable for these scans.")).toBeTruthy();
+  expect(screen.getByText(/No earlier completed scan/)).toBeTruthy();
+  expect(screen.queryByText(/New: 0/)).toBeNull();
+});

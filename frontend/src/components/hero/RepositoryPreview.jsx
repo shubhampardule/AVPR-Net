@@ -1,45 +1,36 @@
-import React from 'react';
-import { GitBranch } from 'lucide-react';
-import { SeverityPill } from '../ui/SeverityPill';
+import React, { useState } from 'react';
+import { GitBranch, FileCode2, ArrowUpRight, CircleDot, ChevronRight } from 'lucide-react';
 
-const sampleFindings = [
-  { title: 'Missing authorization check', path: 'src/api/accounts.js:84', severity: 'High' },
-  { title: 'Insecure cookie settings', path: 'src/http/session.js:29', severity: 'Medium' },
+const findings = [
+  { title: 'Missing authorization check', path: 'src/api/accounts.js', line: 84, severity: 'High', rule: 'Access control', risk: 'A signed-in user could read another account’s data. The route returns the record without checking who owns it.', code: ['const account = await findById(id);', 'res.json(account);'], next: 'Check that the signed-in user owns this account before returning the record.' },
+  { title: 'Insecure cookie settings', path: 'src/http/session.js', line: 29, severity: 'Medium', rule: 'Session security', risk: 'The session cookie is available to client-side scripts. An injected script could read it and use the session.', code: ['res.cookie("session", token, {', '  httpOnly: false', '});'], next: 'Enable httpOnly and secure cookie flags. Review SameSite behavior for your authentication flow.' },
 ];
 
 export function RepositoryPreview() {
+  const [selected, setSelected] = useState(0);
+  const finding = findings[selected];
   return (
-    <section aria-label="Sample repository overview" className="overflow-hidden rounded-xl border border-white/[0.1] bg-[#171D1F] text-left shadow-card">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
-        <div>
-          <p className="text-sm font-semibold text-[#E8EEEB]">Example project</p>
-          <p className="mt-1 text-xs text-[#A5B1AB]">Example data · no live scan</p>
-        </div>
-        <span className="inline-flex items-center gap-2 rounded-md border border-white/[0.1] px-2.5 py-1.5 text-xs text-[#B8C3BD]"><GitBranch className="h-3.5 w-3.5" aria-hidden="true" /> main</span>
-      </div>
-
-      <div className="px-5 py-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="font-mono-code text-xs text-[#A8B9AF]">acme / payments-api</p>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight text-[#E8EEEB]">Findings for review</h2>
+    <section aria-label="Sample repository overview" className="review-dossier">
+      <div className="review-dossier-top"><span><FileCode2 size={15} aria-hidden="true" /> acme / payments-api <ChevronRight size={13} aria-hidden="true" /> Findings</span><span>Example data · no live scan</span></div>
+      <div className="review-workbench">
+        <div className="review-inbox">
+          <div className="review-inbox-title"><strong>Findings</strong><span>2 open</span></div>
+          <div className="review-inbox-branch"><GitBranch size={13} aria-hidden="true" /> main <span>Sample branch</span></div>
+          <div className="review-finding-list" aria-label="Sample findings">
+            {findings.map((item, index) => <button key={item.path} type="button" aria-pressed={selected === index} onClick={() => setSelected(index)} className="review-finding-row"><CircleDot size={14} className={index ? 'review-medium' : 'review-risk'} aria-hidden="true" /><span><strong>{item.title}</strong><small>{item.path}:{item.line}</small><span className={index ? 'review-medium' : 'review-risk'}>{item.severity}</span></span><ChevronRight size={13} aria-hidden="true" /></button>)}
           </div>
-          <div className="rounded-lg border border-white/[0.08] bg-[#101416] px-4 py-3 text-right">
-            <p className="text-2xl font-semibold tracking-tight text-[#E8EEEB]">02</p>
-            <p className="mt-0.5 text-xs text-[#9BA8A1]">sample findings</p>
-          </div>
+          <p className="review-inbox-help">Select a finding to inspect its source and recommended next step.</p>
         </div>
-
-        <div className="mt-5 divide-y divide-white/[0.07] border-y border-white/[0.08]">
-          {sampleFindings.map((finding) => (
-            <div key={finding.title} className="flex flex-wrap items-center justify-between gap-3 py-4">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[#E8EEEB]">{finding.title}</p>
-                <p className="mt-1 truncate font-mono-code text-xs text-[#9BA8A1]">{finding.path}</p>
-              </div>
-              <SeverityPill severity={finding.severity} size="sm" />
-            </div>
-          ))}
+        <div className="review-finding" aria-live="polite" aria-atomic="true">
+          <div className="review-finding-meta"><span className={selected ? 'review-medium' : 'review-risk'}><CircleDot size={13} aria-hidden="true" /> {finding.severity} severity</span><span>{finding.rule}</span></div>
+          <h2>{finding.title}</h2>
+          <p>{finding.risk}</p>
+          <div className="review-code">
+            <div><span><FileCode2 size={13} aria-hidden="true" /> {finding.path}</span><span>Source excerpt</span></div>
+            <pre><code>{finding.code.map((line,index) => <span key={`${finding.path}-${index}`} className={index === 1 ? 'review-code-warning' : ''}><b>{finding.line + index}</b>{line}{'\n'}</span>)}</code></pre>
+          </div>
+          <div className="review-next"><strong>Recommended next step</strong><p>{finding.next}</p></div>
+          <a className="review-dossier-link" href="#playground">Explore a patch example <ArrowUpRight size={15} aria-hidden="true" /></a>
         </div>
       </div>
     </section>

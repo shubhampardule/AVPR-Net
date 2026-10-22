@@ -27,28 +27,28 @@ export function CodeBlock({
   const lines = code.trim().split('\n');
 
   return (
-    <div className={`rounded-lg border border-white/[0.08] bg-[#171D1F] overflow-hidden text-xs font-mono ${className}`}>
+    <div className={`rounded-lg border border-text-primary/[0.08] bg-bg-secondary overflow-hidden text-xs font-mono ${className}`}>
       {filename && (
-        <div className="flex items-center justify-between px-4 py-2 bg-[#202729] border-b border-white/[0.06] text-text-secondary">
+        <div className="flex items-center justify-between px-4 py-2 bg-bg-elevated border-b border-text-primary/[0.06] text-text-secondary">
           <div className="flex items-center gap-2">
-            <FileCode className="w-3.5 h-3.5 text-[#8AA7B2]" />
+            <FileCode className="w-3.5 h-3.5 text-accent-blue" />
             <span className="text-[11px] font-medium tracking-wide text-text-primary">{filename}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-[10px] uppercase tracking-wider text-text-muted">{language}</span>
+            <span className="text-[11px] uppercase tracking-wider text-text-muted">{language}</span>
             <button
               type="button"
               onClick={handleCopy}
-              className="p-1 rounded hover:bg-white/[0.06] text-text-muted hover:text-text-primary transition-colors"
+              className="p-1 rounded hover:bg-text-primary/[0.06] text-text-muted hover:text-text-primary transition-colors"
               title="Copy code"
               aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-[#78A88B]" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? <Check className="w-3.5 h-3.5 text-accent-security" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
       )}
-      {copyError && <p role="alert" className="border-b border-white/[0.06] px-4 py-2 text-[11px] text-amber-200">{copyError}</p>}
+      {copyError && <p role="alert" className="border-b border-text-primary/[0.06] px-4 py-2 text-[11px] text-severity-medium">{copyError}</p>}
 
       <div
         className="p-4 overflow-x-auto text-[12px] leading-relaxed select-text"
@@ -64,14 +64,14 @@ export function CodeBlock({
                   key={idx}
                   className={`${
                     isHighlighted
-                      ? 'bg-[#F87171]/10 border-l-2 border-[#F87171]'
-                      : 'hover:bg-white/[0.02]'
+                      ? 'bg-severity-critical/10 border-l-2 border-severity-critical'
+                      : 'hover:bg-text-primary/[0.02]'
                   } transition-colors`}
                 >
                   <td className="pr-4 pl-1 text-right select-none text-text-muted/50 w-8 font-mono text-[11px]">
                     {lineNum}
                   </td>
-                  <td className="font-mono whitespace-pre text-[#E8EEEB]">
+                  <td className="font-mono whitespace-pre text-text-primary">
                     {renderSyntaxHighlight(line)}
                   </td>
                 </tr>
@@ -97,16 +97,16 @@ function renderSyntaxHighlight(line) {
 
   return parts.map((part, i) => {
     if (/^(const|let|var|function|async|await|return|import|export|from|def|if|else|router|try|catch)$/.test(part)) {
-      return <span key={i} className="text-[#8AA7B2] font-medium">{part}</span>;
+      return <span key={i} className="text-accent-blue font-medium">{part}</span>;
     }
     if (/^["'`].*["'`]$/.test(part)) {
       if (part.includes('SELECT') || part.includes('ffmpeg') || part.includes('AKIA') || part.includes('EXAMPLE_AWS')) {
-        return <span key={i} className="text-[#F87171]">{part}</span>;
+        return <span key={i} className="text-severity-critical">{part}</span>;
       }
-      return <span key={i} className="text-[#78A88B]">{part}</span>;
+      return <span key={i} className="text-accent-security">{part}</span>;
     }
     if (/^\d+$/.test(part)) {
-      return <span key={i} className="text-[#FBBF24]">{part}</span>;
+      return <span key={i} className="text-severity-medium">{part}</span>;
     }
     return <span key={i}>{part}</span>;
   });

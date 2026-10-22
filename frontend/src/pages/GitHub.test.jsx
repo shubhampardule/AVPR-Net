@@ -87,3 +87,30 @@ test("keeps the verified account connected when only the repository request fail
   expect(screen.queryByRole("heading", { name: "Connect your GitHub account" })).toBeNull();
   expect(screen.getAllByRole("button", { name: "Add repository" }).length).toBeGreaterThan(0);
 });
+
+test("shows the GitHub rate-limit delay and recovers when repository access is retried", async () => {
+  let limited = true;
+  const fetchMock = vi.fn(url => {
+    if (String(url).endsWith("/status")) return Promise.resolve(response(status));
+    if (limited) return Promise.resolve({
+      ok: false,
+      json: async () => ({ error: {
+        code: "GITHUB_RATE_LIMITED",
+        message: "GitHub is rate limiting requests. Wait 23 seconds before trying again.",
+        retryAfterSeconds: 23,
+      } }),
+    });
+    return Promise.resolve(response({ repositories }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const user = userEvent.setup();
+  render(<Harness />);
+
+  expect((await screen.findByRole("alert")).textContent).toMatch(/Wait 23 seconds before trying again/i);
+  expect(screen.getByText("Connected", { exact: true })).toBeTruthy();
+  limited = false;
+  await user.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByRole("button", { name: /AVPR shubhampardule\/AVPR mainPrivate/i })).toBeTruthy();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+});

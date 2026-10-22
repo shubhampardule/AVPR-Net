@@ -218,15 +218,15 @@ export default function Repository() {
   };
 
   return (
-    <div className="min-h-screen">
+    <main className="app-document min-h-screen">
 
       {/* Header */}
-      <header className="border-b border-border-subtle bg-bg-primary/80 backdrop-blur-xl">
+      <header className="page-header border-b border-border-subtle bg-bg-primary">
         <div className="px-6 py-5 lg:px-8">
 
           <button
             onClick={() => navigate("/github")}
-            className="mb-4 flex items-center gap-2 text-xs font-mono-code text-text-muted transition hover:text-white"
+            className="mb-4 flex items-center gap-2 text-xs font-mono-code text-text-muted transition hover:text-text-primary"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Back to GitHub
@@ -236,7 +236,7 @@ export default function Repository() {
 
             <div className="flex items-center gap-3">
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-text-primary/10 bg-text-primary/[0.04]">
                 <Folder className="h-5 w-5 text-accent-blue" />
               </div>
 
@@ -245,10 +245,6 @@ export default function Repository() {
                   <h1 className="text-xl font-semibold tracking-tight">
                     {repository.name}
                   </h1>
-
-                  <span className="rounded-full border border-accent-security/20 bg-accent-security/10 px-2 py-0.5 text-[10px] font-mono-code text-accent-security">
-                    CONNECTED
-                  </span>
                 </div>
 
                 <p className="mt-1 font-mono-code text-xs text-text-muted">
@@ -263,7 +259,7 @@ export default function Repository() {
               <button
                 onClick={() => fetchFiles(true)}
                 disabled={refreshing || loading}
-                className="flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-secondary transition hover:border-white/15 hover:text-white disabled:opacity-50"
+                className="flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-secondary transition hover:border-text-primary/15 hover:text-text-primary disabled:opacity-50"
               >
                 <RefreshCw
                   className={`h-4 w-4 ${
@@ -287,49 +283,9 @@ export default function Repository() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8 lg:px-8">
+      <div className="app-page">
 
-        {/* Repository metadata */}
-        <div className="mb-8 grid gap-4 md:grid-cols-3">
-
-          <InfoCard
-            icon={GitBranch}
-            label="Default Branch"
-          value={repositoryDetails?.defaultBranch || "Unavailable"}
-          />
-
-          <InfoCard
-            icon={ShieldCheck}
-            label="Access"
-            value="Read-only"
-          />
-
-          <InfoCard
-            icon={Globe}
-            label="Source"
-            value="GitHub"
-          />
-
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-400/20 bg-red-400/5 p-4">
-
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
-
-            <div>
-              <p className="text-sm font-medium text-red-300">
-                Unable to load repository
-              </p>
-
-              <p className="mt-1 text-sm text-text-secondary">
-                {error}
-              </p>
-            </div>
-
-          </div>
-        )}
+        <p className="mb-6 flex items-center gap-2 text-sm text-text-secondary"><GitBranch className="h-4 w-4" aria-hidden="true" />Default branch: <span className="font-mono-code">{repositoryDetails?.defaultBranch || "Unavailable"}</span></p>
 
         <RepositoryAutomation organization={selectedOrg} owner={decodedOwner} repo={decodedRepo} />
         {/* Explorer */}
@@ -338,16 +294,13 @@ export default function Repository() {
           <div className="mb-5 flex items-end justify-between">
 
             <div>
-              <p className="font-mono-code text-xs uppercase tracking-[0.18em] text-accent-blue">
-                Repository Explorer
-              </p>
 
               <h2 className="mt-2 text-2xl font-semibold tracking-tight">
                 Files
               </h2>
 
               <p className="mt-1 text-sm text-text-secondary">
-                Browse repository files before security analysis.
+                Open a file to inspect its source, or start a scan.
               </p>
             </div>
 
@@ -367,10 +320,10 @@ export default function Repository() {
           ) : loading ? (
             <LoadingTree />
           ) : error && files.length === 0 ? (
-            <div role="alert" className="rounded-xl border border-red-400/20 bg-red-400/5 p-6">
-              <h3 className="font-medium text-red-200">Repository data could not be loaded</h3>
+            <div role="alert" className="rounded-xl border border-severity-critical/20 bg-severity-critical/5 p-6">
+              <h3 className="font-medium text-severity-critical">Repository data could not be loaded</h3>
               <p className="mt-2 text-sm text-text-secondary">{error}</p>
-              <button type="button" onClick={() => fetchFiles(true)} disabled={refreshing} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-text-primary disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Retry</button>
+              <button type="button" onClick={() => fetchFiles(true)} disabled={refreshing} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-text-primary/10 px-3 py-2 text-sm text-text-primary disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Retry</button>
             </div>
           ) : tree.length === 0 ? (
             <EmptyTree />
@@ -379,11 +332,11 @@ export default function Repository() {
 
               {/* Explorer header */}
               <div className="flex items-center justify-between border-b border-border-subtle bg-bg-elevated px-5 py-3">
-                <span className="font-mono-code text-[10px] uppercase tracking-wider text-text-muted">
+                <span className="font-mono-code text-[11px] uppercase tracking-wider text-text-muted">
                   Repository
                 </span>
 
-                <span className="font-mono-code text-[10px] uppercase tracking-wider text-text-muted">
+                <span className="font-mono-code text-[11px] uppercase tracking-wider text-text-muted">
                   Size
                 </span>
               </div>
@@ -402,12 +355,12 @@ export default function Repository() {
 
             </div>
           )}
-          {error && files.length > 0 && <p role="status" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">Showing the last successfully loaded repository snapshot because refresh failed: {error}</p>}
+          {error && files.length > 0 && <p role="status" className="mt-3 rounded-lg border border-severity-medium/20 bg-severity-medium/5 p-3 text-xs text-severity-medium">Showing the last successfully loaded repository snapshot because refresh failed: {error}</p>}
 
         </section>
 
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
 
@@ -435,7 +388,7 @@ function TreeItem({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         onClick={() => onClick(item)}
-        className="flex w-full items-center justify-between border-b border-border-subtle px-5 py-3 text-left transition last:border-b-0 hover:bg-white/[0.025]"
+        className="flex w-full items-center justify-between border-b border-border-subtle px-5 py-3 text-left transition last:border-b-0 hover:bg-text-primary/[0.025]"
         style={{
           paddingLeft: `${20 + depth * 28}px`,
         }}
@@ -476,13 +429,13 @@ function TreeItem({
         <div className="flex shrink-0 items-center gap-4">
 
           {!isFolder && (
-            <span className="font-mono-code text-[10px] text-text-muted">
+            <span className="font-mono-code text-[11px] text-text-muted">
               {formatFileSize(item.size)}
             </span>
           )}
 
           {isFolder && (
-            <span className="font-mono-code text-[9px] uppercase tracking-wider text-text-muted">
+            <span className="font-mono-code text-[11px] uppercase tracking-wider text-text-muted">
               Folder
             </span>
           )}
@@ -589,12 +542,12 @@ function InfoCard({ icon: Icon, label, value }) {
     <div className="rounded-xl border border-border-subtle bg-bg-secondary p-4">
       <div className="flex items-center gap-3">
 
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.07] bg-white/[0.025]">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-text-primary/[0.07] bg-text-primary/[0.025]">
           <Icon className="h-4 w-4 text-accent-blue" />
         </div>
 
         <div>
-          <p className="font-mono-code text-[9px] uppercase tracking-wider text-text-muted">
+          <p className="font-mono-code text-[11px] uppercase tracking-wider text-text-muted">
             {label}
           </p>
 
@@ -616,8 +569,8 @@ function LoadingTree() {
           key={item}
           className="flex h-14 animate-pulse items-center gap-3 border-b border-border-subtle px-5 last:border-b-0"
         >
-          <div className="h-7 w-7 rounded-lg bg-white/[0.05]" />
-          <div className="h-3 w-52 rounded bg-white/[0.05]" />
+          <div className="h-7 w-7 rounded-lg bg-text-primary/[0.05]" />
+          <div className="h-3 w-52 rounded bg-text-primary/[0.05]" />
         </div>
       ))}
     </div>

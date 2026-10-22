@@ -20,20 +20,20 @@ const steps = [
 
 export function ScrollNarrative() {
   return (
-    <section id="workflow" className="scroll-mt-24 border-t border-white/[0.07] bg-[#141A1B] py-20 sm:py-24">
+    <section id="workflow" className="scroll-mt-24 border-t border-text-primary/[0.07] bg-bg-secondary py-20 sm:py-24">
       <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
         <div className="mb-12 max-w-2xl space-y-4">
-          <p className="text-sm font-medium text-[#A8B9AF]">Workflow</p>
-          <h2 className="text-3xl font-semibold tracking-[-0.035em] text-[#E8EEEB] sm:text-4xl">How a finding moves through review.</h2>
-          <p className="max-w-xl text-base leading-7 text-[#AEB9B3]">Each step stays tied to the scanned commit and the evidence that produced the result.</p>
+          <p className="text-sm font-medium text-text-secondary">Workflow</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.035em] text-text-primary sm:text-4xl">How a finding moves through review.</h2>
+          <p className="max-w-xl text-base leading-7 text-text-secondary">Each step stays tied to the scanned commit and the evidence that produced the result.</p>
         </div>
 
-        <ol className="grid gap-0 border-t border-white/[0.1] md:grid-cols-3 md:divide-x md:divide-white/[0.1]">
+        <ol className="grid gap-0 border-t border-text-primary/[0.1] md:grid-cols-3 md:divide-x md:divide-text-primary/[0.1]">
           {steps.map((step) => (
-            <li key={step.number} className="border-b border-white/[0.1] py-6 md:border-b-0 md:px-7 md:py-7 first:md:pl-0 last:md:pr-0">
-              <p className="font-mono-code text-xs text-[#A8B9AF]">{step.number}</p>
-              <h3 className="mt-4 text-lg font-semibold text-[#E8EEEB]">{step.title}</h3>
-              <p className="mt-2 max-w-sm text-sm leading-6 text-[#AEB9B3]">{step.description}</p>
+            <li key={step.number} className="border-b border-text-primary/[0.1] py-6 md:border-b-0 md:px-7 md:py-7 first:md:pl-0 last:md:pr-0">
+              <p className="font-mono-code text-xs text-text-secondary">{step.number}</p>
+              <h3 className="mt-4 text-lg font-semibold text-text-primary">{step.title}</h3>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">{step.description}</p>
             </li>
           ))}
         </ol>

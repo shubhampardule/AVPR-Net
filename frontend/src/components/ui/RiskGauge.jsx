@@ -18,8 +18,7 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
   } else if (normalizedScore >= 4.0) {
     color = 'var(--severity-medium)'; // Medium
     label = 'Medium';
-  } else if (normalizedScore === 0) {
-    label = 'Resolved';
+
   }
 
   return (
@@ -37,7 +36,7 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
             cy={size / 2}
             r={radius}
             fill="transparent"
-            stroke="rgba(255, 255, 255, 0.06)"
+            stroke="var(--border-light)"
             strokeWidth={strokeWidth}
             strokeDasharray={circumference * 0.75}
             strokeLinecap="round"
@@ -58,7 +57,7 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
         </svg>
 
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="font-sans text-2xl font-semibold tracking-tight text-[#E8EEEB]">
+          <span className="font-sans text-2xl font-semibold tracking-tight text-text-primary">
             {score.toFixed(1)}
           </span>
           <span className="text-xs font-medium" style={{ color }}>
@@ -68,7 +67,7 @@ export function RiskGauge({ score = 9.4, size = 110, strokeWidth = 8, showBreakd
       </div>
 
       {showBreakdown && (exploitability || businessImpact) && (
-        <div className="mt-3 grid grid-cols-2 gap-3 w-full text-xs border-t border-white/[0.06] pt-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 w-full text-xs border-t border-text-primary/[0.06] pt-3">
           {exploitability !== null && (
             <div className="flex flex-col">
               <span className="text-text-muted text-[11px]">Exploitability</span>

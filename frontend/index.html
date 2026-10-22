@@ -2,14 +2,15 @@
 <html lang="en" class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" sizes="96x96" href="/securepatch-favicon.png?v=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SecurePatch — Source-code security review</title>
+    <title>AVPR-Net — Source-code security review</title>
     <meta name="description" content="Connect authorized GitHub repositories, review scanner coverage and findings, and inspect focused patch proposals. Developers review every change before it is merged." />
     <script>
       try {
         const theme = localStorage.getItem("securepatch-theme") === "light" ? "light" : "dark";
         document.documentElement.dataset.theme = theme;
+        document.querySelector('link[rel="icon"]').href = theme === "light" ? "/favicon-light.svg?v=3" : "/favicon.svg?v=3";
         document.documentElement.classList.toggle("dark", theme === "dark");
         document.documentElement.classList.toggle("light", theme === "light");
       } catch {
@@ -22,7 +23,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#101416] text-[#E8EEEB] font-sans antialiased selection:bg-[#78A88B]/20 selection:text-[#78A88B] min-h-screen overflow-x-hidden">
+  <body class="bg-bg-primary text-text-primary font-sans antialiased min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
