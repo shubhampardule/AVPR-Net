@@ -79,6 +79,14 @@ function createAssistantRouter(options = {}) {
         }
         counter.count++; counters.set(key, counter); inFlight++; acquired = true;
       }
+      if (!demo && req.method === "POST") {
+        const operation = req.path.split("/").filter(Boolean).at(-1) || "unknown";
+        await require("../services/audit.service").recordAuditEvent(req, {
+          action: "ai.request_consented",
+          target: `assistant/${operation}`,
+          details: { operation, provider: "NVIDIA" },
+        });
+      }
       const result = await require("../services/ai-context").run({ signal: controller.signal }, () => fn(req));
       res.status(result.status === "unavailable" ? 503 : 200).json({ success: result.status !== "unavailable", data: result });
     } catch (error) {
@@ -149,7 +157,7 @@ function createAssistantRouter(options = {}) {
     const cached = await Cache.findOne({ _id: key, expires: { $gt: new Date() } }).lean();
     if (cached) return { ...cached.result, cached: true };
     const result = await service.analyzeFinding(finding);
-    if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { result, expires: new Date(Date.now() + 600000) } }, { upsert: true }).catch(() => {});
+    if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { organization: req.params.organizationId, result, expires: new Date(Date.now() + 600000) } }, { upsert: true }).catch(() => {});
     return result;
   }, true));
   router.post("/code", handle(async (req) => service.generateCode(req.body), true));

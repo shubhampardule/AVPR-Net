@@ -1,6 +1,8 @@
 const express = require("express");
 const request = require("supertest");
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 const { createAssistantRouter } = require("../src/routes/assistant.routes");
+const { recordAuditEvent } = require("../src/services/audit.service");
 const event = require("../fixtures/events/suspicious.json");
 let service, rag, provider;
 beforeEach(() => {
@@ -28,6 +30,8 @@ test("production accepts the configured site origin while rejecting other origin
     const accepted = await request(instance).post("/org/org-1/ai/analyze")
       .set("Origin", "https://avpr-psi.vercel.app").set("X-SecurePatch-AI-Consent", "1").send({ event });
     expect(accepted.status).toBe(200);
+    expect(recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ organizationId: "org-1" }) }),
+      expect.objectContaining({ action: "ai.request_consented", target: "assistant/analyze", details: { operation: "analyze", provider: "NVIDIA" } }));
     const rejected = await request(instance).post("/org/org-1/ai/analyze")
       .set("Origin", "https://evil.example").set("X-SecurePatch-AI-Consent", "1").send({ event });
     expect(rejected.status).toBe(403);
@@ -53,6 +57,15 @@ test("hosted AI requires an explicit request confirmation before any service cal
   expect(response.status).toBe(428);
   expect(response.body.error.code).toBe("AI_CONSENT_REQUIRED");
   expect(service.analyzeEvent).not.toHaveBeenCalled();
+});
+test("a consented hosted request is recorded even when the provider is unavailable", async () => {
+  service.analyzeEvent.mockResolvedValue({ status: "unavailable", original: event, analysis: null });
+  const response = await request(app({ requireAuth: auth, requireMembership: member }))
+    .post("/org/org-1/ai/analyze").set("X-SecurePatch-AI-Consent", "1").send({ event });
+  expect(response.status).toBe(503);
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+    action: "ai.request_consented", target: "assistant/analyze",
+  }));
 });
 test("organization AI opt-out blocks inference even if the browser confirms", async () => {
   const instance = app({ requireAuth: auth, requireMembership: member,

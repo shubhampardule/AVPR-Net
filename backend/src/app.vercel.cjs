@@ -743,6 +743,7 @@ var require_assistant_service = __commonJS({
     var { sanitize, SYSTEM_POLICY } = require_ai_safety();
     var { invalid, isText, isList, parseObject, resolveSources } = require_ai_output();
     var { validateCode } = require_code_validation();
+    var path = require("node:path");
     var ALL_LANGUAGES = ["python", "javascript", "typescript", "c", "cpp", "bash"];
     var CODE_FIELDS = [
       "language",
@@ -757,6 +758,9 @@ var require_assistant_service = __commonJS({
       "sources"
     ];
     var badInput = (message) => Object.assign(new Error(message), { code: "AI_INVALID_INPUT", statusCode: 400 });
+    function safeTargetPath(value) {
+      return isText(value, 500) && !value.includes("\\") && !value.includes("\0") && !path.posix.isAbsolute(value) && !path.win32.isAbsolute(value) && value.split("/").every((part) => part && part !== "." && part !== "..");
+    }
     var bounded = (value, bytes = 16e3) => {
       if (Buffer.byteLength(JSON.stringify(value) || "") > bytes) throw badInput("Input exceeds size limit");
     };
@@ -848,10 +852,11 @@ var require_assistant_service = __commonJS({
       }
       async generateCode(input, retryInvalid = true) {
         bounded(input);
-        if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["request", "language", "mode", "originalCode"].includes(key)) || !isText(input.request, 3e3) || !this.languages().includes(input.language) || !["generate", "review"].includes(input.mode) || input.originalCode !== void 0 && !isText(input.originalCode, 8e3) || input.mode === "review" && !input.originalCode) {
+        if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath"].includes(key)) || !isText(input.request, 3e3) || !this.languages().includes(input.language) || !["generate", "review"].includes(input.mode) || input.originalCode !== void 0 && !isText(input.originalCode, 8e3) || input.targetPath !== void 0 && !safeTargetPath(input.targetPath) || input.mode === "review" && !input.originalCode) {
           throw badInput("Provide a bounded defensive request, supported language, mode and source for reviews");
         }
         const clean = sanitize(input);
+        const targetPath = input.targetPath || "source";
         let retrieval;
         try {
           retrieval = await this.rag.retrieve(
@@ -866,7 +871,7 @@ Return one JSON object, without markdown fences or surrounding text, with exactl
 language must match the request. For review mode return format code:
 return the complete corrected source file, preserving unrelated lines and public names.
 The application will compute the unified diff deterministically from originalCode.
-If returning format diff, use the target path in the request (otherwise a/source and b/source),
+If returning format diff, use exactly ${JSON.stringify(`a/${targetPath}`)} and ${JSON.stringify(`b/${targetPath}`)},
 with exact hunk counts and unchanged context. The patch must apply without fuzzy matching.
 For generate mode return standalone source code. code and tests
 are plain strings (no markdown fences). explanation is a short string. assumptions,
@@ -884,8 +889,7 @@ ${JSON.stringify({
           ], { json: true });
           const proposal = parseObject(response.text, CODE_FIELDS);
           if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16e3)) {
-            const target = clean.request.match(/unified diff for a\/([\w./-]+) and b\/\1(?:[.\s]|$)/)?.[1] || "source";
-            proposal.code = require("diff").createTwoFilesPatch(`a/${target}`, `b/${target}`, clean.originalCode, proposal.code, "", "");
+            proposal.code = require("diff").createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
             proposal.format = "diff";
           }
           for (const field of ["assumptions", "dependencies", "security_considerations", "validation_instructions"]) {
@@ -901,7 +905,7 @@ ${JSON.stringify({
             try {
               const { parsePatch, applyPatch } = require("diff");
               const patches = parsePatch(proposal.code, { strict: true });
-              if (patches.length !== 1 || !patches[0].hunks.length) throw invalid();
+              if (patches.length !== 1 || !patches[0].hunks.length || patches[0].oldFileName !== `a/${targetPath}` || patches[0].newFileName !== `b/${targetPath}`) throw invalid();
               const changed = applyPatch(clean.originalCode, patches[0], { fuzzFactor: 0 });
               if (changed === false || changed === clean.originalCode || changed.length > 16e3) throw invalid();
             } catch {
@@ -1049,7 +1053,7 @@ var require_Organization = __commonJS({
         },
         status: {
           type: String,
-          enum: ["active", "suspended"],
+          enum: ["active", "suspended", "deleting", "deleted"],
           default: "active"
         },
         githubInstallationId: {
@@ -1057,6 +1061,10 @@ var require_Organization = __commonJS({
           default: null,
           index: true
         },
+        deletionRequestedAt: { type: Date, default: null },
+        purgeAfter: { type: Date, default: null, index: true },
+        purgeAttemptedAt: { type: Date, default: null },
+        purgedAt: { type: Date, default: null },
         hostedAiEnabled: {
           type: Boolean,
           default: false
@@ -1134,6 +1142,9 @@ var require_OrganizationMember = __commonJS({
           type: String,
           enum: ["active", "invited", "suspended"],
           default: "active"
+        },
+        notificationPreferences: {
+          scanResults: { type: Boolean, default: true }
         }
       },
       {
@@ -1268,6 +1279,121 @@ var require_budget_service = __commonJS({
   }
 });
 
+// src/models/AuditEvent.js
+var require_AuditEvent = __commonJS({
+  "src/models/AuditEvent.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var AUDIT_ACTIONS = [
+      "organization.created",
+      "organization.exported",
+      "organization.deletion_requested",
+      "scan.started",
+      "scan.cancelled",
+      "finding.reviewed",
+      "github.installation_connected",
+      "github.installation_disconnected",
+      "member.role_changed",
+      "member.removed",
+      "member.left",
+      "member.account_deleted",
+      "member.ownership_transferred",
+      "invitation.created",
+      "invitation.revoked",
+      "invitation.accepted",
+      "ai.settings_changed",
+      "ai.request_consented",
+      "pull_request.draft_created"
+    ];
+    var auditEventSchema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, immutable: true, index: true },
+      actor: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
+      actorLabel: { type: String, required: true, maxlength: 120, immutable: true },
+      action: { type: String, enum: AUDIT_ACTIONS, required: true, immutable: true, index: true },
+      target: { type: String, required: true, maxlength: 300, immutable: true },
+      details: { type: mongoose.Schema.Types.Mixed, default: {}, immutable: true },
+      requestId: { type: String, default: null, maxlength: 100, immutable: true }
+    }, {
+      timestamps: { createdAt: true, updatedAt: false },
+      versionKey: false,
+      strict: "throw"
+    });
+    auditEventSchema.index({ organization: 1, createdAt: -1, _id: -1 });
+    auditEventSchema.pre("save", function rejectAuditMutation() {
+      if (!this.isNew) throw new Error("Audit events are append-only");
+    });
+    for (const operation of ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "deleteOne", "deleteMany", "findOneAndDelete"]) {
+      auditEventSchema.pre(operation, function rejectAuditQueryMutation() {
+        throw new Error("Audit events are append-only");
+      });
+    }
+    module2.exports = mongoose.models.AuditEvent || mongoose.model("AuditEvent", auditEventSchema);
+    module2.exports.AUDIT_ACTIONS = AUDIT_ACTIONS;
+  }
+});
+
+// src/services/audit.service.js
+var require_audit_service = __commonJS({
+  "src/services/audit.service.js"(exports2, module2) {
+    var AuditEvent = require_AuditEvent();
+    var logger = require_logger();
+    var DETAIL_KEYS = Object.freeze({
+      "organization.created": ["organizationName", "slug"],
+      "organization.exported": ["recordCount"],
+      "organization.deletion_requested": ["purgeAfter"],
+      "scan.started": ["repository", "scanId", "branch", "commitSha", "includeDependencies"],
+      "scan.cancelled": ["repository", "scanId"],
+      "finding.reviewed": ["repository", "scanId", "findingId", "status"],
+      "github.installation_connected": ["installationId", "account", "accountType"],
+      "github.installation_disconnected": ["installationId", "reason"],
+      "member.role_changed": ["memberId", "fromRole", "toRole"],
+      "member.removed": ["memberId", "previousRole"],
+      "member.left": ["memberId", "previousRole"],
+      "member.account_deleted": [],
+      "member.ownership_transferred": ["previousOwnerId", "newOwnerId"],
+      "invitation.created": ["invitationId", "role", "refreshed"],
+      "invitation.revoked": ["invitationId"],
+      "invitation.accepted": ["role"],
+      "ai.settings_changed": ["hostedAiEnabled"],
+      "ai.request_consented": ["operation", "provider"],
+      "pull_request.draft_created": ["repository", "pullRequestNumber", "pullRequestUrl", "baseSha"]
+    });
+    function safeValue(value) {
+      if (typeof value === "boolean" || typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value !== "string") return void 0;
+      return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 500);
+    }
+    function safeDetails(action, details = {}) {
+      const allowedKeys = DETAIL_KEYS[action];
+      if (!allowedKeys) throw new Error("Unsupported audit action");
+      return Object.fromEntries(allowedKeys.filter((key) => Object.hasOwn(details, key)).map((key) => [key, safeValue(details[key])]).filter(([, value]) => value !== void 0));
+    }
+    async function recordAuditEvent(req, { action, target, details = {}, organizationId = req.params.organizationId }) {
+      if (!organizationId || !req.user?._id || typeof target !== "string" || !target.trim()) {
+        throw new Error("Audit event requires an organization, actor, and target");
+      }
+      const actorLabel = `User ${String(req.user._id).slice(-8)}`;
+      try {
+        const event = await AuditEvent.create({
+          organization: organizationId,
+          actor: req.user._id,
+          actorLabel,
+          action,
+          target: target.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300),
+          details: safeDetails(action, details),
+          requestId: typeof req.requestId === "string" ? req.requestId.slice(0, 100) : null
+        });
+        req.res?.setHeader?.("X-SecurePatch-Audit-Recorded", "true");
+        return event;
+      } catch (error) {
+        logger.error(`audit_event_write_failed action=${action} request=${req.requestId || "unknown"} error=${error.name || "Error"}`);
+        req.res?.setHeader?.("X-SecurePatch-Audit-Recorded", "false");
+        return null;
+      }
+    }
+    module2.exports = { recordAuditEvent, safeDetails };
+  }
+});
+
 // src/models/Finding.js
 var require_Finding = __commonJS({
   "src/models/Finding.js"(exports2, module2) {
@@ -1360,6 +1486,10 @@ var require_Finding = __commonJS({
           type: String,
           default: ""
         },
+        remediationGuidance: {
+          type: mongoose.Schema.Types.Mixed,
+          default: null
+        },
         fingerprint: {
           type: String,
           required: true,
@@ -1394,6 +1524,7 @@ var require_Finding = __commonJS({
     );
     findingSchema.index({ scan: 1, fingerprint: 1 });
     findingSchema.index({ scan: 1, fingerprint: 1 }, { unique: true, name: "scan_fingerprint_unique" });
+    findingSchema.index({ organization: 1, scan: 1, status: 1 });
     findingSchema.index({ organization: 1, owner: 1, repo: 1 });
     module2.exports = mongoose.models.Finding || mongoose.model("Finding", findingSchema);
   }
@@ -1415,6 +1546,7 @@ var require_Scan = __commonJS({
         cancelledAt: { type: Date, default: null },
         coverage: { type: [mongoose.Schema.Types.Mixed], default: [] },
         rulesHash: { type: String, default: null },
+        scannerPolicyHash: { type: String, default: null },
         normalizerHash: { type: String, default: null },
         organization: {
           type: mongoose.Schema.Types.ObjectId,
@@ -1656,28 +1788,34 @@ var require_remediation_service = __commonJS({
       };
     }
     function applyExactDiff(original, patch, filePath) {
-      if (typeof patch !== "string" || patch.length > 18e3) throw bad("Provide a bounded unified diff");
+      if (typeof patch !== "string" || patch.length > 18e3) throw bad("Provide a bounded unified diff", 400, "PATCH_INTEGRITY_FAILED");
       let entries;
       try {
         entries = parsePatch(patch, { strict: true });
       } catch {
-        throw bad("Invalid unified diff");
+        throw bad("Invalid unified diff", 400, "PATCH_INTEGRITY_FAILED");
       }
-      if (entries.length !== 1 || entries[0].oldFileName !== `a/${filePath}` || entries[0].newFileName !== `b/${filePath}` || !entries[0].hunks.length) throw bad("Diff must modify only the selected source file");
+      if (entries.length !== 1 || entries[0].oldFileName !== `a/${filePath}` || entries[0].newFileName !== `b/${filePath}` || !entries[0].hunks.length) throw bad("Diff must modify only the selected source file", 400, "PATCH_INTEGRITY_FAILED");
       let content;
       try {
         content = applyPatch(original, entries[0], { fuzzFactor: 0 });
       } catch {
-        throw bad("Diff does not apply to the scanned source", 409);
+        throw bad("Diff does not apply to the scanned source", 409, "PATCH_INTEGRITY_FAILED");
       }
-      if (content === false || content === original || content.length > 16e3) throw bad("Diff is empty, too large, or does not match the scanned source", 409);
+      if (content === false || content === original || content.length > 16e3) throw bad("Diff is empty, too large, or does not match the scanned source", 409, "PATCH_INTEGRITY_FAILED");
       return content;
     }
-    async function validate(scan, finding, patch) {
+    async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {}) {
       const context = await source(scan, finding);
-      const content = applyExactDiff(context.originalCode, patch, context.filePath);
+      let content;
+      try {
+        content = applyExactDiff(context.originalCode, patch, context.filePath);
+      } catch (error) {
+        error.validationContext = context;
+        throw error;
+      }
       const syntax = await validateCode(context.language, content);
-      if (syntax.status === "failed") throw bad("Proposed source failed syntax validation");
+      if (syntax.status === "failed" && !allowSyntaxFailure) throw bad("Proposed source failed syntax validation");
       return { context, content, syntax };
     }
     async function createPullRequest(scan, finding, { patch, acknowledged }) {
@@ -1708,6 +1846,8 @@ var require_remediation_service = __commonJS({
       });
       await client.request("POST /repos/{owner}/{repo}/git/refs", { ...base, ref: `refs/heads/${branch}`, sha: proposal.sha });
       try {
+        const latest = await resolveCommit(scan.installationId, scan.owner, scan.repo);
+        if (latest.sha !== current.sha || latest.branch !== current.branch) throw bad("The default branch changed. Rescan before creating the PR.", 409, "BASE_CHANGED");
         const { data: pr } = await client.request("POST /repos/{owner}/{repo}/pulls", {
           ...base,
           head: branch,
@@ -1720,9 +1860,18 @@ Base commit: ${current.sha}
 Syntax: ${syntax.status}.
 Tests were not executed. The patch requires independent correctness and security review.
 
-Scanner severity: ${finding.severity}; SecurePatch risk: ${finding.riskScore} (not a probability).`
+Scanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not a probability).`
         });
-        return { url: pr.html_url, number: pr.number, draft: true, branch, syntax, tests: "not_executed" };
+        return {
+          url: pr.html_url,
+          number: pr.number,
+          draft: true,
+          branch,
+          baseSha: current.sha,
+          syntax,
+          tests: "not_executed",
+          verificationMaterial: { context, content, syntax }
+        };
       } catch (error) {
         await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { ...base, ref: `heads/${branch}` }).catch(() => {
         });
@@ -1772,7 +1921,7 @@ var require_benign = __commonJS({
 var require_AssistantCache = __commonJS({
   "src/models/AssistantCache.js"(exports2, module2) {
     var mongoose = require("mongoose");
-    var schema = new mongoose.Schema({ _id: String, result: mongoose.Schema.Types.Mixed, expires: Date });
+    var schema = new mongoose.Schema({ _id: String, organization: { type: mongoose.Schema.Types.ObjectId, index: true }, result: mongoose.Schema.Types.Mixed, expires: Date });
     schema.index({ expires: 1 }, { expireAfterSeconds: 0 });
     module2.exports = mongoose.models.AssistantCache || mongoose.model("AssistantCache", schema);
   }
@@ -1865,6 +2014,14 @@ var require_assistant_routes = __commonJS({
             inFlight++;
             acquired = true;
           }
+          if (!demo && req.method === "POST") {
+            const operation = req.path.split("/").filter(Boolean).at(-1) || "unknown";
+            await require_audit_service().recordAuditEvent(req, {
+              action: "ai.request_consented",
+              target: `assistant/${operation}`,
+              details: { operation, provider: "NVIDIA" }
+            });
+          }
           const result = await require_ai_context().run({ signal: controller.signal }, () => fn(req));
           res.status(result.status === "unavailable" ? 503 : 200).json({ success: result.status !== "unavailable", data: result });
         } catch (error) {
@@ -1950,7 +2107,7 @@ var require_assistant_routes = __commonJS({
         const cached = await Cache.findOne({ _id: key, expires: { $gt: /* @__PURE__ */ new Date() } }).lean();
         if (cached) return { ...cached.result, cached: true };
         const result = await service.analyzeFinding(finding);
-        if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { result, expires: new Date(Date.now() + 6e5) } }, { upsert: true }).catch(() => {
+        if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { organization: req.params.organizationId, result, expires: new Date(Date.now() + 6e5) } }, { upsert: true }).catch(() => {
         });
         return result;
       }, true));
@@ -1993,7 +2150,7 @@ var require_health_controller = __commonJS({
           database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
           ai: new NvidiaService().health()
         },
-        "SecurePatch backend is healthy"
+        "AVPR-Net backend is healthy"
       );
     };
     module2.exports = {
@@ -2066,6 +2223,8 @@ var require_User = __commonJS({
           lowercase: true,
           trim: true
         },
+        accessRevision: { type: Number, default: 0 },
+        deletedAt: { type: Date, default: null },
         profileImage: {
           type: String,
           default: null
@@ -2079,7 +2238,7 @@ var require_User = __commonJS({
         githubUsername: { type: String, trim: true },
         status: {
           type: String,
-          enum: ["active", "suspended"],
+          enum: ["active", "suspended", "deleted"],
           default: "active"
         }
       },
@@ -2229,6 +2388,170 @@ var require_auth_controller = __commonJS({
   }
 });
 
+// src/models/OrganizationInvitation.js
+var require_OrganizationInvitation = __commonJS({
+  "src/models/OrganizationInvitation.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var organizationInvitationSchema = new mongoose.Schema({
+      organization: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Organization",
+        required: true
+      },
+      email: { type: String, required: true, lowercase: true, trim: true, maxlength: 320 },
+      role: { type: String, enum: ["admin", "developer"], required: true },
+      invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      tokenHash: { type: String, select: false },
+      status: { type: String, enum: ["pending", "accepted", "revoked"], default: "pending", required: true },
+      expiresAt: { type: Date, required: true },
+      acceptedAt: { type: Date, default: null },
+      revokedAt: { type: Date, default: null },
+      emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown"], default: "manual" },
+      emailAttemptedAt: { type: Date, default: null }
+    }, { timestamps: true });
+    organizationInvitationSchema.index(
+      { organization: 1, email: 1 },
+      { unique: true, partialFilterExpression: { status: "pending" } }
+    );
+    organizationInvitationSchema.index({ tokenHash: 1 }, { unique: true, sparse: true });
+    organizationInvitationSchema.index({ organization: 1, status: 1, expiresAt: 1 });
+    module2.exports = mongoose.models.OrganizationInvitation || mongoose.model("OrganizationInvitation", organizationInvitationSchema);
+  }
+});
+
+// src/models/Notification.js
+var require_Notification = __commonJS({
+  "src/models/Notification.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var notificationSchema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, immutable: true, index: true },
+      recipient: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, immutable: true, index: true },
+      type: { type: String, enum: ["scan.completed", "scan.partial", "scan.failed"], required: true, immutable: true },
+      dedupeKey: { type: String, required: true, maxlength: 180, immutable: true },
+      title: { type: String, required: true, maxlength: 120, immutable: true },
+      body: { type: String, required: true, maxlength: 300, immutable: true },
+      href: { type: String, required: true, maxlength: 500, immutable: true },
+      scan: { type: mongoose.Schema.Types.ObjectId, ref: "Scan", required: true, immutable: true },
+      repository: { type: String, required: true, maxlength: 140, immutable: true },
+      createdAt: { type: Date, default: Date.now, immutable: true },
+      readAt: { type: Date, default: null },
+      expiresAt: { type: Date, required: true, immutable: true }
+    }, { versionKey: false, strict: "throw" });
+    notificationSchema.index({ recipient: 1, dedupeKey: 1 }, { unique: true, name: "notification_recipient_dedupe" });
+    notificationSchema.index({ organization: 1, recipient: 1, createdAt: -1, _id: -1 });
+    notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "notification_ttl" });
+    module2.exports = mongoose.models.Notification || mongoose.model("Notification", notificationSchema);
+  }
+});
+
+// src/services/account-lock.service.js
+var require_account_lock_service = __commonJS({
+  "src/services/account-lock.service.js"(exports2, module2) {
+    var User = require_User();
+    var { bad } = require_input();
+    async function lockActiveAccount(userId, session2) {
+      const account = await User.findOneAndUpdate(
+        { _id: userId, status: "active" },
+        { $inc: { accessRevision: 1 } },
+        { session: session2, returnDocument: "after" }
+      );
+      if (!account) throw bad("This account is no longer active. Sign in again.", 409, "ACCOUNT_CHANGED");
+      return account;
+    }
+    module2.exports = { lockActiveAccount };
+  }
+});
+
+// src/services/account-deletion.service.js
+var require_account_deletion_service = __commonJS({
+  "src/services/account-deletion.service.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var User = require_User();
+    var OrganizationMember = require_OrganizationMember();
+    var OrganizationInvitation = require_OrganizationInvitation();
+    var Notification = require_Notification();
+    var AuditEvent = require_AuditEvent();
+    var { lockActiveAccount } = require_account_lock_service();
+    var { bad } = require_input();
+    async function deleteAccount(userId, confirmation) {
+      if (typeof confirmation !== "string" || !confirmation || confirmation.length > 320) {
+        throw bad("Enter your account email exactly to confirm deletion");
+      }
+      await mongoose.connection.transaction(async (session2) => {
+        const account = await lockActiveAccount(userId, session2);
+        if (confirmation !== account.email) throw bad("Enter your account email exactly to confirm deletion");
+        const memberships = await OrganizationMember.find({ user: userId }).session(session2).lean();
+        if (memberships.some((member) => member.status === "active" && member.role === "owner")) {
+          throw bad("Transfer ownership of every organization before deleting your account", 409, "OWNER_MUST_TRANSFER");
+        }
+        await OrganizationMember.updateMany(
+          { user: userId },
+          { $set: { status: "suspended", "notificationPreferences.scanResults": false } },
+          { session: session2 }
+        );
+        await OrganizationInvitation.deleteMany({ email: account.email }, { session: session2 });
+        await Notification.deleteMany({ recipient: userId }, { session: session2 });
+        await mongoose.connection.collection("sessions").deleteMany({ $or: [
+          { "session.passport.user": String(userId) },
+          { "session.githubAccess.userId": String(userId) },
+          { "session.githubOAuth.userId": String(userId) }
+        ] }, { session: session2 });
+        const activeMemberships = memberships.filter((member) => member.status === "active");
+        if (activeMemberships.length) await AuditEvent.create(activeMemberships.map((member) => ({
+          organization: member.organization,
+          actor: userId,
+          actorLabel: "Deleted account",
+          action: "member.account_deleted",
+          target: `member/${userId}`,
+          details: {}
+        })), { session: session2 });
+        await User.updateOne({ _id: userId, status: "active" }, { $set: {
+          status: "deleted",
+          deletedAt: /* @__PURE__ */ new Date(),
+          name: "Deleted account",
+          email: `deleted-${userId}@account.invalid`,
+          profileImage: null
+        }, $unset: { googleId: "", githubId: "", githubUsername: "" } }, { session: session2, runValidators: true });
+      });
+    }
+    module2.exports = { deleteAccount };
+  }
+});
+
+// src/controllers/account.controller.js
+var require_account_controller = __commonJS({
+  "src/controllers/account.controller.js"(exports2, module2) {
+    var ApiResponse = require_ApiResponse();
+    var { bad } = require_input();
+    var { deleteAccount } = require_account_deletion_service();
+    async function deleteMyAccount(req, res, next) {
+      try {
+        if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.confirmation !== "string") {
+          throw bad("Provide only your account email as confirmation");
+        }
+        await deleteAccount(req.user._id, req.body.confirmation);
+        req.user = null;
+        if (req.session) {
+          try {
+            await new Promise((resolve) => req.session.destroy(() => resolve()));
+          } catch {
+            require_logger().warn("account_deleted_session_cleanup_failed");
+          }
+        }
+        res.clearCookie("securepatch.sid", {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax"
+        });
+        return ApiResponse.success(res, { deleted: true }, "Your account has been deleted");
+      } catch (error) {
+        next(error);
+      }
+    }
+    module2.exports = { deleteMyAccount };
+  }
+});
+
 // src/controllers/githubAuth.controller.js
 var require_githubAuth_controller = __commonJS({
   "src/controllers/githubAuth.controller.js"(exports2, module2) {
@@ -2367,6 +2690,7 @@ var require_auth_routes = __commonJS({
     var { googleCallback, getCurrentUser, logout } = require_auth_controller();
     var { requireAuth } = require_auth_middleware();
     var router = express2.Router();
+    router.delete("/me", requireAuth, require_account_controller().deleteMyAccount);
     var { startGitHubLogin, finishGitHubLogin } = require_githubAuth_controller();
     var safeReturnTo = require_safeReturnTo();
     router.get("/github", startGitHubLogin);
@@ -2408,12 +2732,298 @@ var require_auth_routes = __commonJS({
   }
 });
 
+// src/models/RepositoryAutomation.js
+var require_RepositoryAutomation = __commonJS({
+  "src/models/RepositoryAutomation.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var schema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
+      owner: { type: String, required: true },
+      repo: { type: String, required: true },
+      installationId: { type: String, required: true },
+      push: { type: Boolean, default: false },
+      pullRequest: { type: Boolean, default: false },
+      frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
+      nextRunAt: { type: Date, default: null },
+      leaseUntil: { type: Date, default: null },
+      lastError: { type: String, default: null },
+      lastScanId: { type: String, default: null },
+      pendingRefs: { type: [String], default: [] }
+    }, { timestamps: true });
+    schema.index({ organization: 1, owner: 1, repo: 1 }, { unique: true });
+    schema.index({ nextRunAt: 1 });
+    module2.exports = mongoose.models.RepositoryAutomation || mongoose.model("RepositoryAutomation", schema);
+  }
+});
+
+// src/models/RemediationVerification.js
+var require_RemediationVerification = __commonJS({
+  "src/models/RemediationVerification.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var CHECK_NAMES = ["patch_integrity", "syntax", "allowed_tests", "security_rescan"];
+    var CHECK_STATUSES = ["passed", "failed", "skipped", "unavailable"];
+    var checkSchema = new mongoose.Schema({
+      name: { type: String, enum: CHECK_NAMES, required: true, immutable: true },
+      status: { type: String, enum: CHECK_STATUSES, required: true, immutable: true },
+      method: { type: String, maxlength: 80, default: null, immutable: true },
+      detailCode: { type: String, maxlength: 80, required: true, immutable: true }
+    }, { _id: false, strict: "throw" });
+    var remediationVerificationSchema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, immutable: true, index: true },
+      scan: { type: mongoose.Schema.Types.ObjectId, ref: "Scan", required: true, immutable: true, index: true },
+      finding: { type: mongoose.Schema.Types.ObjectId, ref: "Finding", required: true, immutable: true, index: true },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
+      repository: { type: String, required: true, maxlength: 140, immutable: true },
+      sourceCommitSha: { type: String, required: true, match: /^[a-f0-9]{40}$/i, immutable: true },
+      targetPath: { type: String, required: true, maxlength: 500, immutable: true },
+      patchSha256: { type: String, required: true, match: /^[a-f0-9]{64}$/, immutable: true },
+      sourceSha256: { type: String, required: true, match: /^[a-f0-9]{64}$/, immutable: true },
+      proposedSha256: { type: String, match: /^[a-f0-9]{64}$/, default: null, immutable: true },
+      action: { type: String, enum: ["validation", "draft_pr"], required: true, immutable: true },
+      checks: { type: [checkSchema], required: true, validate: (value) => value.length === CHECK_NAMES.length && CHECK_NAMES.every((name) => value.filter((check) => check.name === name).length === 1), immutable: true },
+      pullRequest: {
+        number: { type: Number, min: 1, default: null, immutable: true },
+        url: { type: String, maxlength: 300, default: null, immutable: true },
+        branch: { type: String, maxlength: 200, default: null, immutable: true },
+        baseSha: { type: String, match: /^[a-f0-9]{40}$/i, default: null, immutable: true }
+      }
+    }, {
+      timestamps: { createdAt: true, updatedAt: false },
+      versionKey: false,
+      strict: "throw"
+    });
+    remediationVerificationSchema.index({ organization: 1, scan: 1, finding: 1, createdAt: -1, _id: -1 });
+    remediationVerificationSchema.pre("save", function rejectVerificationMutation() {
+      if (!this.isNew) throw new Error("Remediation verification records are append-only");
+    });
+    for (const operation of ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "deleteOne", "deleteMany", "findOneAndDelete"]) {
+      remediationVerificationSchema.pre(operation, function rejectVerificationQueryMutation() {
+        throw new Error("Remediation verification records are append-only");
+      });
+    }
+    module2.exports = mongoose.models.RemediationVerification || mongoose.model("RemediationVerification", remediationVerificationSchema);
+    module2.exports.CHECK_NAMES = CHECK_NAMES;
+    module2.exports.CHECK_STATUSES = CHECK_STATUSES;
+  }
+});
+
+// src/services/organization-export.service.js
+var require_organization_export_service = __commonJS({
+  "src/services/organization-export.service.js"(exports2, module2) {
+    var Organization = require_Organization();
+    var OrganizationMember = require_OrganizationMember();
+    var OrganizationInvitation = require_OrganizationInvitation();
+    var RepositoryAutomation = require_RepositoryAutomation();
+    var Scan = require_Scan();
+    var Finding = require_Finding();
+    var AuditEvent = require_AuditEvent();
+    var RemediationVerification = require_RemediationVerification();
+    var MAX_EXPORT_RECORDS = 25e3;
+    function tooLarge() {
+      return Object.assign(new Error(`This organization has more than ${MAX_EXPORT_RECORDS} exportable records. Narrow or archive the organization before retrying.`), {
+        statusCode: 413,
+        code: "EXPORT_LIMIT_EXCEEDED"
+      });
+    }
+    function idOf(value) {
+      return value == null ? null : String(value);
+    }
+    function withoutInstallationIds(details = {}) {
+      if (!details || typeof details !== "object" || Array.isArray(details)) return {};
+      return Object.fromEntries(Object.entries(details).filter(([key]) => key !== "installationId"));
+    }
+    async function buildOrganizationExport(organizationId) {
+      const organization = await Organization.findById(organizationId).select("name slug status createdAt updatedAt").lean();
+      if (!organization) return null;
+      const filter = { organization: organizationId };
+      const [memberCount, invitationCount, automationCount, scanCount, findingCount, auditEventCount, verificationCount] = await Promise.all([
+        OrganizationMember.countDocuments(filter),
+        OrganizationInvitation.countDocuments(filter),
+        RepositoryAutomation.countDocuments(filter),
+        Scan.countDocuments(filter),
+        Finding.countDocuments(filter),
+        AuditEvent.countDocuments(filter),
+        RemediationVerification.countDocuments(filter)
+      ]);
+      const expectedRecords = memberCount + invitationCount + automationCount + scanCount + findingCount + auditEventCount + verificationCount;
+      if (expectedRecords > MAX_EXPORT_RECORDS) throw tooLarge();
+      const collectionQueries = [
+        (limit) => OrganizationMember.find(filter).select("user role status notificationPreferences createdAt updatedAt").populate("user", "name email githubUsername").limit(limit).lean(),
+        (limit) => OrganizationInvitation.find(filter).select("email role invitedBy status expiresAt acceptedAt revokedAt createdAt updatedAt").limit(limit).lean(),
+        (limit) => RepositoryAutomation.find(filter).select("owner repo push pullRequest frequency nextRunAt lastScanId createdAt updatedAt").limit(limit).lean(),
+        (limit) => Scan.find(filter).select("owner repo branch commitSha includeDependencies status scannersUsed scannerErrors.scanner scannerErrors.exitCode summary startedAt completedAt createdAt updatedAt").limit(limit).lean(),
+        (limit) => Finding.find(filter).select("scan owner repo filePath startLine endLine column cwe ruleId scanner severity title description remediation fingerprint riskScore riskFactors riskCategory status statusReason reviewedBy reviewedAt reviewHistory createdAt updatedAt").limit(limit).lean(),
+        (limit) => AuditEvent.find(filter).select("actor actorLabel action target details requestId createdAt").limit(limit).lean(),
+        (limit) => RemediationVerification.find(filter).select("scan finding requestedBy repository sourceCommitSha targetPath patchSha256 sourceSha256 proposedSha256 action checks pullRequest createdAt").limit(limit).lean()
+      ];
+      const collections = [];
+      let remainingRecordBudget = MAX_EXPORT_RECORDS;
+      for (const loadCollection of collectionQueries) {
+        const collection = await loadCollection(remainingRecordBudget + 1);
+        if (collection.length > remainingRecordBudget) throw tooLarge();
+        collections.push(collection);
+        remainingRecordBudget -= collection.length;
+      }
+      const [members, invitations, automations, scans, findings, auditEvents, verifications] = collections;
+      const records = [members, invitations, automations, scans, findings, auditEvents, verifications];
+      const actualRecords = records.reduce((sum, collection) => sum + collection.length, 0);
+      if (actualRecords > MAX_EXPORT_RECORDS) throw tooLarge();
+      const counts = {
+        members: members.length,
+        invitations: invitations.length,
+        repositoryAutomations: automations.length,
+        scans: scans.length,
+        findings: findings.length,
+        auditEvents: auditEvents.length,
+        remediationVerifications: verifications.length,
+        total: actualRecords
+      };
+      return {
+        format: "securepatch-organization-export",
+        version: 1,
+        generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        organization: {
+          id: idOf(organization._id),
+          name: organization.name,
+          slug: organization.slug,
+          status: organization.status,
+          createdAt: organization.createdAt,
+          updatedAt: organization.updatedAt
+        },
+        counts,
+        data: {
+          members: members.map((member) => ({
+            id: idOf(member._id),
+            user: member.user ? {
+              id: idOf(member.user._id),
+              name: member.user.name,
+              email: member.user.email,
+              githubUsername: member.user.githubUsername || null
+            } : null,
+            role: member.role,
+            status: member.status,
+            notificationPreferences: member.notificationPreferences || {},
+            createdAt: member.createdAt,
+            updatedAt: member.updatedAt
+          })),
+          invitations: invitations.map((invitation) => ({
+            id: idOf(invitation._id),
+            email: invitation.email,
+            role: invitation.role,
+            invitedBy: idOf(invitation.invitedBy),
+            status: invitation.status,
+            expiresAt: invitation.expiresAt,
+            acceptedAt: invitation.acceptedAt,
+            revokedAt: invitation.revokedAt,
+            createdAt: invitation.createdAt,
+            updatedAt: invitation.updatedAt
+          })),
+          repositoryAutomations: automations.map((automation) => ({
+            id: idOf(automation._id),
+            owner: automation.owner,
+            repo: automation.repo,
+            push: automation.push,
+            pullRequest: automation.pullRequest,
+            frequency: automation.frequency,
+            nextRunAt: automation.nextRunAt,
+            lastScanId: automation.lastScanId,
+            createdAt: automation.createdAt,
+            updatedAt: automation.updatedAt
+          })),
+          scans: scans.map((scan) => ({
+            id: idOf(scan._id),
+            owner: scan.owner,
+            repo: scan.repo,
+            branch: scan.branch,
+            commitSha: scan.commitSha,
+            includeDependencies: scan.includeDependencies,
+            status: scan.status,
+            scannersUsed: scan.scannersUsed || [],
+            scannerErrors: (scan.scannerErrors || []).map((error) => ({ scanner: error.scanner, exitCode: error.exitCode })),
+            summary: scan.summary || {},
+            startedAt: scan.startedAt,
+            completedAt: scan.completedAt,
+            createdAt: scan.createdAt,
+            updatedAt: scan.updatedAt
+          })),
+          findings: findings.map((finding) => ({
+            id: idOf(finding._id),
+            scanId: idOf(finding.scan),
+            owner: finding.owner,
+            repo: finding.repo,
+            filePath: finding.filePath,
+            startLine: finding.startLine,
+            endLine: finding.endLine,
+            column: finding.column,
+            cwe: finding.cwe,
+            ruleId: finding.ruleId,
+            scanner: finding.scanner,
+            severity: finding.severity,
+            title: finding.title,
+            description: finding.description,
+            remediation: finding.remediation,
+            fingerprint: finding.fingerprint,
+            riskScore: finding.riskScore,
+            riskFactors: finding.riskFactors,
+            riskCategory: finding.riskCategory,
+            status: finding.status,
+            statusReason: finding.statusReason,
+            reviewedBy: idOf(finding.reviewedBy),
+            reviewedAt: finding.reviewedAt,
+            reviewHistory: finding.reviewHistory || [],
+            createdAt: finding.createdAt,
+            updatedAt: finding.updatedAt
+          })),
+          auditEvents: auditEvents.map((event) => ({
+            id: idOf(event._id),
+            actorId: idOf(event.actor),
+            actorLabel: event.actorLabel,
+            action: event.action,
+            target: event.target,
+            details: withoutInstallationIds(event.details),
+            requestId: event.requestId,
+            createdAt: event.createdAt
+          })),
+          remediationVerifications: verifications.map((record) => ({
+            id: idOf(record._id),
+            scanId: idOf(record.scan),
+            findingId: idOf(record.finding),
+            requestedBy: idOf(record.requestedBy),
+            repository: record.repository,
+            sourceCommitSha: record.sourceCommitSha,
+            targetPath: record.targetPath,
+            patchSha256: record.patchSha256,
+            sourceSha256: record.sourceSha256,
+            proposedSha256: record.proposedSha256,
+            action: record.action,
+            checks: record.checks,
+            pullRequest: record.pullRequest,
+            createdAt: record.createdAt
+          }))
+        },
+        exclusions: [
+          "Repository source files, finding evidence snippets, and raw scanner stderr are excluded.",
+          "OAuth credentials, GitHub installation identifiers, session data, and token hashes are excluded.",
+          "Personal notification inboxes, temporary AI caches, and request rate-limit buckets are excluded."
+        ],
+        limitations: [
+          "This export is assembled from live records and is not a transactionally consistent point-in-time snapshot.",
+          `Synchronous export is limited to ${MAX_EXPORT_RECORDS} records.`
+        ]
+      };
+    }
+    module2.exports = { buildOrganizationExport, MAX_EXPORT_RECORDS };
+  }
+});
+
 // src/controllers/organization.controller.js
 var require_organization_controller = __commonJS({
   "src/controllers/organization.controller.js"(exports2, module2) {
     var Organization = require_Organization();
     var OrganizationMember = require_OrganizationMember();
     var ApiResponse = require_ApiResponse();
+    var { recordAuditEvent } = require_audit_service();
+    var { buildOrganizationExport } = require_organization_export_service();
     var createOrganization = async (req, res, next) => {
       try {
         const { name } = req.body;
@@ -2451,6 +3061,7 @@ var require_organization_controller = __commonJS({
         }
         let organization;
         await require("mongoose").connection.transaction(async (session2) => {
+          await require_account_lock_service().lockActiveAccount(req.user._id, session2);
           [organization] = await Organization.create([{ name: trimmedName, slug }], { session: session2 });
           await OrganizationMember.create([{
             user: req.user._id,
@@ -2458,6 +3069,12 @@ var require_organization_controller = __commonJS({
             role: "owner",
             status: "active"
           }], { session: session2 });
+        });
+        await recordAuditEvent(req, {
+          organizationId: organization._id,
+          action: "organization.created",
+          target: `organization/${organization._id}`,
+          details: { organizationName: organization.name, slug: organization.slug }
         });
         return ApiResponse.success(
           res,
@@ -2561,7 +3178,36 @@ var require_organization_controller = __commonJS({
           success: false,
           error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" }
         });
+        await recordAuditEvent(req, {
+          action: "ai.settings_changed",
+          target: `organization/${req.params.organizationId}/hosted-ai`,
+          details: { hostedAiEnabled: organization.hostedAiEnabled === true }
+        });
         return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled });
+      } catch (error) {
+        next(error);
+      }
+    };
+    var exportOrganization = async (req, res, next) => {
+      try {
+        const exported = await buildOrganizationExport(req.params.organizationId);
+        if (!exported) {
+          return res.status(404).json({
+            success: false,
+            error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" }
+          });
+        }
+        await recordAuditEvent(req, {
+          action: "organization.exported",
+          target: `organization/${req.params.organizationId}`,
+          details: { recordCount: exported.counts.total }
+        });
+        const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+        const slug = String(exported.organization.slug || "organization").replace(/[^a-z0-9-]/gi, "-").slice(0, 100);
+        const filename = `securepatch-${slug}-export-${date}.json`;
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.type("application/json");
+        return res.send(JSON.stringify(exported, null, 2));
       } catch (error) {
         next(error);
       }
@@ -2571,7 +3217,8 @@ var require_organization_controller = __commonJS({
       getMyOrganizations,
       getOrganization,
       getAiSettings,
-      updateAiSettings
+      updateAiSettings,
+      exportOrganization
     };
   }
 });
@@ -2609,6 +3256,162 @@ var require_rbac_middleware = __commonJS({
   }
 });
 
+// require("../models/**/*") in src/services/organization-deletion.service.js
+var globRequire_models;
+var init_2 = __esm({
+  'require("../models/**/*") in src/services/organization-deletion.service.js'() {
+    globRequire_models = __glob({
+      "../models/AssistantCache.js": () => require_AssistantCache(),
+      "../models/AuditEvent.js": () => require_AuditEvent(),
+      "../models/Finding.js": () => require_Finding(),
+      "../models/Notification.js": () => require_Notification(),
+      "../models/Organization.js": () => require_Organization(),
+      "../models/OrganizationInvitation.js": () => require_OrganizationInvitation(),
+      "../models/OrganizationMember.js": () => require_OrganizationMember(),
+      "../models/RemediationVerification.js": () => require_RemediationVerification(),
+      "../models/RepositoryAutomation.js": () => require_RepositoryAutomation(),
+      "../models/Scan.js": () => require_Scan(),
+      "../models/UsageBucket.js": () => require_UsageBucket(),
+      "../models/User.js": () => require_User()
+    });
+  }
+});
+
+// src/services/organization-deletion.service.js
+var require_organization_deletion_service = __commonJS({
+  "src/services/organization-deletion.service.js"(exports2, module2) {
+    init_2();
+    var mongoose = require("mongoose");
+    var Organization = require_Organization();
+    var Member = require_OrganizationMember();
+    var Invitation = require_OrganizationInvitation();
+    var Automation = require_RepositoryAutomation();
+    var Scan = require_Scan();
+    var Audit = require_AuditEvent();
+    var { bad } = require_input();
+    var logger = require_logger();
+    var SETTLING_MS = 24 * 60 * 60 * 1e3;
+    var BATCH_SIZE = 500;
+    var PURGE_MODELS = [
+      "OrganizationInvitation",
+      "RepositoryAutomation",
+      "Notification",
+      "AssistantCache",
+      "Finding",
+      "RemediationVerification",
+      "Scan",
+      "AuditEvent",
+      "OrganizationMember"
+    ];
+    async function requestOrganizationDeletion({ organizationId, actorId, confirmation, now = /* @__PURE__ */ new Date() }) {
+      if (typeof confirmation !== "string" || !confirmation || confirmation.length > 150) throw bad("Enter the organization name exactly to confirm deletion");
+      const purgeAfter = new Date(now.getTime() + SETTLING_MS);
+      await mongoose.connection.transaction(async (session2) => {
+        const owner = await Member.findOneAndUpdate(
+          { organization: organizationId, user: actorId, status: "active", role: "owner" },
+          { $set: { status: "suspended" } },
+          { session: session2, returnDocument: "after" }
+        );
+        if (!owner) throw bad("Only the current organization owner can delete this organization", 403, "OWNER_REQUIRED");
+        const organization = await Organization.findOneAndUpdate(
+          { _id: organizationId, status: "active", name: confirmation },
+          { $set: { status: "deleting", deletionRequestedAt: now, purgeAfter, githubInstallationId: null, hostedAiEnabled: false } },
+          { session: session2, returnDocument: "after", runValidators: true }
+        );
+        if (!organization) throw bad("The organization changed or its name does not match. Refresh and try again", 409, "ORGANIZATION_CHANGED");
+        await Member.updateMany({ organization: organizationId }, { $set: { status: "suspended", "notificationPreferences.scanResults": false } }, { session: session2 });
+        await Invitation.updateMany(
+          { organization: organizationId, status: "pending" },
+          { $set: { status: "revoked", revokedAt: now }, $unset: { tokenHash: "" } },
+          { session: session2 }
+        );
+        await Automation.updateMany(
+          { organization: organizationId },
+          { $set: { frequency: "off", push: false, pullRequest: false, pendingRefs: [], nextRunAt: null, leaseUntil: null } },
+          { session: session2 }
+        );
+        await Scan.updateMany(
+          { organization: organizationId, status: { $in: ["queued", "running"] } },
+          { $set: {
+            status: "failed",
+            cancelledAt: now,
+            completedAt: now,
+            activeKey: null,
+            leaseUntil: null,
+            leaseToken: null,
+            errorMessage: "Organization deletion requested"
+          } },
+          { session: session2 }
+        );
+        await Audit.create([{
+          organization: organizationId,
+          actor: actorId,
+          actorLabel: `User ${String(actorId).slice(-8)}`,
+          action: "organization.deletion_requested",
+          target: `organization/${organizationId}`,
+          details: { purgeAfter: purgeAfter.toISOString() }
+        }], { session: session2 });
+      });
+      return { status: "deleting", purgeAfter };
+    }
+    async function purgeDueOrganizations(now = /* @__PURE__ */ new Date()) {
+      const due = await Organization.find({ status: "deleting", purgeAfter: { $lte: now } }).select("_id").sort({ purgeAttemptedAt: 1, purgeAfter: 1, _id: 1 }).limit(3).lean();
+      const result = { processed: 0, completed: 0, failed: 0 };
+      for (const organization of due) {
+        result.processed++;
+        try {
+          await Organization.updateOne({ _id: organization._id, status: "deleting" }, { $set: { purgeAttemptedAt: now } });
+          let remaining = false;
+          for (const modelName of PURGE_MODELS) {
+            const collection = globRequire_models(`../models/${modelName}`).collection;
+            const ids = await collection.find({ organization: organization._id }, { projection: { _id: 1 } }).limit(BATCH_SIZE).toArray();
+            if (ids.length) await collection.deleteMany({ organization: organization._id, _id: { $in: ids.map((item) => item._id) } });
+            if (await collection.findOne({ organization: organization._id }, { projection: { _id: 1 } })) remaining = true;
+          }
+          if (!remaining) {
+            await Organization.updateOne(
+              { _id: organization._id, status: "deleting", purgeAfter: { $lte: now } },
+              { $set: {
+                status: "deleted",
+                purgedAt: now,
+                name: "Deleted organization",
+                slug: `deleted-${organization._id}`,
+                githubInstallationId: null,
+                hostedAiEnabled: false
+              } }
+            );
+            result.completed++;
+          }
+        } catch (error) {
+          result.failed++;
+          logger.error(`organization_purge_failed organization=${organization._id} error=${error.name || "Error"}`);
+        }
+      }
+      return result;
+    }
+    module2.exports = { requestOrganizationDeletion, purgeDueOrganizations, SETTLING_MS, BATCH_SIZE };
+  }
+});
+
+// src/controllers/organization-deletion.controller.js
+var require_organization_deletion_controller = __commonJS({
+  "src/controllers/organization-deletion.controller.js"(exports2, module2) {
+    var ApiResponse = require_ApiResponse();
+    var { bad } = require_input();
+    var { requestOrganizationDeletion } = require_organization_deletion_service();
+    async function deleteOrganization(req, res, next) {
+      try {
+        if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.confirmation !== "string") throw bad("Provide only the exact organization name as confirmation");
+        const data = await requestOrganizationDeletion({ organizationId: req.params.organizationId, actorId: req.user._id, confirmation: req.body.confirmation });
+        return ApiResponse.success(res, data, "Organization access removed; data erasure queued", 202);
+      } catch (error) {
+        next(error);
+      }
+    }
+    module2.exports = { deleteOrganization };
+  }
+});
+
 // src/routes/organization.routes.js
 var require_organization_routes = __commonJS({
   "src/routes/organization.routes.js"(exports2, module2) {
@@ -2618,7 +3421,8 @@ var require_organization_routes = __commonJS({
       getMyOrganizations,
       getOrganization,
       getAiSettings,
-      updateAiSettings
+      updateAiSettings,
+      exportOrganization
     } = require_organization_controller();
     var {
       requireOrganizationMember
@@ -2631,6 +3435,8 @@ var require_organization_routes = __commonJS({
     router.get("/:organizationId", requireAuth, requireOrganizationMember, getOrganization);
     router.get("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, getAiSettings);
     router.patch("/:organizationId/ai-settings", requireAuth, requireOrganizationMember, requireRole("owner", "admin"), updateAiSettings);
+    router.get("/:organizationId/export", requireAuth, requireOrganizationMember, requireRole("owner", "admin"), exportOrganization);
+    router.delete("/:organizationId", requireAuth, requireOrganizationMember, requireRole("owner"), require_organization_deletion_controller().deleteOrganization);
     module2.exports = router;
   }
 });
@@ -2639,7 +3445,11 @@ var require_organization_routes = __commonJS({
 var require_member_controller = __commonJS({
   "src/controllers/member.controller.js"(exports2, module2) {
     var OrganizationMember = require_OrganizationMember();
+    var Organization = require_Organization();
+    var mongoose = require("mongoose");
     var ApiResponse = require_ApiResponse();
+    var { recordAuditEvent } = require_audit_service();
+    var { bad, objectId } = require_input();
     var getMembers = async (req, res, next) => {
       try {
         const members = await OrganizationMember.find({
@@ -2702,8 +3512,14 @@ var require_member_controller = __commonJS({
             }
           });
         }
+        const previousRole = membership.role;
         membership.role = role;
         await membership.save();
+        await recordAuditEvent(req, {
+          action: "member.role_changed",
+          target: `member/${membership.user}`,
+          details: { memberId: String(membership.user), fromRole: previousRole, toRole: role }
+        });
         return ApiResponse.success(
           res,
           {
@@ -2747,6 +3563,11 @@ var require_member_controller = __commonJS({
         }
         membership.status = "suspended";
         await membership.save();
+        await recordAuditEvent(req, {
+          action: "member.removed",
+          target: `member/${membership.user}`,
+          details: { memberId: String(membership.user), previousRole: membership.role }
+        });
         return ApiResponse.success(
           res,
           null,
@@ -2756,40 +3577,147 @@ var require_member_controller = __commonJS({
         next(error);
       }
     };
+    var transferOwnership = async (req, res, next) => {
+      try {
+        const { organizationId } = req.params;
+        const body = req.body || {};
+        if (Object.keys(body).length !== 2 || typeof body.newOwnerId !== "string" || typeof body.confirmation !== "string") {
+          throw bad("Provide a newOwnerId and the exact organization name to confirm the transfer");
+        }
+        const newOwnerId = objectId(body.newOwnerId);
+        if (String(newOwnerId) === String(req.user._id)) throw bad("Choose another active organization member as the new owner");
+        const organization = await Organization.findOne({ _id: organizationId, status: "active" }).select("name").lean();
+        if (!organization) throw bad("Organization not found", 404, "ORGANIZATION_NOT_FOUND");
+        if (body.confirmation !== organization.name) throw bad("Enter the organization name exactly to confirm the ownership transfer");
+        let transferredMember;
+        await mongoose.connection.transaction(async (session2) => {
+          const previousOwner = await OrganizationMember.findOneAndUpdate({
+            _id: req.organizationMembership._id,
+            user: req.user._id,
+            organization: organizationId,
+            status: "active",
+            role: "owner"
+          }, { $set: { role: "admin" } }, { session: session2, returnDocument: "after", runValidators: true });
+          if (!previousOwner) throw bad("Your owner role changed. Refresh the workspace and try again.", 409, "OWNER_ROLE_CHANGED");
+          transferredMember = await OrganizationMember.findOneAndUpdate({
+            user: newOwnerId,
+            organization: organizationId,
+            status: "active",
+            role: { $in: ["admin", "developer"] }
+          }, { $set: { role: "owner" } }, { session: session2, returnDocument: "after", runValidators: true });
+          if (!transferredMember) throw bad("The new owner must be an active admin or developer in this organization", 409, "NEW_OWNER_NOT_ELIGIBLE");
+        });
+        await recordAuditEvent(req, {
+          action: "member.ownership_transferred",
+          target: `member/${newOwnerId}`,
+          details: { previousOwnerId: String(req.user._id), newOwnerId: String(newOwnerId) }
+        });
+        return ApiResponse.success(res, {
+          newOwner: { userId: String(transferredMember.user), role: "owner" },
+          currentUserRole: "admin"
+        }, "Organization ownership transferred successfully");
+      } catch (error) {
+        next(error);
+      }
+    };
+    var leaveOrganization = async (req, res, next) => {
+      try {
+        const { organizationId } = req.params;
+        if (req.organizationMembership.role === "owner") {
+          throw bad("Transfer ownership to another active member before leaving this organization", 409, "OWNER_MUST_TRANSFER");
+        }
+        let departedMembership;
+        await mongoose.connection.transaction(async (session2) => {
+          departedMembership = await OrganizationMember.findOneAndUpdate({
+            _id: req.organizationMembership._id,
+            user: req.user._id,
+            organization: organizationId,
+            status: "active",
+            role: { $in: ["admin", "developer"] }
+          }, { $set: { status: "suspended" } }, { session: session2, returnDocument: "after", runValidators: true });
+          if (!departedMembership) {
+            throw bad("Your organization membership changed. Refresh the workspace and try again", 409, "MEMBERSHIP_CHANGED");
+          }
+          const activeOwner = await OrganizationMember.findOne({
+            organization: organizationId,
+            status: "active",
+            role: "owner"
+          }).session(session2).select("_id").lean();
+          if (!activeOwner) {
+            throw bad("This organization has no active owner. Contact an administrator before leaving", 409, "ACTIVE_OWNER_REQUIRED");
+          }
+        });
+        await recordAuditEvent(req, {
+          action: "member.left",
+          target: `member/${req.user._id}`,
+          details: { memberId: String(req.user._id), previousRole: departedMembership.role }
+        });
+        return ApiResponse.success(res, { organizationId, status: "suspended" }, "You left the organization");
+      } catch (error) {
+        next(error);
+      }
+    };
     module2.exports = {
       getMembers,
       updateMemberRole,
-      removeMember
+      removeMember,
+      transferOwnership,
+      leaveOrganization
     };
   }
 });
 
-// src/models/OrganizationInvitation.js
-var require_OrganizationInvitation = __commonJS({
-  "src/models/OrganizationInvitation.js"(exports2, module2) {
-    var mongoose = require("mongoose");
-    var organizationInvitationSchema = new mongoose.Schema({
-      organization: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Organization",
-        required: true
-      },
-      email: { type: String, required: true, lowercase: true, trim: true, maxlength: 320 },
-      role: { type: String, enum: ["admin", "developer"], required: true },
-      invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-      tokenHash: { type: String, select: false },
-      status: { type: String, enum: ["pending", "accepted", "revoked"], default: "pending", required: true },
-      expiresAt: { type: Date, required: true },
-      acceptedAt: { type: Date, default: null },
-      revokedAt: { type: Date, default: null }
-    }, { timestamps: true });
-    organizationInvitationSchema.index(
-      { organization: 1, email: 1 },
-      { unique: true, partialFilterExpression: { status: "pending" } }
-    );
-    organizationInvitationSchema.index({ tokenHash: 1 }, { unique: true, sparse: true });
-    organizationInvitationSchema.index({ organization: 1, status: 1, expiresAt: 1 });
-    module2.exports = mongoose.models.OrganizationInvitation || mongoose.model("OrganizationInvitation", organizationInvitationSchema);
+// src/services/invitation-email.service.js
+var require_invitation_email_service = __commonJS({
+  "src/services/invitation-email.service.js"(exports2, module2) {
+    function available() {
+      return process.env.INVITATION_EMAIL_ENABLED === "true" && Boolean(process.env.RESEND_API_KEY?.trim()) && Boolean(process.env.INVITATION_EMAIL_FROM?.trim());
+    }
+    async function send({ email, url, role, expiresAt, tokenHash }) {
+      if (!available()) return { status: "not_configured" };
+      let target;
+      try {
+        target = new URL(url);
+      } catch {
+        return { status: "failed", code: "INVALID_LINK" };
+      }
+      if (target.protocol !== "https:" || target.username || target.password) {
+        return { status: "failed", code: "HTTPS_REQUIRED" };
+      }
+      try {
+        const response = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          redirect: "error",
+          signal: AbortSignal.timeout(1e4),
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": `invitation/${tokenHash}`
+          },
+          body: JSON.stringify({
+            from: process.env.INVITATION_EMAIL_FROM.trim(),
+            to: [email],
+            subject: "Your AVPR-Net workspace invitation",
+            text: `You have been invited to a AVPR-Net workspace as ${role}.
+
+Sign in with ${email} to accept:
+${url}
+
+This single-use link expires ${new Date(expiresAt).toISOString()}. If you did not expect this invitation, ignore this email.`
+          })
+        });
+        if (!response.ok) {
+          await response.body?.cancel();
+          return { status: "failed", code: response.status === 429 ? "PROVIDER_RATE_LIMIT" : "PROVIDER_REJECTED" };
+        }
+        const data = await response.json();
+        if (typeof data.id !== "string" || !/^[a-zA-Z0-9-]{1,128}$/.test(data.id)) return { status: "unknown", code: "INVALID_PROVIDER_RESPONSE" };
+        return { status: "accepted", providerId: data.id };
+      } catch {
+        return { status: "unknown", code: "PROVIDER_UNCONFIRMED" };
+      }
+    }
+    module2.exports = { available, send };
   }
 });
 
@@ -2803,6 +3731,8 @@ var require_invitation_controller = __commonJS({
     var OrganizationMember = require_OrganizationMember();
     var User = require_User();
     var ApiResponse = require_ApiResponse();
+    var { recordAuditEvent } = require_audit_service();
+    var invitationEmail = require_invitation_email_service();
     var INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
     var MAX_PENDING_INVITATIONS = 100;
     function fail(res, status, code, message) {
@@ -2822,6 +3752,13 @@ var require_invitation_controller = __commonJS({
       try {
         const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
         const role = req.body.role;
+        if (req.body.sendEmail !== void 0 && typeof req.body.sendEmail !== "boolean") {
+          return fail(res, 400, "INVALID_EMAIL_OPTION", "Email delivery must be true or false");
+        }
+        const sendEmail = req.body.sendEmail === true;
+        if (sendEmail && !invitationEmail.available()) {
+          return fail(res, 503, "INVITATION_EMAIL_UNAVAILABLE", "Email delivery is unavailable. Create and share an invitation link instead.");
+        }
         if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           return fail(res, 400, "INVALID_EMAIL", "Enter a valid email address for the invite");
         }
@@ -2853,6 +3790,9 @@ var require_invitation_controller = __commonJS({
           email,
           status: "pending"
         });
+        if (sendEmail && existing?.emailAttemptedAt && Date.now() - new Date(existing.emailAttemptedAt).getTime() < 6e4) {
+          return fail(res, 429, "INVITATION_EMAIL_COOLDOWN", "Wait one minute before emailing this invitation again.");
+        }
         if (!existing && pendingCount >= MAX_PENDING_INVITATIONS) {
           return fail(res, 429, "INVITATION_LIMIT", "This organization has reached its pending invitation limit");
         }
@@ -2866,17 +3806,42 @@ var require_invitation_controller = __commonJS({
           expiresAt,
           acceptedAt: null,
           revokedAt: null,
-          status: "pending"
+          status: "pending",
+          emailStatus: sendEmail ? "unknown" : "manual",
+          ...sendEmail ? { emailAttemptedAt: /* @__PURE__ */ new Date() } : {}
         };
         let invitation;
         if (existing) {
-          Object.assign(existing, fields);
-          invitation = await existing.save();
+          invitation = await OrganizationInvitation.findOneAndUpdate({
+            _id: existing._id,
+            status: "pending",
+            ...sendEmail ? { $or: [{ emailAttemptedAt: null }, { emailAttemptedAt: { $lte: new Date(Date.now() - 6e4) } }] } : {}
+          }, { $set: fields }, { returnDocument: "after", runValidators: true });
+          if (!invitation) return fail(res, 409, "INVITATION_CHANGED", "This invitation changed or was just emailed. Refresh the list and wait one minute before emailing again.");
         } else {
           invitation = await OrganizationInvitation.create({
             ...fields,
             organization: req.params.organizationId
           });
+        }
+        await recordAuditEvent(req, {
+          action: "invitation.created",
+          target: `invitation/${invitation._id}`,
+          details: { invitationId: String(invitation._id), role, refreshed: Boolean(existing) }
+        });
+        const url = invitationUrl(token);
+        let emailDelivery = { status: "manual" };
+        if (sendEmail) {
+          emailDelivery = await invitationEmail.send({ email, url, role, expiresAt, tokenHash: fields.tokenHash });
+          try {
+            await OrganizationInvitation.updateOne(
+              { _id: invitation._id, tokenHash: fields.tokenHash, status: "pending" },
+              { $set: { emailStatus: emailDelivery.status === "not_configured" ? "failed" : emailDelivery.status } }
+            );
+          } catch {
+            emailDelivery = { ...emailDelivery, statusRecorded: false };
+          }
+          delete emailDelivery.providerId;
         }
         return ApiResponse.success(res, {
           invitation: {
@@ -2885,7 +3850,8 @@ var require_invitation_controller = __commonJS({
             role: invitation.role,
             status: invitation.status,
             expiresAt: invitation.expiresAt,
-            url: invitationUrl(token)
+            url,
+            emailDelivery
           }
         }, existing ? "Invitation link refreshed" : "Invitation created", existing ? 200 : 201);
       } catch (error) {
@@ -2900,9 +3866,10 @@ var require_invitation_controller = __commonJS({
         const invitations = await OrganizationInvitation.find({
           organization: req.params.organizationId,
           status: "pending"
-        }).select("email role invitedBy expiresAt createdAt").populate("invitedBy", "name email").sort({ createdAt: -1 }).limit(MAX_PENDING_INVITATIONS);
+        }).select("email role invitedBy expiresAt createdAt emailStatus emailAttemptedAt").populate("invitedBy", "name email").sort({ createdAt: -1 }).limit(MAX_PENDING_INVITATIONS);
         const now = Date.now();
         return ApiResponse.success(res, {
+          emailDeliveryAvailable: invitationEmail.available(),
           invitations: invitations.map((invitation) => ({
             id: invitation._id,
             email: invitation.email,
@@ -2910,7 +3877,8 @@ var require_invitation_controller = __commonJS({
             invitedBy: invitation.invitedBy ? { name: invitation.invitedBy.name, email: invitation.invitedBy.email } : null,
             expiresAt: invitation.expiresAt,
             createdAt: invitation.createdAt,
-            status: invitation.expiresAt.getTime() > now ? "pending" : "expired"
+            status: invitation.expiresAt.getTime() > now ? "pending" : "expired",
+            emailStatus: invitation.emailStatus || "manual"
           }))
         }, "Organization invitations retrieved successfully");
       } catch (error) {
@@ -2932,6 +3900,11 @@ var require_invitation_controller = __commonJS({
         invitation.tokenHash = void 0;
         invitation.revokedAt = /* @__PURE__ */ new Date();
         await invitation.save();
+        await recordAuditEvent(req, {
+          action: "invitation.revoked",
+          target: `invitation/${invitation._id}`,
+          details: { invitationId: String(invitation._id) }
+        });
         return ApiResponse.success(res, null, "Invitation revoked");
       } catch (error) {
         next(error);
@@ -2944,9 +3917,10 @@ var require_invitation_controller = __commonJS({
           return fail(res, 410, "INVITATION_INVALID", "This invitation link is invalid, expired, or already used");
         }
         const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-        let result;
+        let result, acceptedInvitationId;
         try {
           await mongoose.connection.transaction(async (session2) => {
+            await require_account_lock_service().lockActiveAccount(req.user._id, session2);
             const invitation = await OrganizationInvitation.findOne({
               tokenHash,
               status: "pending",
@@ -2984,6 +3958,7 @@ var require_invitation_controller = __commonJS({
             invitation.tokenHash = void 0;
             invitation.acceptedAt = /* @__PURE__ */ new Date();
             await invitation.save({ session: session2 });
+            acceptedInvitationId = invitation._id;
             result = {
               organization: { id: organization._id, name: organization.name, slug: organization.slug },
               role: membership.role
@@ -2993,6 +3968,12 @@ var require_invitation_controller = __commonJS({
           if (error.statusCode) return fail(res, error.statusCode, error.code, error.message);
           throw error;
         }
+        await recordAuditEvent(req, {
+          organizationId: result.organization.id,
+          action: "invitation.accepted",
+          target: `invitation/${acceptedInvitationId}`,
+          details: { role: result.role }
+        });
         return ApiResponse.success(res, result, "Organization invitation accepted");
       } catch (error) {
         next(error);
@@ -3009,9 +3990,19 @@ var require_member_routes = __commonJS({
     var { requireAuth } = require_auth_middleware();
     var { requireOrganizationMember } = require_organization_middleware();
     var { requireRole } = require_rbac_middleware();
-    var { getMembers, updateMemberRole, removeMember } = require_member_controller();
+    var { getMembers, updateMemberRole, removeMember, transferOwnership, leaveOrganization } = require_member_controller();
     var { createInvitation, listInvitations, revokeInvitation, acceptInvitation } = require_invitation_controller();
+    var AuditEvent = require_AuditEvent();
+    var handler = require_asyncHandler();
+    var { integer } = require_input();
     var router = express2.Router();
+    router.post(
+      "/:organizationId/ownership-transfer",
+      requireAuth,
+      requireOrganizationMember,
+      requireRole("owner"),
+      transferOwnership
+    );
     router.get(
       "/:organizationId/members",
       requireAuth,
@@ -3024,6 +4015,12 @@ var require_member_routes = __commonJS({
       requireOrganizationMember,
       requireRole("owner"),
       updateMemberRole
+    );
+    router.delete(
+      "/:organizationId/members/me",
+      requireAuth,
+      requireOrganizationMember,
+      leaveOrganization
     );
     router.delete(
       "/:organizationId/members/:userId",
@@ -3054,6 +4051,25 @@ var require_member_routes = __commonJS({
       revokeInvitation
     );
     router.post("/invitations/accept", requireAuth, acceptInvitation);
+    router.get(
+      "/:organizationId/audit-events",
+      requireAuth,
+      requireOrganizationMember,
+      requireRole("owner", "admin"),
+      handler(async (req, res) => {
+        const page = integer(req.query.page, 1, 1e5);
+        const limit = integer(req.query.limit, 20, 100);
+        const filter = { organization: req.params.organizationId };
+        const [events, total] = await Promise.all([
+          AuditEvent.find(filter).select("actor actorLabel action target details requestId createdAt").populate("actor", "name githubUsername").sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+          AuditEvent.countDocuments(filter)
+        ]);
+        return res.json({ success: true, data: {
+          events: events.map((event) => ({ ...event, actorLabel: event.actor?.name || event.actor?.githubUsername || event.actorLabel })),
+          pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
+        } });
+      })
+    );
     module2.exports = router;
   }
 });
@@ -3064,6 +4080,7 @@ var require_github_controller = __commonJS({
     var Organization = require_Organization();
     var { githubApp } = require_github();
     var { authorizedInstallations } = require_githubAuth_controller();
+    var { recordAuditEvent } = require_audit_service();
     var connectGitHubInstallation = async (req, res, next) => {
       try {
         const { organizationId } = req.params;
@@ -3101,6 +4118,15 @@ var require_github_controller = __commonJS({
         );
         organization.githubInstallationId = String(installation.id);
         await organization.save();
+        await recordAuditEvent(req, {
+          action: "github.installation_connected",
+          target: `github-installation/${installation.id}`,
+          details: {
+            installationId: String(installation.id),
+            account: installation.account?.login || "unknown",
+            accountType: installation.account?.type || "unknown"
+          }
+        });
         return res.status(200).json({
           success: true,
           data: {
@@ -3139,12 +4165,32 @@ var require_github_controller = __commonJS({
             message: "GitHub is not connected"
           });
         }
-        const { data: installation } = await githubApp.octokit.request(
-          "GET /app/installations/{installation_id}",
-          {
-            installation_id: organization.githubInstallationId
+        let installation;
+        try {
+          ({ data: installation } = await githubApp.octokit.request(
+            "GET /app/installations/{installation_id}",
+            { installation_id: organization.githubInstallationId }
+          ));
+        } catch (error) {
+          if (error.status !== 404) throw error;
+          const revokedInstallationId = String(organization.githubInstallationId);
+          organization.githubInstallationId = null;
+          await organization.save();
+          if (Array.isArray(req.session?.githubAccess?.installations)) {
+            req.session.githubAccess.installations = req.session.githubAccess.installations.filter((item) => String(item.id) !== revokedInstallationId);
+            await new Promise((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
           }
-        );
+          await recordAuditEvent(req, {
+            action: "github.installation_disconnected",
+            target: `github-installation/${revokedInstallationId}`,
+            details: { installationId: revokedInstallationId, reason: "revoked" }
+          });
+          return res.status(200).json({
+            success: true,
+            data: { connected: false, installation: null, revoked: true, revokedInstallationId },
+            message: "GitHub App access was removed. Reinstall it to restore repository access."
+          });
+        }
         return res.status(200).json({
           success: true,
           data: {
@@ -3455,118 +4501,55 @@ var require_scan_timing = __commonJS({
   }
 });
 
+// src/utils/github-rate-limit.js
+var require_github_rate_limit = __commonJS({
+  "src/utils/github-rate-limit.js"(exports2, module2) {
+    var DEFAULT_RETRY_SECONDS = 60;
+    function getHeader(headers, name) {
+      if (!headers) return null;
+      if (typeof headers.get === "function") return headers.get(name);
+      const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+      return key ? String(headers[key]) : null;
+    }
+    function positiveInteger(value) {
+      if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+    }
+    function rateLimitError({ status, headers, message = "" }) {
+      if (![403, 429].includes(Number(status))) return null;
+      const remaining = getHeader(headers, "x-ratelimit-remaining");
+      const retryAfter = positiveInteger(getHeader(headers, "retry-after"));
+      const isRateLimited = Number(status) === 429 || remaining === "0" || retryAfter !== null || /rate limit|abuse detection/i.test(message);
+      if (!isRateLimited) return null;
+      const resetAt = remaining === "0" ? positiveInteger(getHeader(headers, "x-ratelimit-reset")) : null;
+      const resetDelay = resetAt ? Math.max(1, Math.ceil(resetAt - Date.now() / 1e3)) : null;
+      const retryAfterSeconds = retryAfter || resetDelay || DEFAULT_RETRY_SECONDS;
+      return Object.assign(new Error(`GitHub is rate limiting requests. Wait ${retryAfterSeconds} seconds before trying again.`), {
+        statusCode: 429,
+        code: "GITHUB_RATE_LIMITED",
+        retryAfterSeconds
+      });
+    }
+    function fromOctokitError(error) {
+      const headers = error?.response?.headers;
+      const requestUrl = error?.request?.url || "";
+      const isGitHubResponse = getHeader(headers, "x-github-request-id") || /(?:^|\/)api\.github\.com(?:\/|$)/i.test(requestUrl);
+      if (!isGitHubResponse) return null;
+      return rateLimitError({
+        status: error.status || error.response?.status,
+        headers,
+        message: error.response?.data?.message || error.message || ""
+      });
+    }
+    module2.exports = { fromOctokitError, fromResponse: rateLimitError };
+  }
+});
+
 // src/services/scan-context.js
 var require_scan_context = __commonJS({
   "src/services/scan-context.js"(exports2, module2) {
     module2.exports = new (require("node:async_hooks")).AsyncLocalStorage();
-  }
-});
-
-// src/services/workspace.service.js
-var require_workspace_service = __commonJS({
-  "src/services/workspace.service.js"(exports2, module2) {
-    var os = require("node:os");
-    var fs = require("node:fs");
-    var path = require("node:path");
-    var AdmZip = require("adm-zip");
-    var { getInstallationOctokit } = require_github();
-    var { repository, bad } = require_input();
-    var context = require_scan_context();
-    var MAX_ARCHIVE = 50 * 1024 * 1024;
-    var MAX_EXPANDED = 200 * 1024 * 1024;
-    async function download(installationId, owner, repo, ref) {
-      const client = await getInstallationOctokit(installationId);
-      const { token } = await client.auth({ type: "installation" });
-      const signal = AbortSignal.any([AbortSignal.timeout(3e4), ...context.getStore()?.signal ? [context.getStore().signal] : []]);
-      let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "SecurePatch" },
-        redirect: "manual",
-        signal
-      });
-      if ([301, 302, 307, 308].includes(response.status)) {
-        const url = new URL(response.headers.get("location"));
-        await response.body?.cancel();
-        if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
-        response = await fetch(url, { redirect: "error", signal });
-      }
-      if (!response.ok || !response.body) throw bad("GitHub archive download failed", 502);
-      if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) {
-        await response.body.cancel();
-        throw bad("Repository archive exceeds 50 MiB", 413);
-      }
-      const parts = [];
-      let bytes = 0;
-      for await (const part of response.body) {
-        bytes += part.byteLength;
-        if (bytes > MAX_ARCHIVE) {
-          throw bad("Repository archive exceeds 50 MiB", 413);
-        }
-        parts.push(Buffer.from(part));
-      }
-      return Buffer.concat(parts);
-    }
-    async function createEphemeralWorkspace(installationId, owner, repo, ref) {
-      repository(owner, repo);
-      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
-      const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
-      const workspacePath = path.join(base, "workspace");
-      const cleanup = () => {
-        const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
-        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
-        fs.rmSync(base, { recursive: true, force: true });
-      };
-      try {
-        const zip = new AdmZip(await download(installationId, owner, repo, ref));
-        const entries = zip.getEntries();
-        if (entries.length > 2e4) throw bad("Repository contains too many archive entries", 413);
-        let expanded = 0;
-        for (const entry of entries) {
-          const name = entry.entryName;
-          expanded += entry.header.size;
-          if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
-          if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || (entry.attr >>> 16 & 61440) === 40960) throw bad("Unsafe archive path or symbolic link");
-        }
-        fs.mkdirSync(workspacePath);
-        zip.extractAllTo(workspacePath, false);
-        const names = fs.readdirSync(workspacePath);
-        const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
-        return { workspacePath: nested ? path.join(workspacePath, names[0]) : workspacePath, cleanup };
-      } catch (error) {
-        cleanup();
-        throw error;
-      }
-    }
-    module2.exports = { createEphemeralWorkspace, download };
-  }
-});
-
-// src/scanners/base.adapter.js
-var require_base_adapter = __commonJS({
-  "src/scanners/base.adapter.js"(exports2, module2) {
-    var BaseScannerAdapter = class _BaseScannerAdapter {
-      constructor(name) {
-        if (new.target === _BaseScannerAdapter) {
-          throw new TypeError("Cannot construct BaseScannerAdapter instances directly");
-        }
-        this.name = name;
-      }
-      /**
-       * Check if scanner binary/tool is available on host system
-       * @returns {Promise<boolean>}
-       */
-      async isAvailable() {
-        throw new Error("Method 'isAvailable()' must be implemented.");
-      }
-      /**
-       * Execute scanner against ephemeral workspace directory
-       * @param {string} workspacePath - Absolute path to extracted repository code
-       * @returns {Promise<Array<Object>>} Array of raw scanner finding objects
-       */
-      async scan(workspacePath) {
-        throw new Error("Method 'scan()' must be implemented.");
-      }
-    };
-    module2.exports = BaseScannerAdapter;
   }
 });
 
@@ -3576,6 +4559,7 @@ var require_process = __commonJS({
     var { execFile } = require("node:child_process");
     var os = require("node:os");
     var path = require("node:path");
+    var wslWorkspaces = /* @__PURE__ */ new Map();
     function scannerEnv() {
       const scannerBinDir = process.env.SECUREPATCH_SCANNER_BIN_DIR;
       const inheritedPath = process.env.PATH || process.env.Path;
@@ -3593,7 +4577,90 @@ var require_process = __commonJS({
         SEMGREP_VERSION_CACHE_PATH: path.join(os.tmpdir(), "securepatch-semgrep-version")
       }).filter(([, value]) => value));
     }
+    function wslUtility(args, timeout = 3e4) {
+      return new Promise((resolve, reject) => {
+        execFile("wsl.exe", ["--distribution", process.env.SECUREPATCH_SCANNER_WSL_DISTRO, "--exec", ...args], {
+          env: scannerEnv(),
+          timeout,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024
+        }, (error, stdout, stderr) => {
+          if (error) return reject(new Error(`WSL scanner workspace setup failed (${error.code || stderr.trim() || "command failed"})`));
+          resolve(stdout.trim());
+        });
+      });
+    }
+    function toWslPath(value) {
+      if (typeof value !== "string" || !/^[a-z]:[\\/]/i.test(value)) return Promise.resolve(value);
+      return wslUtility(["wslpath", "-a", value], 5e3);
+    }
+    async function prepareWslWorkspace(hostPath) {
+      const key = path.resolve(hostPath);
+      if (wslWorkspaces.has(key)) return wslWorkspaces.get(key);
+      const workspacePromise = (async () => {
+        let destination;
+        try {
+          const source = await toWslPath(hostPath);
+          destination = await wslUtility(["mktemp", "-d", "/tmp/securepatch-scan-XXXXXX"]);
+          if (!/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) throw new Error("WSL returned an invalid temporary workspace path");
+          await wslUtility(["cp", "-a", "--", `${source.replace(/\/$/, "")}/.`, destination], 6e4);
+          return destination;
+        } catch (error) {
+          if (destination && /^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
+            await wslUtility(["rm", "-rf", "--", destination]).catch(() => {
+            });
+          }
+          throw error;
+        }
+      })();
+      wslWorkspaces.set(key, workspacePromise);
+      try {
+        return await workspacePromise;
+      } catch (error) {
+        wslWorkspaces.delete(key);
+        throw error;
+      }
+    }
+    async function cleanupWslWorkspace(hostPath) {
+      if (!hostPath) return;
+      const key = path.resolve(hostPath);
+      const workspace = wslWorkspaces.get(key);
+      wslWorkspaces.delete(key);
+      if (!workspace) return;
+      const destination = await workspace;
+      if (/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
+        await wslUtility(["rm", "-rf", "--", destination], 1e4);
+      }
+    }
+    function runInWsl(binary, args, { cwd, timeout }) {
+      const distro = process.env.SECUREPATCH_SCANNER_WSL_DISTRO;
+      const scannerDir = process.env.SECUREPATCH_SCANNER_WSL_BIN_DIR;
+      const executable = scannerDir ? path.posix.join(scannerDir, binary) : binary;
+      const translate = (value) => typeof value === "string" && /^[a-z]:[\\/]/i.test(value) ? toWslPath(value) : Promise.resolve(value);
+      const translatedCwd = cwd ? prepareWslWorkspace(cwd) : Promise.resolve(void 0);
+      return Promise.all([translatedCwd, ...args.map(translate)]).then(([workspacePath, ...translatedArgs]) => new Promise((resolve, reject) => {
+        execFile("wsl.exe", ["--distribution", distro, ...workspacePath ? ["--cd", workspacePath] : [], "--exec", "timeout", "--signal=KILL", `${Math.ceil(timeout / 1e3)}s`, executable, ...translatedArgs], {
+          cwd,
+          env: scannerEnv(),
+          timeout,
+          killSignal: "SIGKILL",
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true,
+          signal: require_scan_context().getStore()?.signal
+        }, (error, stdout, stderr) => {
+          const exitCode = error ? error.code : 0;
+          if (error && ![0, 1].includes(exitCode)) {
+            return reject(Object.assign(
+              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
+              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
+            ));
+          }
+          resolve({ stdout, stderr, exitCode });
+        });
+      }));
+    }
     function run(binary, args, { cwd, timeout = 12e4 } = {}) {
+      if (process.env.SECUREPATCH_SCANNER_WSL_DISTRO) return runInWsl(binary, args, { cwd, timeout });
       return new Promise((resolve, reject) => {
         let child;
         child = execFile(binary, args, {
@@ -3639,12 +4706,163 @@ var require_process = __commonJS({
       }
       return parsed;
     }
-    module2.exports = { run, scanJSON, scannerEnv };
+    module2.exports = { run, scanJSON, scannerEnv, cleanupWslWorkspace };
     module2.exports.coverage = (paths, root, skipped = null) => ({
       scanned: paths.length,
       skipped,
-      filesHash: require("node:crypto").createHash("sha256").update(JSON.stringify(paths.map((p) => path.relative(root, p).replace(/\\/g, "/")).sort())).digest("hex")
+      filesHash: require("node:crypto").createHash("sha256").update(JSON.stringify(paths.map(
+        (p) => path.isAbsolute(p) || path.win32.isAbsolute(p) ? path.relative(root, p).replace(/\\/g, "/") : String(p).replace(/\\/g, "/").replace(/^\.\//, "")
+      ).sort())).digest("hex")
     });
+  }
+});
+
+// src/services/workspace.service.js
+var require_workspace_service = __commonJS({
+  "src/services/workspace.service.js"(exports2, module2) {
+    var os = require("node:os");
+    var fs = require("node:fs");
+    var path = require("node:path");
+    var AdmZip = require("adm-zip");
+    var { getInstallationOctokit } = require_github();
+    var { repository, bad } = require_input();
+    var { fromResponse: githubRateLimit } = require_github_rate_limit();
+    var context = require_scan_context();
+    var MAX_ARCHIVE = 50 * 1024 * 1024;
+    var MAX_EXPANDED = 200 * 1024 * 1024;
+    async function archiveRateLimit(response) {
+      let message = "";
+      if (response.status === 403 && response.body) {
+        const reader = response.clone().body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let text = "", bytes = 0;
+          try {
+            while (bytes < 4096) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = value.subarray(0, 4096 - bytes);
+              bytes += chunk.byteLength;
+              text += decoder.decode(chunk, { stream: bytes < 4096 });
+              if (bytes === 4096) await reader.cancel();
+            }
+            text += decoder.decode();
+            try {
+              message = JSON.parse(text).message || text;
+            } catch {
+              message = text;
+            }
+          } catch {
+          }
+        }
+      }
+      return githubRateLimit({ status: response.status, headers: response.headers, message });
+    }
+    async function download(installationId, owner, repo, ref) {
+      const client = await getInstallationOctokit(installationId);
+      const { token } = await client.auth({ type: "installation" });
+      const signal = AbortSignal.any([AbortSignal.timeout(3e4), ...context.getStore()?.signal ? [context.getStore().signal] : []]);
+      let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" },
+        redirect: "manual",
+        signal
+      });
+      if ([301, 302, 307, 308].includes(response.status)) {
+        const url = new URL(response.headers.get("location"));
+        await response.body?.cancel();
+        if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+        response = await fetch(url, { redirect: "error", signal });
+      }
+      if (!response.ok || !response.body) {
+        const limited = await archiveRateLimit(response);
+        await response.body?.cancel().catch(() => {
+        });
+        if (limited) throw limited;
+        throw bad("GitHub archive download failed", 502);
+      }
+      if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) {
+        await response.body.cancel();
+        throw bad("Repository archive exceeds 50 MiB", 413);
+      }
+      const parts = [];
+      let bytes = 0;
+      for await (const part of response.body) {
+        bytes += part.byteLength;
+        if (bytes > MAX_ARCHIVE) {
+          throw bad("Repository archive exceeds 50 MiB", 413);
+        }
+        parts.push(Buffer.from(part));
+      }
+      return Buffer.concat(parts);
+    }
+    async function createEphemeralWorkspace(installationId, owner, repo, ref) {
+      repository(owner, repo);
+      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
+      const workspacePath = path.join(base, "workspace");
+      let scannerWorkspacePath = workspacePath;
+      const cleanup = async () => {
+        const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
+        try {
+          await require_process().cleanupWslWorkspace(scannerWorkspacePath);
+        } finally {
+          fs.rmSync(base, { recursive: true, force: true });
+        }
+      };
+      try {
+        const zip = new AdmZip(await download(installationId, owner, repo, ref));
+        const entries = zip.getEntries();
+        if (entries.length > 2e4) throw bad("Repository contains too many archive entries", 413);
+        let expanded = 0;
+        for (const entry of entries) {
+          const name = entry.entryName;
+          expanded += entry.header.size;
+          if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
+          if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || (entry.attr >>> 16 & 61440) === 40960) throw bad("Unsafe archive path or symbolic link");
+        }
+        fs.mkdirSync(workspacePath);
+        zip.extractAllTo(workspacePath, false);
+        const names = fs.readdirSync(workspacePath);
+        const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
+        scannerWorkspacePath = nested ? path.join(workspacePath, names[0]) : workspacePath;
+        return { workspacePath: scannerWorkspacePath, cleanup };
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
+    }
+    module2.exports = { createEphemeralWorkspace, download };
+  }
+});
+
+// src/scanners/base.adapter.js
+var require_base_adapter = __commonJS({
+  "src/scanners/base.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = class _BaseScannerAdapter {
+      constructor(name) {
+        if (new.target === _BaseScannerAdapter) {
+          throw new TypeError("Cannot construct BaseScannerAdapter instances directly");
+        }
+        this.name = name;
+      }
+      /**
+       * Check if scanner binary/tool is available on host system
+       * @returns {Promise<boolean>}
+       */
+      async isAvailable() {
+        throw new Error("Method 'isAvailable()' must be implemented.");
+      }
+      /**
+       * Execute scanner against ephemeral workspace directory
+       * @param {string} workspacePath - Absolute path to extracted repository code
+       * @returns {Promise<Array<Object>>} Array of raw scanner finding objects
+       */
+      async scan(workspacePath) {
+        throw new Error("Method 'scan()' must be implemented.");
+      }
+    };
+    module2.exports = BaseScannerAdapter;
   }
 });
 
@@ -3659,14 +4877,15 @@ var require_semgrep_adapter = __commonJS({
       }
       async isAvailable() {
         try {
-          this.version = (await run("semgrep", ["--version"], { timeout: 5e3 })).stdout.trim();
+          this.version = (await run("semgrep", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
           return true;
         } catch {
           return false;
         }
       }
       async scan(workspacePath) {
-        const parsed = await scanJSON("semgrep", ["scan", "--config", require("node:path").join(__dirname, "rules.yml"), "--json", "--quiet", "--metrics", "off", "--disable-version-check", workspacePath], workspacePath);
+        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
+        const parsed = await scanJSON("semgrep", ["scan", "--config", require("node:path").join(__dirname, "rules.yml"), "--json", "--quiet", "--metrics", "off", "--disable-version-check", scanTarget], workspacePath);
         this.coverage = require_process().coverage(parsed.paths?.scanned || [], workspacePath, parsed.paths?.skipped?.length ?? null);
         return parsed.results;
       }
@@ -3686,14 +4905,15 @@ var require_bandit_adapter = __commonJS({
       }
       async isAvailable() {
         try {
-          this.version = (await run("bandit", ["--version"], { timeout: 5e3 })).stdout.trim();
+          this.version = (await run("bandit", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
           return true;
         } catch {
           return false;
         }
       }
       async scan(workspacePath) {
-        const parsed = await scanJSON("bandit", ["-r", workspacePath, "-f", "json", "-q"], workspacePath);
+        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
+        const parsed = await scanJSON("bandit", ["-r", scanTarget, "-f", "json", "-q"], workspacePath);
         this.coverage = require_process().coverage(Object.keys(parsed.metrics || {}).filter((key) => key !== "_totals"), workspacePath);
         return parsed.results;
       }
@@ -3942,6 +5162,9 @@ var require_normalizer_service = __commonJS({
         return [];
       }
       static cleanFilePath(fullPath, workspacePath) {
+        if (!path.isAbsolute(fullPath) && !path.win32.isAbsolute(fullPath)) {
+          return String(fullPath).replace(/\\/g, "/").replace(/^\.\//, "");
+        }
         let rel = path.relative(workspacePath, fullPath).replace(/\\/g, "/");
         if (rel.startsWith("./")) rel = rel.substring(2);
         return rel;
@@ -4055,14 +5278,15 @@ var require_deduplicator_service = __commonJS({
        * Generates a deterministic SHA-256 fingerprint for a finding.
        *
        * Fingerprint basis:
-       * owner + repo + normalizedFilePath + cwe + ruleId + startLine
+       * owner + repo + scanner + normalizedFilePath + cwe + ruleId + startLine
        */
       static generateFingerprint(owner, repo, finding) {
         const normPath = (finding.filePath || "").trim().replace(/\\/g, "/");
         const cwe = (finding.cwe || "CWE-Unknown").trim().toUpperCase();
         const rule = (finding.ruleId || "").trim();
         const line = finding.startLine || 1;
-        const payload = `${owner.toLowerCase()}:${repo.toLowerCase()}:${normPath}:${cwe}:${rule}:${line}`;
+        const scanner = String(finding.scanner || "unknown").trim().toLowerCase();
+        const payload = `${owner.toLowerCase()}:${repo.toLowerCase()}:${scanner}:${normPath}:${cwe}:${rule}:${line}`;
         return crypto.createHash("sha256").update(payload).digest("hex");
       }
       /**
@@ -4083,8 +5307,11 @@ var require_deduplicator_service = __commonJS({
           item.correlationKey = crypto.createHash("sha256").update(JSON.stringify([
             owner.toLowerCase(),
             repo.toLowerCase(),
+            item.scanner,
             item.filePath,
+            item.startLine || 1,
             item.cwe?.match(/CWE-\d+/)?.[0],
+            item.ruleId,
             evidence || `${item.ruleId}:${item.startLine}`
           ])).digest("hex");
           item.provenance = [{ scanner: item.scanner, ruleId: item.ruleId, severity: item.severity }];
@@ -4265,27 +5492,121 @@ var require_risk_service = __commonJS({
   }
 });
 
-// src/models/RepositoryAutomation.js
-var require_RepositoryAutomation = __commonJS({
-  "src/models/RepositoryAutomation.js"(exports2, module2) {
-    var mongoose = require("mongoose");
-    var schema = new mongoose.Schema({
-      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
-      owner: { type: String, required: true },
-      repo: { type: String, required: true },
-      installationId: { type: String, required: true },
-      push: { type: Boolean, default: false },
-      pullRequest: { type: Boolean, default: false },
-      frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
-      nextRunAt: { type: Date, default: null },
-      leaseUntil: { type: Date, default: null },
-      lastError: { type: String, default: null },
-      lastScanId: { type: String, default: null },
-      pendingRefs: { type: [String], default: [] }
-    }, { timestamps: true });
-    schema.index({ organization: 1, owner: 1, repo: 1 }, { unique: true });
-    schema.index({ nextRunAt: 1 });
-    module2.exports = mongoose.models.RepositoryAutomation || mongoose.model("RepositoryAutomation", schema);
+// src/services/notification.service.js
+var require_notification_service = __commonJS({
+  "src/services/notification.service.js"(exports2, module2) {
+    var OrganizationMember = require_OrganizationMember();
+    var Notification = require_Notification();
+    var logger = require_logger();
+    function eventForScan(scan) {
+      if (!scan || scan.cancelledAt) return null;
+      if (scan.status === "failed") return {
+        type: "scan.failed",
+        title: "Scan failed",
+        body: "A complete result is not available. Open scan history to review the failure and retry."
+      };
+      if (scan.status !== "completed") return null;
+      const scannersRan = Array.isArray(scan.scannersUsed) && scan.scannersUsed.length > 0;
+      const partial = !scannersRan || Boolean(scan.scannerErrors?.length);
+      if (partial) return {
+        type: "scan.partial",
+        title: "Scan needs review",
+        body: "Some scanner coverage is missing. Review the scan before treating the repository as clean."
+      };
+      const summary = scan.summary || {};
+      const count = Number.isSafeInteger(summary.total) && summary.total >= 0 ? summary.total : 0;
+      const critical = Number.isSafeInteger(summary.critical) && summary.critical >= 0 ? summary.critical : 0;
+      const high = Number.isSafeInteger(summary.high) && summary.high >= 0 ? summary.high : 0;
+      return {
+        type: "scan.completed",
+        title: "Scan completed",
+        body: count ? `${count} findings detected \xB7 ${critical} critical \xB7 ${high} high.` : "No findings were detected by the completed scanners."
+      };
+    }
+    async function notifyScanResult(scan) {
+      const event = eventForScan(scan);
+      if (!event || !scan.organization || !scan._id || !scan.owner || !scan.repo) return { delivered: 0, skipped: true };
+      try {
+        const memberships = await OrganizationMember.find({
+          organization: scan.organization,
+          status: "active",
+          "notificationPreferences.scanResults": { $ne: false }
+        }).select("user").lean();
+        if (!memberships.length) return { delivered: 0, skipped: true };
+        const now = /* @__PURE__ */ new Date();
+        const dedupeKey = `${scan._id}:${event.type}`;
+        const repository = `${scan.owner}/${scan.repo}`.slice(0, 140);
+        const href = `/github/${encodeURIComponent(scan.owner)}/${encodeURIComponent(scan.repo)}/scan?scanId=${encodeURIComponent(String(scan._id))}`;
+        const operations = memberships.filter((item) => item.user).map(({ user }) => ({
+          updateOne: {
+            filter: { recipient: user, dedupeKey },
+            update: { $setOnInsert: {
+              organization: scan.organization,
+              recipient: user,
+              type: event.type,
+              dedupeKey,
+              title: event.title,
+              body: event.body,
+              href,
+              scan: scan._id,
+              repository,
+              createdAt: now,
+              expiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1e3)
+            } },
+            upsert: true
+          }
+        }));
+        if (!operations.length) return { delivered: 0, skipped: true };
+        const result = await Notification.bulkWrite(operations, { ordered: false });
+        return { delivered: (result.upsertedCount || 0) + (result.modifiedCount || 0), skipped: false };
+      } catch (error) {
+        logger.error(`notification_delivery_failed type=${event.type} scan=${String(scan._id)} error=${error.name || "Error"}`);
+        return { delivered: 0, failed: true };
+      }
+    }
+    module2.exports = { eventForScan, notifyScanResult };
+  }
+});
+
+// src/services/remediation-guidance.service.js
+var require_remediation_guidance_service = __commonJS({
+  "src/services/remediation-guidance.service.js"(exports2, module2) {
+    var GUIDANCE_VERSION = "securepatch-guidance-v1";
+    var entries = {
+      "semgrep:securepatch.js.dynamic-eval": ["Avoid dynamic code evaluation", "The rule matched JavaScript or TypeScript that turns a string into executable code.", ["Use a data parser such as JSON.parse when the input is data.", "If callers need different behavior, select from a fixed map of reviewed functions instead of evaluating caller-provided source.", "Add a regression test for untrusted input and the expected rejected or parsed result."]],
+      "semgrep:securepatch.js.shell-exec": ["Pass process arguments separately", "Shell command construction can let untrusted values change which command runs.", ["Prefer execFile or spawn with an executable and an argument array.", "Validate each argument against the expected format and allowlist executable choices.", "Keep shell mode disabled and add a test for metacharacters in user-controlled values."]],
+      "semgrep:securepatch.js.raw-html": ["Render untrusted content as text", "Raw HTML can turn attacker-controlled markup into script or unsafe links.", ["Prefer ordinary text rendering when HTML is not required.", "If rich HTML is required, sanitize it with a maintained allowlist sanitizer immediately before rendering.", "Test scripts, event-handler attributes, unsafe URL schemes, and malformed markup."]],
+      "semgrep:securepatch.js.weak-hash": ["Choose a hash for the security purpose", "MD5 and SHA-1 are unsuitable when collision resistance is required.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use a password-hashing function such as Argon2id, scrypt, or bcrypt rather than a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "semgrep:securepatch.js.sql-concatenation": ["Bind SQL parameters", "Building a query by concatenating values can let input alter the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Keep table or column names out of user input; map any selectable identifiers to fixed allowed names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
+      "semgrep:securepatch.js.disabled-tls": ["Keep certificate verification enabled", "Disabling TLS verification removes the check that the server is the intended peer.", ["Restore the client's normal certificate verification behavior.", "Fix the certificate chain or configure the correct trusted CA instead of bypassing validation.", "Add a connection test that rejects an untrusted or mismatched certificate."]],
+      "semgrep:securepatch.js.jwt-unverified": ["Verify JWT signatures and claims", "Decoding a token only reads its contents; it does not prove who issued it.", ["Use a JWT verification API with an explicit allowlist of algorithms and the expected key.", "Validate issuer, audience, expiration, and any required not-before claim.", "Test invalid signatures, wrong audiences, expired tokens, and disallowed algorithms."]],
+      "semgrep:securepatch.python.pickle": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
+      "semgrep:securepatch.python.dynamic-eval": ["Parse data instead of evaluating source", "Evaluating a string as Python can execute arbitrary operations.", ["Use JSON parsing or ast.literal_eval when the input is a supported literal format.", "For commands, use a fixed dispatch table of approved operations and validated arguments.", "Test that expressions, imports, and unexpected names are rejected."]],
+      "semgrep:securepatch.python.shell": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess.run with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "semgrep:securepatch.python.sql-formatting": ["Bind SQL parameters", "Formatting values into SQL text can let input change the query structure.", ["Use the database driver's parameter binding API with the correct placeholder syntax.", "Allowlist any dynamic identifiers such as table names instead of binding them as values.", "Test quotes and SQL metacharacters and verify they remain data."]],
+      "semgrep:securepatch.python.insecure-yaml": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
+      "bandit:B301": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
+      "bandit:B602": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "bandit:B605": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "bandit:B506": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
+      "bandit:B608": ["Bind SQL parameters", "Building a query with formatted values can let input change the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Allowlist dynamic identifiers; value placeholders usually cannot represent table or column names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
+      "bandit:B303": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "bandit:B324": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "secrets:github-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it at GitHub before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review token activity and limit the replacement token's permissions."]],
+      "secrets:nvidia-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it with the issuing provider before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review usage and restrict the replacement credential to the required scope."]],
+      "secrets:aws-access-id": ["Review the AWS credential exposure", "An AWS access-key identifier matched a local pattern; this does not include or prove the presence of a usable secret key.", ["Check the corresponding IAM access key privately and deactivate it if it should not be public.", "Rotate any associated secret key and review CloudTrail activity for unexpected use.", "Move active credentials to an approved identity or secret-management flow; prefer short-lived roles where possible."]],
+      "secrets:private-key": ["Treat the private key as compromised", "A private-key header matched a local pattern; the key contents were not stored by this scanner.", ["Identify the key owner and revoke or rotate the key or certificate.", "Check recent use and dependent services for unexpected access.", "Store the replacement in an approved secret manager and remove the exposed key from repository history where practical."]],
+      "dependency:*": ["Upgrade the affected dependency", "The locked package version matched an advisory; reachability and exploitability are not established by this match.", ["Open the linked advisory and confirm the affected version range and fixed release.", "Upgrade to a fixed compatible release and update the lockfile.", "Run the project's relevant tests and rescan the updated lockfile."]]
+    };
+    function forFinding(finding) {
+      const scanner = String(finding?.scanner || "").toLowerCase();
+      const ruleId = String(finding?.ruleId || "");
+      const entry = entries[`${scanner}:${ruleId}`] || (scanner === "dependency" ? entries["dependency:*"] : null);
+      if (!entry) return null;
+      const [title, summary, steps] = entry;
+      return { source: "deterministic", version: GUIDANCE_VERSION, title, summary, steps: [...steps] };
+    }
+    module2.exports = { GUIDANCE_VERSION, forFinding };
   }
 });
 
@@ -4419,11 +5740,35 @@ var require_scanWorker = __commonJS({
     var DeduplicatorService = require_deduplicator_service();
     var OccurrenceService = require_occurrence_service();
     var RiskService = require_risk_service();
+    var bestEffortScanNotification = async (scan) => {
+      try {
+        await require_notification_service().notifyScanResult(scan);
+      } catch (error) {
+        console.error(`[ScanWorker] Notification delivery failed for scan ${scan._id} (${error.name || "Error"}).`);
+      }
+    };
     var heartbeatWorker = () => require_UsageBucket().updateOne(
       { _id: "worker:bom1" },
       { $set: { count: 1, expires: new Date(Date.now() + 9e4) } },
       { upsert: true }
     );
+    var reportScannerReadiness = async () => {
+      const adapters = [
+        new (require_semgrep_adapter())(),
+        new (require_bandit_adapter())()
+      ];
+      const results = await Promise.all(adapters.map(async (adapter) => {
+        try {
+          return { adapter, available: await adapter.isAvailable() };
+        } catch (error) {
+          return { adapter, available: false, error };
+        }
+      }));
+      for (const { adapter, available, error } of results) {
+        if (available) console.info(`[ScanWorker] ${adapter.name} scanner ready (${adapter.version || "unknown version"}).`);
+        else console.error(`[ScanWorker] ${adapter.name} scanner unavailable; scan coverage will be partial.${error ? ` ${error.message}` : ""}`);
+      }
+    };
     var ensureDatabase = async () => {
       if (mongoose.connection.readyState === 0) {
         await mongoose.connect(env2.databaseUrl);
@@ -4434,6 +5779,7 @@ var require_scanWorker = __commonJS({
       const { scanId, organizationId, installationId, owner, repo } = job.data;
       console.info(`[ScanWorker] Processing job ${job.id} for scan ${scanId} (${owner}/${repo})...`);
       await ensureDatabase();
+      if (!await require_Organization().exists({ _id: organizationId, status: "active" })) return { success: true, skipped: true };
       const now = /* @__PURE__ */ new Date();
       const leaseToken = require("node:crypto").randomUUID();
       const scan = await Scan.findOneAndUpdate(
@@ -4482,6 +5828,10 @@ var require_scanWorker = __commonJS({
         scan.scannerErrors = scannerErrors;
         scan.coverage = coverage;
         scan.rulesHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../scanners/rules.yml"))).digest("hex");
+        const scannerSourceFiles = ["scanners/base.adapter.js", "scanners/bandit.adapter.js", "scanners/orchestrator.js", "scanners/process.js", "scanners/repository-data.adapter.js", "scanners/semgrep.adapter.js", "scanners/rules.yml", "services/deduplicator.service.js"];
+        const scannerSourceHash = require("node:crypto").createHash("sha256");
+        for (const name of scannerSourceFiles) scannerSourceHash.update(name).update("\0").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", name))).update("\0");
+        scan.scannerPolicyHash = scannerSourceHash.digest("hex");
         scan.normalizerHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../services/normalizer.service.js"))).digest("hex");
         let allNormalized = [];
         for (const res of results) {
@@ -4510,6 +5860,7 @@ var require_scanWorker = __commonJS({
           const cweKey = (item.cwe || "CWE-Unknown").toUpperCase();
           const count = occurrenceMap.get(cweKey) || 1;
           const { riskScore, riskCategory, riskFactors } = RiskService.evaluateRisk(item, count);
+          const remediationGuidance = require_remediation_guidance_service().forFinding(item);
           return {
             scan: scan._id,
             organization: organizationId,
@@ -4527,6 +5878,7 @@ var require_scanWorker = __commonJS({
             description: item.description,
             evidenceSnippet: item.evidenceSnippet,
             remediation: item.remediation,
+            remediationGuidance,
             fingerprint: item.fingerprint,
             correlationKey: item.correlationKey,
             provenance: item.provenance,
@@ -4591,6 +5943,7 @@ var require_scanWorker = __commonJS({
             scannersUsed: scan.scannersUsed,
             scannerErrors: scan.scannerErrors,
             rulesHash: scan.rulesHash,
+            scannerPolicyHash: scan.scannerPolicyHash,
             normalizerHash: scan.normalizerHash,
             commitSha: scan.commitSha,
             activeKey: null,
@@ -4599,6 +5952,7 @@ var require_scanWorker = __commonJS({
           } }
         );
         if (!finalized) throw new Error("Scan was cancelled before completion");
+        await bestEffortScanNotification(scan);
         console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
         return { success: true, summary };
       } catch (error) {
@@ -4612,16 +5966,20 @@ var require_scanWorker = __commonJS({
           errorMessage: error.message
         };
         if (error.scannerErrors) failure.scannerErrors = error.scannerErrors;
-        await Scan.findOneAndUpdate(
+        const failedScan = await Scan.findOneAndUpdate(
           { _id: scanId, status: "running", cancelledAt: null, leaseToken },
           { $set: failure }
         );
+        if (failedScan) {
+          const scanRecord = typeof scan.toObject === "function" ? scan.toObject() : scan;
+          await bestEffortScanNotification({ ...scanRecord, ...failure, _id: scan._id });
+        }
         throw error;
       } finally {
         clearTimeout(deadline);
         clearInterval(heartbeat);
         if (workspaceHandle && typeof workspaceHandle.cleanup === "function") {
-          workspaceHandle.cleanup();
+          await workspaceHandle.cleanup();
           console.info(`[ScanWorker] Ephemeral workspace cleaned up for scan ${scanId}.`);
         }
       }
@@ -4645,7 +6003,7 @@ var require_scanWorker = __commonJS({
       worker.on("error", (err) => {
         console.error("[ScanWorker] Worker error:", err.message);
       });
-      const schedules = setInterval(() => require_automation_service().runDueSchedules().catch(() => {
+      const schedules = setInterval(() => runMaintenance().catch(() => {
       }), 6e4);
       schedules.unref();
       worker.on("closed", () => clearInterval(schedules));
@@ -4655,6 +6013,14 @@ var require_scanWorker = __commonJS({
       worker.on("closed", () => clearInterval(pulse));
       return worker;
     };
+    async function runMaintenance() {
+      try {
+        await require_organization_deletion_service().purgeDueOrganizations();
+      } catch (error) {
+        console.error(`[ScanWorker] Organization erasure pass failed (${error.name || "Error"}).`);
+      }
+      await require_automation_service().runDueSchedules();
+    }
     var wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
     var startVercelQueueWorker = async () => {
       const [{ PollingQueueClient }, { getVercelOidcToken }] = await Promise.all([
@@ -4667,6 +6033,7 @@ var require_scanWorker = __commonJS({
         console.info("[ScanWorker] Shutdown requested; finishing the current job.");
       });
       console.info(`[ScanWorker] Polling Vercel Queue '${SCAN_QUEUE_NAME}' in ${SCAN_QUEUE_REGION}...`);
+      await reportScannerReadiness();
       let pollDelayMs = 5e3;
       let lastScheduleCheck = 0;
       while (!shuttingDown) {
@@ -4685,7 +6052,7 @@ var require_scanWorker = __commonJS({
             } }
           );
           if (Date.now() - lastScheduleCheck > 6e4) {
-            await require_automation_service().runDueSchedules();
+            await runMaintenance();
             lastScheduleCheck = Date.now();
           }
           const token = await getVercelOidcToken();
@@ -4736,7 +6103,8 @@ var require_scanWorker = __commonJS({
     module2.exports = {
       createBullMqWorker,
       processScanJob,
-      startVercelQueueWorker
+      startVercelQueueWorker,
+      reportScannerReadiness
     };
   }
 });
@@ -4961,6 +6329,7 @@ var require_scan_service = __commonJS({
 var require_scan_controller = __commonJS({
   "src/controllers/scan.controller.js"(exports2, module2) {
     var ScanService = require_scan_service();
+    var { recordAuditEvent } = require_audit_service();
     var enqueueScan = async (req, res, next) => {
       try {
         const { organizationId, owner, repo } = req.params;
@@ -4969,6 +6338,17 @@ var require_scan_controller = __commonJS({
           owner,
           repo,
           includeDependencies: req.body?.includeDependencies === true
+        });
+        await recordAuditEvent(req, {
+          action: "scan.started",
+          target: `scan/${result.scanId}`,
+          details: {
+            repository: `${owner}/${repo}`,
+            scanId: String(result.scanId),
+            branch: result.branch,
+            commitSha: result.commitSha,
+            includeDependencies: result.includeDependencies
+          }
         });
         return res.status(202).json({
           success: true,
@@ -5041,6 +6421,35 @@ var require_finding_workflow_service = __commonJS({
       if (findings.length > 2e4) throw bad("Export/comparison exceeds the 20000 finding limit", 413);
       return findings;
     }
+    function comparisonBlockReason(current, previous) {
+      if (!previous) return "No earlier completed scan with successful scanner runs is available. Findings are not labeled new, persistent, or fixed.";
+      if (current.status !== "completed" || current.scannerErrors?.length || previous.status !== "completed" || previous.scannerErrors?.length) {
+        return "Both scans must finish with every configured scanner successful before findings can be classified.";
+      }
+      const scanners = (value) => [...new Set(value || [])].sort();
+      const currentScanners = scanners(current.scannersUsed), previousScanners = scanners(previous.scannersUsed);
+      if (!currentScanners.length || JSON.stringify(currentScanners) !== JSON.stringify(previousScanners)) {
+        return "The scans used different scanner sets, so findings are not classified as new, persistent, or fixed.";
+      }
+      if (!current.rulesHash || current.rulesHash !== previous.rulesHash || !current.scannerPolicyHash || current.scannerPolicyHash !== previous.scannerPolicyHash || !current.normalizerHash || current.normalizerHash !== previous.normalizerHash) {
+        return "The scanner rules, scanner implementation, or finding normalization changed, so findings are not classified across these scans.";
+      }
+      const coverage = (scan) => {
+        if (!Array.isArray(scan.coverage) || scan.coverage.length !== currentScanners.length) return null;
+        const result = /* @__PURE__ */ new Map();
+        for (const item of scan.coverage) {
+          if (!item?.scanner || result.has(item.scanner) || !item.version || item.version === "unknown" || !item.filesHash) return null;
+          result.set(item.scanner, `${item.version}:${item.filesHash}`);
+        }
+        if (result.size !== currentScanners.length || currentScanners.some((name) => !result.has(name))) return null;
+        return result;
+      };
+      const currentCoverage = coverage(current), previousCoverage = coverage(previous);
+      if (!currentCoverage || !previousCoverage || currentScanners.some((name) => currentCoverage.get(name) !== previousCoverage.get(name))) {
+        return "Scanner versions or covered file sets differ, so findings are not classified as new, persistent, or fixed.";
+      }
+      return null;
+    }
     async function compare(scanId) {
       const scan = await Scan.findById(scanId).lean();
       if (!scan || scan.status !== "completed") throw bad("Comparison requires a completed scan");
@@ -5055,21 +6464,18 @@ var require_finding_workflow_service = __commonJS({
       const current = await records(scanId), before = previous ? await records(previous._id) : [];
       const key = (f) => f.correlationKey || f.fingerprint;
       const currentKeys = new Set(current.map(key)), previousKeys = new Set(before.map(key));
-      const coverageMatches = previous && JSON.stringify([...scan.scannersUsed || []].sort()) === JSON.stringify([...previous.scannersUsed || []].sort()) && scan.rulesHash && scan.rulesHash === previous.rulesHash && scan.normalizerHash && scan.normalizerHash === previous.normalizerHash;
-      const completeCoverage = previous && (scan.coverage || []).length > 0 && (scan.coverage || []).every((current2) => {
-        const old = previous.coverage?.find((item) => item.scanner === current2.scanner);
-        return old && old.version === current2.version && current2.filesHash && current2.filesHash === old.filesHash;
-      });
-      const canInferFixed = Boolean(coverageMatches && completeCoverage && !scan.scannerErrors?.length);
+      const limitation = comparisonBlockReason(scan, previous);
+      const canCompare = !limitation;
       return {
         scanId,
         commitSha: scan.commitSha,
         previousScanId: previous?._id || null,
-        canInferFixed,
-        new: current.filter((f) => !previousKeys.has(key(f))),
-        persistent: current.filter((f) => previousKeys.has(key(f))),
-        fixed: canInferFixed ? before.filter((f) => !currentKeys.has(key(f))) : [],
-        limitation: "Comparison uses evidence identities; moved or edited code can change identity. Missing issues are only classified fixed when successful scanner, rules, file, and normalization-policy coverage match."
+        canCompare,
+        canInferFixed: canCompare,
+        new: canCompare ? current.filter((f) => !previousKeys.has(key(f))) : [],
+        persistent: canCompare ? current.filter((f) => previousKeys.has(key(f))) : [],
+        fixed: canCompare ? before.filter((f) => !currentKeys.has(key(f))) : [],
+        limitation: limitation || "Comparison uses evidence identities; moved or edited code can change identity."
       };
     }
     async function exportScan(scanId, format) {
@@ -5079,7 +6485,7 @@ var require_finding_workflow_service = __commonJS({
       if (format === "json") return { schemaVersion: 1, scan, findings };
       if (format !== "sarif") throw bad("Export format must be json or sarif");
       return { version: "2.1.0", $schema: "https://json.schemastore.org/sarif-2.1.0.json", runs: [{
-        tool: { driver: { name: "SecurePatch", informationUri: "https://avpr-psi.vercel.app" } },
+        tool: { driver: { name: "AVPR-Net", informationUri: "https://avpr-psi.vercel.app" } },
         properties: { commitSha: scan.commitSha, scanId: String(scan._id), status: scan.status, coverage: scan.coverage, scannerErrors: scan.scannerErrors },
         results: findings.map((f) => ({
           ruleId: f.ruleId,
@@ -5092,6 +6498,88 @@ var require_finding_workflow_service = __commonJS({
       }] };
     }
     module2.exports = { compare, exportScan, records };
+  }
+});
+
+// src/services/remediation-verification.service.js
+var require_remediation_verification_service = __commonJS({
+  "src/services/remediation-verification.service.js"(exports2, module2) {
+    var crypto = require("node:crypto");
+    var RemediationVerification = require_RemediationVerification();
+    var DIGEST = (value) => crypto.createHash("sha256").update(value, "utf8").digest("hex");
+    function checkRecord(validation) {
+      const syntaxStatus = ["passed", "failed", "skipped", "unavailable"].includes(validation.syntax?.status) ? validation.syntax.status : "unavailable";
+      const syntaxDetail = syntaxStatus === "passed" ? "parser_passed" : syntaxStatus === "failed" ? "syntax_check_failed" : syntaxStatus === "skipped" ? "syntax_check_skipped" : "parser_unavailable";
+      return [
+        { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
+        { name: "syntax", status: syntaxStatus, method: validation.syntax?.method || null, detailCode: syntaxDetail },
+        { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
+        { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" }
+      ];
+    }
+    function pullRequestRecord(pullRequest) {
+      if (!pullRequest) return void 0;
+      let url = null;
+      try {
+        const parsed = new URL(pullRequest.url);
+        if (parsed.protocol === "https:" && parsed.hostname === "github.com" && /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+\/?$/.test(parsed.pathname)) url = parsed.toString();
+      } catch {
+      }
+      return {
+        number: Number.isSafeInteger(pullRequest.number) && pullRequest.number > 0 ? pullRequest.number : null,
+        url,
+        branch: typeof pullRequest.branch === "string" ? pullRequest.branch.slice(0, 200) : null,
+        baseSha: /^[a-f0-9]{40}$/i.test(pullRequest.baseSha || "") ? pullRequest.baseSha : null
+      };
+    }
+    async function recordVerification({ scan, finding, actorId, patch, validation, action, pullRequest }) {
+      if (!scan?.commitSha || typeof validation?.context?.originalCode !== "string" || typeof validation.content !== "string" || typeof patch !== "string") {
+        throw new Error("Cannot record remediation verification without exact source and proposed content");
+      }
+      return RemediationVerification.create({
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        requestedBy: actorId,
+        repository: `${scan.owner}/${scan.repo}`.slice(0, 140),
+        sourceCommitSha: scan.commitSha,
+        targetPath: validation.context.filePath,
+        patchSha256: DIGEST(patch),
+        sourceSha256: DIGEST(validation.context.originalCode),
+        proposedSha256: DIGEST(validation.content),
+        action,
+        checks: checkRecord(validation),
+        pullRequest: pullRequestRecord(pullRequest)
+      });
+    }
+    async function recordFailedIntegrity({ scan, finding, actorId, patch, context }) {
+      if (!scan?.commitSha || typeof context?.originalCode !== "string" || typeof patch !== "string") {
+        throw new Error("Cannot record patch-integrity failure without exact source context");
+      }
+      return RemediationVerification.create({
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        requestedBy: actorId,
+        repository: `${scan.owner}/${scan.repo}`.slice(0, 140),
+        sourceCommitSha: scan.commitSha,
+        targetPath: context.filePath,
+        patchSha256: DIGEST(patch),
+        sourceSha256: DIGEST(context.originalCode),
+        proposedSha256: null,
+        action: "validation",
+        checks: [
+          { name: "patch_integrity", status: "failed", method: "strict-single-file-diff", detailCode: "diff_not_applicable" },
+          { name: "syntax", status: "skipped", method: null, detailCode: "patch_integrity_failed" },
+          { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
+          { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" }
+        ]
+      });
+    }
+    async function listVerifications({ organizationId, scanId, findingId, limit = 20 }) {
+      return RemediationVerification.find({ organization: organizationId, scan: scanId, finding: findingId }).sort({ createdAt: -1, _id: -1 }).limit(Math.min(Math.max(limit, 1), 50)).lean();
+    }
+    module2.exports = { recordVerification, recordFailedIntegrity, listVerifications, checkRecord, pullRequestRecord };
   }
 });
 
@@ -5115,6 +6603,9 @@ var require_scan_routes = __commonJS({
     var Finding = require_Finding();
     var { bad, objectId } = require_input();
     var remediation = require_remediation_service();
+    var remediationVerification = require_remediation_verification_service();
+    var { recordAuditEvent } = require_audit_service();
+    var logger = require_logger();
     async function findingContext(req) {
       objectId(req.params.findingId);
       const scan = await Scan.findById(req.params.scanId).lean();
@@ -5128,8 +6619,38 @@ var require_scan_routes = __commonJS({
     }));
     router.post("/:scanId/findings/:findingId/validate", requireAuth, requireScanMember, handler(async (req, res) => {
       const { scan, finding } = await findingContext(req);
-      const result = await remediation.validate(scan, finding, req.body?.patch);
-      res.json({ success: true, data: { applies: true, syntax: result.syntax, tests: "not_executed" } });
+      await require_budget_service().consume(`patch-validate:${scan.organization}`, 60, 36e5);
+      let result;
+      try {
+        result = await remediation.validate(scan, finding, req.body?.patch, { allowSyntaxFailure: true });
+      } catch (error) {
+        if (error.code === "PATCH_INTEGRITY_FAILED" && error.validationContext) {
+          try {
+            await remediationVerification.recordFailedIntegrity({
+              scan,
+              finding,
+              actorId: req.user._id,
+              patch: req.body?.patch,
+              context: error.validationContext
+            });
+            res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+          } catch (recordError) {
+            logger.error(`remediation_verification_write_failed action=validation request=${req.requestId || "unknown"} error=${recordError.name || "Error"}`);
+            res.setHeader("X-SecurePatch-Verification-Recorded", "false");
+          }
+        }
+        throw error;
+      }
+      const verification = await remediationVerification.recordVerification({
+        scan,
+        finding,
+        actorId: req.user._id,
+        patch: req.body?.patch,
+        validation: result,
+        action: "validation"
+      });
+      res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+      res.json({ success: true, data: { applies: true, syntax: result.syntax, tests: "not_executed", verification } });
     }));
     router.post(
       "/:scanId/findings/:findingId/pull-request",
@@ -5138,25 +6659,87 @@ var require_scan_routes = __commonJS({
       require_rbac_middleware().requireRole("owner", "admin"),
       handler(async (req, res) => {
         const { scan, finding } = await findingContext(req);
-        res.status(201).json({ success: true, data: await remediation.createPullRequest(scan, finding, req.body || {}) });
+        const result = await remediation.createPullRequest(scan, finding, req.body || {});
+        const { verificationMaterial, ...publicResult } = result;
+        await recordAuditEvent(req, {
+          organizationId: scan.organization,
+          action: "pull_request.draft_created",
+          target: `pull-request/${scan.owner}/${scan.repo}#${result.number}`,
+          details: {
+            repository: `${scan.owner}/${scan.repo}`,
+            pullRequestNumber: result.number,
+            pullRequestUrl: result.url,
+            baseSha: result.baseSha || scan.commitSha
+          }
+        });
+        let verification = null;
+        try {
+          verification = await remediationVerification.recordVerification({
+            scan,
+            finding,
+            actorId: req.user._id,
+            patch: req.body?.patch,
+            validation: verificationMaterial,
+            action: "draft_pr",
+            pullRequest: result
+          });
+          res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+        } catch (error) {
+          logger.error(`remediation_verification_write_failed action=draft_pr request=${req.requestId || "unknown"} error=${error.name || "Error"}`);
+          res.setHeader("X-SecurePatch-Verification-Recorded", "false");
+        }
+        res.status(201).json({ success: true, data: { ...publicResult, verification, verificationRecorded: Boolean(verification) } });
       })
     );
+    router.get("/:scanId/findings/:findingId/verifications", requireAuth, requireScanMember, handler(async (req, res) => {
+      const { scan } = await findingContext(req);
+      const verifications = await remediationVerification.listVerifications({
+        organizationId: scan.organization,
+        scanId: scan._id,
+        findingId: req.params.findingId,
+        limit: 20
+      });
+      res.json({ success: true, data: { verifications } });
+    }));
     router.get("/organizations/:organizationId/findings", requireAuth, requireOrganizationMember, handler(async (req, res) => {
       objectId(req.params.organizationId);
       const { integer } = require_input();
       const page = integer(req.query.page, 1, 1e4), limit = integer(req.query.limit, 25, 100);
-      const latest = await Scan.aggregate([
-        { $match: { organization: new (require("mongoose")).Types.ObjectId(req.params.organizationId), status: "completed", scannerErrors: { $size: 0 } } },
-        { $sort: { createdAt: -1 } },
-        { $group: { _id: { owner: "$owner", repo: "$repo" }, scan: { $first: "$_id" }, commitSha: { $first: "$commitSha" } } }
+      const organization = new (require("mongoose")).Types.ObjectId(req.params.organizationId);
+      const [latest, latestActivity] = await Promise.all([
+        Scan.aggregate([
+          { $match: { organization, status: "completed", scannersUsed: { $exists: true, $ne: [] }, scannerErrors: { $size: 0 } } },
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $group: { _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } }, scan: { $first: "$_id" }, commitSha: { $first: "$commitSha" } } }
+        ]),
+        Scan.aggregate([
+          { $match: { organization } },
+          { $sort: { createdAt: -1, _id: -1 } },
+          { $group: { _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } }, scan: { $first: "$_id" }, status: { $first: "$status" } } }
+        ])
       ]);
+      const key = (item) => `${item._id.owner}/${item._id.repo}`;
+      const successfulByRepository = new Map(latest.map((scan) => [key(scan), scan]));
+      const latestFindingsFreshness = {
+        repositoriesWithSuccessfulBaseline: latest.length,
+        repositoriesUsingEarlierSuccessfulResult: latestActivity.filter((activity) => {
+          const successful = successfulByRepository.get(key(activity));
+          return successful && String(successful.scan) !== String(activity.scan);
+        }).length,
+        repositoriesWithoutSuccessfulBaseline: latestActivity.filter((activity) => !successfulByRepository.has(key(activity))).length
+      };
       const filter = { organization: req.params.organizationId, scan: { $in: latest.map((s) => s.scan) }, status: { $nin: ["resolved", "dismissed"] } };
       if (req.query.riskCategory) {
         if (!["critical", "high", "medium", "low"].includes(req.query.riskCategory)) throw bad("Invalid risk category");
         filter.riskCategory = req.query.riskCategory;
       }
       const [findings, total] = await Promise.all([Finding.find(filter).populate("reviewHistory.reviewedBy", "name githubUsername").sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
-      res.json({ success: true, data: { findings, latestScans: latest, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } } });
+      res.json({ success: true, data: {
+        findings,
+        latestScans: latest,
+        latestFindingsFreshness,
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
+      } });
     }));
     router.get("/:scanId/comparison", requireAuth, requireScanMember, handler(async (req, res) => {
       res.json({ success: true, data: await workflow.compare(req.params.scanId) });
@@ -5182,6 +6765,12 @@ var require_scan_routes = __commonJS({
         { returnDocument: "after" }
       );
       if (!scan) throw bad("No active scan to cancel", 409);
+      await recordAuditEvent(req, {
+        organizationId: scan.organization,
+        action: "scan.cancelled",
+        target: `scan/${scan._id}`,
+        details: { repository: `${scan.owner}/${scan.repo}`, scanId: String(scan._id) }
+      });
       res.json({ success: true, data: scan });
     }));
     router.patch("/:scanId/findings/:findingId", requireAuth, requireScanMember, handler(async (req, res) => {
@@ -5198,6 +6787,17 @@ var require_scan_routes = __commonJS({
         { returnDocument: "after", runValidators: true }
       );
       if (!finding) throw bad("Finding not found", 404);
+      await recordAuditEvent(req, {
+        organizationId: finding.organization,
+        action: "finding.reviewed",
+        target: `finding/${finding._id}`,
+        details: {
+          repository: `${finding.owner}/${finding.repo}`,
+          scanId: String(finding.scan),
+          findingId: String(finding._id),
+          status
+        }
+      });
       res.json({ success: true, data: finding });
     }));
     router.post(
@@ -5228,6 +6828,7 @@ var require_dashboard_service = __commonJS({
     var RECENT_SCAN_LIMIT = 6;
     var PRIORITY_FINDING_LIMIT = 8;
     var RECENT_SCANNER_SCAN_LIMIT = 20;
+    var emptyRiskDistribution = () => ({ critical: 0, high: 0, medium: 0, low: 0 });
     var DashboardService = class {
       static async getOrganizationOverview(organizationId) {
         const organization = await Organization.findById(organizationId).lean();
@@ -5237,44 +6838,51 @@ var require_dashboard_service = __commonJS({
           error.code = "ORGANIZATION_NOT_FOUND";
           throw error;
         }
-        const [scansCount, findingsCount, riskGroups, recentScans, priorityFindings, scannerScans] = await Promise.all([
+        const organizationKey = organization._id;
+        const [latestSuccessfulScans, latestScans] = await Promise.all([
+          Scan.aggregate([
+            { $match: { organization: organizationKey, status: "completed", scannersUsed: { $exists: true, $ne: [] }, scannerErrors: { $size: 0 } } },
+            { $sort: { createdAt: -1, _id: -1 } },
+            { $group: { _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } }, scan: { $first: "$_id" } } }
+          ]),
+          Scan.aggregate([
+            { $match: { organization: organizationKey } },
+            { $sort: { createdAt: -1, _id: -1 } },
+            { $group: {
+              _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } },
+              scan: { $first: "$_id" },
+              status: { $first: "$status" },
+              scannerErrors: { $first: "$scannerErrors" }
+            } }
+          ])
+        ]);
+        const repositoryKey = (scan) => `${String(scan._id.owner).toLowerCase()}/${String(scan._id.repo).toLowerCase()}`;
+        const successfulByRepository = new Map(latestSuccessfulScans.map((scan) => [repositoryKey(scan), scan]));
+        const currentScanIds = latestSuccessfulScans.map((scan) => scan.scan);
+        const currentFindingFilter = { organization: organizationKey, scan: { $in: currentScanIds }, status: { $nin: ["resolved", "dismissed"] } };
+        const [
+          scansCount,
+          historicalFindingsCount,
+          historicalRiskGroups,
+          currentFindingsCount,
+          currentRiskGroups,
+          recentScans,
+          priorityFindings,
+          scannerScans
+        ] = await Promise.all([
           Scan.countDocuments({ organization: organizationId }),
           Finding.countDocuments({ organization: organizationId }),
           Finding.aggregate([
-            { $match: { organization: organization._id } },
+            { $match: { organization: organizationKey } },
+            { $group: { _id: "$riskCategory", count: { $sum: 1 } } }
+          ]),
+          Finding.countDocuments(currentFindingFilter),
+          Finding.aggregate([
+            { $match: currentFindingFilter },
             { $group: { _id: "$riskCategory", count: { $sum: 1 } } }
           ]),
           Scan.find({ organization: organizationId }).sort({ createdAt: -1 }).limit(RECENT_SCAN_LIMIT).select("owner repo status summary createdAt startedAt completedAt scannersUsed scannerErrors").lean(),
-          Finding.aggregate([
-            { $match: { organization: organization._id } },
-            { $sort: { createdAt: -1, _id: -1 } },
-            {
-              $group: {
-                _id: "$fingerprint",
-                finding: { $first: "$$ROOT" }
-              }
-            },
-            { $replaceRoot: { newRoot: "$finding" } },
-            { $sort: { riskScore: -1, createdAt: -1 } },
-            { $limit: PRIORITY_FINDING_LIMIT },
-            {
-              $project: {
-                owner: 1,
-                repo: 1,
-                filePath: 1,
-                startLine: 1,
-                cwe: 1,
-                ruleId: 1,
-                scanner: 1,
-                severity: 1,
-                title: 1,
-                riskScore: 1,
-                riskCategory: 1,
-                createdAt: 1,
-                scan: 1
-              }
-            }
-          ]),
+          Finding.find(currentFindingFilter).sort({ riskScore: -1, createdAt: -1, _id: -1 }).limit(PRIORITY_FINDING_LIMIT).select("owner repo filePath startLine cwe ruleId scanner severity title riskScore riskCategory createdAt scan").lean(),
           Scan.find({
             organization: organizationId,
             $or: [
@@ -5292,11 +6900,28 @@ var require_dashboard_service = __commonJS({
             integrationWarning = "GitHub is temporarily unavailable. Stored scan data remains available.";
           }
         }
-        const riskDistribution = { critical: 0, high: 0, medium: 0, low: 0 };
-        for (const group of riskGroups) {
-          if (Object.hasOwn(riskDistribution, group._id)) {
-            riskDistribution[group._id] = group.count;
+        const knownRepositoryKeys = new Set(latestScans.map(repositoryKey));
+        for (const repository of repositories || []) {
+          if (repository.owner && repository.name) {
+            knownRepositoryKeys.add(`${String(repository.owner).toLowerCase()}/${String(repository.name).toLowerCase()}`);
           }
+        }
+        const currentFindingsStatus = {
+          repositoriesWithScans: latestScans.length,
+          repositoriesWithSuccessfulBaseline: latestSuccessfulScans.length,
+          repositoriesUsingEarlierSuccessfulResult: latestScans.filter((scan) => {
+            const successful = successfulByRepository.get(repositoryKey(scan));
+            return successful && String(successful.scan) !== String(scan.scan);
+          }).length,
+          repositoriesWithoutSuccessfulBaseline: [...knownRepositoryKeys].filter((key) => !successfulByRepository.has(key)).length
+        };
+        const riskDistribution = emptyRiskDistribution();
+        for (const group of historicalRiskGroups) {
+          if (Object.hasOwn(riskDistribution, group._id)) riskDistribution[group._id] = group.count;
+        }
+        const currentRiskDistribution = emptyRiskDistribution();
+        for (const group of currentRiskGroups) {
+          if (Object.hasOwn(currentRiskDistribution, group._id)) currentRiskDistribution[group._id] = group.count;
         }
         const scannerStatus = {};
         for (const scan of scannerScans) {
@@ -5312,20 +6937,18 @@ var require_dashboard_service = __commonJS({
           }
         }
         return {
-          organization: {
-            id: organization._id,
-            name: organization.name
-          },
-          repositories: {
-            connected: Boolean(organization.githubInstallationId),
-            total: repositories?.length ?? null
-          },
+          organization: { id: organization._id, name: organization.name },
+          repositories: { connected: Boolean(organization.githubInstallationId), total: repositories?.length ?? null },
           totals: {
             scans: scansCount,
-            findings: findingsCount,
-            criticalAndHigh: riskDistribution.critical + riskDistribution.high
+            findings: historicalFindingsCount,
+            criticalAndHigh: riskDistribution.critical + riskDistribution.high,
+            currentFindings: currentFindingsCount,
+            currentCriticalAndHigh: currentRiskDistribution.critical + currentRiskDistribution.high
           },
           riskDistribution,
+          currentRiskDistribution,
+          currentFindingsStatus,
           recentScans: recentScans.map((scan) => ({
             ...scan,
             durationMs: scan.startedAt && scan.completedAt ? Math.max(0, new Date(scan.completedAt) - new Date(scan.startedAt)) : null
@@ -5381,6 +7004,74 @@ var require_dashboard_routes = __commonJS({
   }
 });
 
+// src/services/operations.service.js
+var require_operations_service = __commonJS({
+  "src/services/operations.service.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var UsageBucket = require_UsageBucket();
+    var Scan = require_Scan();
+    var SIGNALS = ["provider_failure", "webhook_reject", "request_failure"];
+    var WINDOW_MS = 15 * 60 * 1e3;
+    async function recordSignal(code, now = Date.now()) {
+      if (!SIGNALS.includes(code) || mongoose.connection.readyState !== 1) return false;
+      const minute = Math.floor(now / 6e4);
+      try {
+        await UsageBucket.updateOne({ _id: `ops:${code}:${minute}` }, {
+          $inc: { count: 1 },
+          $set: { expires: new Date(now + 60 * 60 * 1e3) }
+        }, { upsert: true, maxTimeMS: 500 });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function evaluate(metrics, { maxQueueAgeMs = 5 * 60 * 1e3, failureThreshold = 5 } = {}) {
+      const alerts = [];
+      if (!metrics.workerAvailable) alerts.push("WORKER_HEARTBEAT_STALE");
+      if (metrics.oldestQueuedAgeMs !== null && metrics.oldestQueuedAgeMs >= maxQueueAgeMs) alerts.push("QUEUE_AGE_HIGH");
+      if (metrics.failedScans >= failureThreshold) alerts.push("SCAN_FAILURES_HIGH");
+      if (metrics.partialScans >= failureThreshold) alerts.push("SCANNER_ERRORS_HIGH");
+      for (const [signal, label] of [["provider_failure", "PROVIDER_FAILURES_HIGH"], ["webhook_reject", "WEBHOOK_REJECTS_HIGH"], ["request_failure", "REQUEST_FAILURES_HIGH"]]) {
+        if ((metrics.signals[signal] || 0) >= failureThreshold) alerts.push(label);
+      }
+      return { status: alerts.length ? "degraded" : "ok", alerts, metrics };
+    }
+    async function snapshot({ now = Date.now() } = {}) {
+      if (mongoose.connection.readyState !== 1) return { status: "unavailable", alerts: ["DATABASE_UNAVAILABLE"] };
+      const since = new Date(now - WINDOW_MS);
+      try {
+        const ids = [];
+        for (let minute = Math.floor((now - WINDOW_MS) / 6e4); minute <= Math.floor(now / 6e4); minute++) {
+          for (const signal of SIGNALS) ids.push(`ops:${signal}:${minute}`);
+        }
+        const [worker, oldest, failedScans, partialScans, buckets] = await Promise.all([
+          UsageBucket.findById("worker:bom1").select("expires").maxTimeMS(2e3).lean(),
+          Scan.findOne({ status: "queued" }).sort({ createdAt: 1 }).select("createdAt").maxTimeMS(2e3).lean(),
+          Scan.countDocuments({ status: "failed", cancelledAt: null, completedAt: { $gte: since } }).maxTimeMS(2e3),
+          Scan.countDocuments({ status: "completed", "scannerErrors.0": { $exists: true }, completedAt: { $gte: since } }).maxTimeMS(2e3),
+          UsageBucket.find({ _id: { $in: ids } }).select("_id count").maxTimeMS(2e3).lean()
+        ]);
+        const signals = Object.fromEntries(SIGNALS.map((signal) => [signal, 0]));
+        for (const bucket of buckets) {
+          const code = String(bucket._id).split(":")[1];
+          if (Object.hasOwn(signals, code)) signals[code] += Math.max(0, Number(bucket.count) || 0);
+        }
+        return evaluate({
+          windowMs: WINDOW_MS,
+          workerAvailable: Boolean(worker?.expires && new Date(worker.expires).getTime() > now),
+          oldestQueuedAgeMs: oldest ? Math.max(0, now - new Date(oldest.createdAt).getTime()) : null,
+          failedScans,
+          partialScans,
+          signals
+        });
+      } catch {
+        return { status: "unavailable", alerts: ["DATABASE_QUERY_FAILED"] };
+      }
+    }
+    module2.exports = { recordSignal, evaluate, snapshot };
+  }
+});
+
 // src/routes/automation.routes.js
 var require_automation_routes = __commonJS({
   "src/routes/automation.routes.js"(exports2, module2) {
@@ -5391,7 +7082,10 @@ var require_automation_routes = __commonJS({
     var handler = require_asyncHandler();
     var service = require_automation_service();
     router.post("/webhooks/github", handler(async (req, res) => {
-      if (!service.verifySignature(req.body, req.get("X-Hub-Signature-256"), process.env.GITHUB_WEBHOOK_SECRET)) return res.status(401).json({ success: false, error: { code: "WEBHOOK_SIGNATURE", message: "Invalid webhook signature" } });
+      if (!service.verifySignature(req.body, req.get("X-Hub-Signature-256"), process.env.GITHUB_WEBHOOK_SECRET)) {
+        void require_operations_service().recordSignal("webhook_reject");
+        return res.status(401).json({ success: false, error: { code: "WEBHOOK_SIGNATURE", message: "Invalid webhook signature" } });
+      }
       res.status(202).json({ success: true, data: await service.receive(req.body, req.get("X-GitHub-Event"), req.get("X-GitHub-Delivery")) });
     }));
     var route = "/organizations/:organizationId/repositories/:owner/:repo/automation";
@@ -5400,6 +7094,85 @@ var require_automation_routes = __commonJS({
     }));
     router.put(route, requireAuth, requireOrganizationMember, requireRole("owner", "admin"), handler(async (req, res) => {
       res.json({ success: true, data: { settings: await service.settings(req.params.organizationId, req.params.owner, req.params.repo, req.body), webhookReady: Boolean(process.env.GITHUB_WEBHOOK_SECRET) } });
+    }));
+    module2.exports = router;
+  }
+});
+
+// src/routes/notification.routes.js
+var require_notification_routes = __commonJS({
+  "src/routes/notification.routes.js"(exports2, module2) {
+    var express2 = require("express");
+    var Notification = require_Notification();
+    var OrganizationMember = require_OrganizationMember();
+    var { requireAuth } = require_auth_middleware();
+    var { requireOrganizationMember } = require_organization_middleware();
+    var handler = require_asyncHandler();
+    var { bad, integer, objectId } = require_input();
+    var router = express2.Router();
+    router.get("/:organizationId/notifications", requireAuth, requireOrganizationMember, handler(async (req, res) => {
+      const page = integer(req.query.page, 1, 1e5);
+      const limit = integer(req.query.limit, 20, 100);
+      if (req.query.unreadOnly !== void 0 && !["true", "false"].includes(req.query.unreadOnly)) throw bad("unreadOnly must be true or false");
+      const filter = {
+        organization: req.params.organizationId,
+        recipient: req.user._id,
+        ...req.query.unreadOnly === "true" ? { readAt: null } : {}
+      };
+      const unreadFilter = { organization: req.params.organizationId, recipient: req.user._id, readAt: null };
+      const [notifications, total, unreadCount] = await Promise.all([
+        Notification.find(filter).select("type title body href scan repository createdAt readAt").sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+        Notification.countDocuments(filter),
+        Notification.countDocuments(unreadFilter)
+      ]);
+      res.json({ success: true, data: {
+        notifications,
+        unreadCount,
+        preferences: { scanResults: req.organizationMembership.notificationPreferences?.scanResults !== false },
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
+      } });
+    }));
+    router.patch("/:organizationId/notifications/read-all", requireAuth, requireOrganizationMember, handler(async (req, res) => {
+      const result = await Notification.updateMany(
+        { organization: req.params.organizationId, recipient: req.user._id, readAt: null },
+        { $set: { readAt: /* @__PURE__ */ new Date() } }
+      );
+      res.json({ success: true, data: { markedRead: result.modifiedCount || 0 } });
+    }));
+    router.patch("/:organizationId/notifications/:notificationId/read", requireAuth, requireOrganizationMember, handler(async (req, res) => {
+      objectId(req.params.notificationId);
+      const notification = await Notification.findOneAndUpdate(
+        {
+          _id: req.params.notificationId,
+          organization: req.params.organizationId,
+          recipient: req.user._id
+        },
+        { $set: { readAt: /* @__PURE__ */ new Date() } },
+        { returnDocument: "after" }
+      ).select("_id readAt").lean();
+      if (!notification) throw bad("Notification not found", 404);
+      res.json({ success: true, data: { notification } });
+    }));
+    router.patch("/:organizationId/notification-preferences", requireAuth, requireOrganizationMember, handler(async (req, res) => {
+      const body = req.body || {};
+      if (Object.keys(body).length !== 1 || typeof body.scanResults !== "boolean") throw bad("Set only the scanResults preference to true or false");
+      const membership = await OrganizationMember.findOneAndUpdate(
+        {
+          _id: req.organizationMembership._id,
+          user: req.user._id,
+          organization: req.params.organizationId,
+          status: "active"
+        },
+        { $set: { "notificationPreferences.scanResults": body.scanResults } },
+        { returnDocument: "after", runValidators: true }
+      );
+      if (!membership) throw bad("Active organization membership not found", 404);
+      res.json({ success: true, data: { preferences: { scanResults: membership.notificationPreferences?.scanResults !== false } } });
+    }));
+    router.get("/:organizationId/notification-preferences", requireAuth, requireOrganizationMember, handler(async (req, res) => {
+      res.json({ success: true, data: { preferences: {
+        scanResults: req.organizationMembership.notificationPreferences?.scanResults !== false
+      } } });
     }));
     module2.exports = router;
   }
@@ -5422,6 +7195,7 @@ var require_routes = __commonJS({
     router.use("/auth", authRoutes);
     router.use("/organizations", organizationRoutes);
     router.use("/organizations", memberRoutes);
+    router.use("/organizations", require_notification_routes());
     router.use("/github", githubRoutes);
     router.use("/scans", scanRoutes);
     router.use("/dashboard", dashboardRoutes);
@@ -5495,7 +7269,9 @@ var require_notFoundHandler = __commonJS({
 var require_errorHandler = __commonJS({
   "src/middleware/errorHandler.js"(exports2, module2) {
     var logger = require_logger();
+    var { fromOctokitError } = require_github_rate_limit();
     var errorHandler2 = (err, req, res, next) => {
+      err = fromOctokitError(err) || err;
       if (err.code === 11e3) {
         err.statusCode = 409;
         err.code = "RESOURCE_CONFLICT";
@@ -5511,11 +7287,18 @@ var require_errorHandler = __commonJS({
       const code = parserError ? statusCode === 413 ? "REQUEST_TOO_LARGE" : "INVALID_JSON" : err.code || "INTERNAL_SERVER_ERROR";
       const diagnostic = parserError ? "" : ` cause=${err.name || "Error"} code=${err.code || "unknown"} message=${require_ai_safety().redact(String(err.message || "unknown")).replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[redacted MongoDB URI]").slice(0, 240)}`;
       logger.error(`${code} status=${statusCode} requestId=${req.requestId || "unknown"}${diagnostic}`);
+      if (statusCode >= 500 || err.name === "NvidiaError") {
+        void require_operations_service().recordSignal(err.name === "NvidiaError" ? "provider_failure" : "request_failure");
+      }
+      if (Number.isSafeInteger(err.retryAfterSeconds) && err.retryAfterSeconds > 0) {
+        res.set("Retry-After", String(err.retryAfterSeconds));
+      }
       res.status(statusCode).json({
         success: false,
         error: {
           code,
-          message: parserError ? "Request must be valid JSON within the size limit" : statusCode >= 500 ? "Internal server error" : err.message
+          message: parserError ? "Request must be valid JSON within the size limit" : statusCode >= 500 ? "Internal server error" : err.message,
+          ...Number.isSafeInteger(err.retryAfterSeconds) && err.retryAfterSeconds > 0 ? { retryAfterSeconds: err.retryAfterSeconds } : {}
         }
       });
     };
@@ -5671,7 +7454,8 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin: ["http://localhost:5174", "http://127.0.0.1:5174"],
-    credentials: true
+    credentials: true,
+    exposedHeaders: ["X-Request-ID", "X-SecurePatch-Audit-Recorded", "X-SecurePatch-Verification-Recorded"]
   })
 );
 app.use("/api/v1/webhooks/github", express.raw({ type: "application/json", limit: "256kb" }));

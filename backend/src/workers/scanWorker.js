@@ -16,6 +16,10 @@ const NormalizerService = require("../services/normalizer.service");
 const DeduplicatorService = require("../services/deduplicator.service");
 const OccurrenceService = require("../services/occurrence.service");
 const RiskService = require("../services/risk.service");
+const bestEffortScanNotification = async (scan) => {
+  try { await require("../services/notification.service").notifyScanResult(scan); }
+  catch (error) { console.error(`[ScanWorker] Notification delivery failed for scan ${scan._id} (${error.name || "Error"}).`); }
+};
 const heartbeatWorker = () => require("../models/UsageBucket").updateOne({ _id: "worker:bom1" },
   { $set: { count: 1, expires: new Date(Date.now() + 90000) } }, { upsert: true });
 const reportScannerReadiness = async () => {
@@ -62,6 +66,7 @@ const processScanJobInternal = async (job, controller) => {
 
   await ensureDatabase();
 
+  if (!await require("../models/Organization").exists({ _id: organizationId, status: "active" })) return { success: true, skipped: true };
   const now = new Date();
   const leaseToken = require("node:crypto").randomUUID();
   const scan = await Scan.findOneAndUpdate({ _id: scanId, cancelledAt: null,
@@ -104,6 +109,10 @@ const processScanJobInternal = async (job, controller) => {
     scan.scannerErrors = scannerErrors;
     scan.coverage = coverage;
     scan.rulesHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../scanners/rules.yml"))).digest("hex");
+    const scannerSourceFiles = ["scanners/base.adapter.js", "scanners/bandit.adapter.js", "scanners/orchestrator.js", "scanners/process.js", "scanners/repository-data.adapter.js", "scanners/semgrep.adapter.js", "scanners/rules.yml", "services/deduplicator.service.js"];
+    const scannerSourceHash = require("node:crypto").createHash("sha256");
+    for (const name of scannerSourceFiles) scannerSourceHash.update(name).update("\0").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", name))).update("\0");
+    scan.scannerPolicyHash = scannerSourceHash.digest("hex");
     scan.normalizerHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../services/normalizer.service.js"))).digest("hex");
 
     // Step 4: Normalize raw findings from all scanners
@@ -143,6 +152,7 @@ const processScanJobInternal = async (job, controller) => {
       const count = occurrenceMap.get(cweKey) || 1;
 
       const { riskScore, riskCategory, riskFactors } = RiskService.evaluateRisk(item, count);
+      const remediationGuidance = require("../services/remediation-guidance.service").forFinding(item);
 
       return {
         scan: scan._id,
@@ -161,6 +171,7 @@ const processScanJobInternal = async (job, controller) => {
         description: item.description,
         evidenceSnippet: item.evidenceSnippet,
         remediation: item.remediation,
+        remediationGuidance,
         fingerprint: item.fingerprint,
         correlationKey: item.correlationKey,
         provenance: item.provenance,
@@ -215,11 +226,12 @@ const processScanJobInternal = async (job, controller) => {
     scan.summary = summary;
     const finalized = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
       { $set: { status: scan.status, completedAt: scan.completedAt, summary, coverage: scan.coverage,
-        scannersUsed: scan.scannersUsed, scannerErrors: scan.scannerErrors, rulesHash: scan.rulesHash,
+        scannersUsed: scan.scannersUsed, scannerErrors: scan.scannerErrors, rulesHash: scan.rulesHash, scannerPolicyHash: scan.scannerPolicyHash,
         normalizerHash: scan.normalizerHash,
         commitSha: scan.commitSha, activeKey: null, leaseUntil: null, leaseToken: null } });
     if (!finalized) throw new Error("Scan was cancelled before completion");
 
+    await bestEffortScanNotification(scan);
     console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
     return { success: true, summary };
   } catch (error) {
@@ -227,8 +239,12 @@ const processScanJobInternal = async (job, controller) => {
     const failure = { status: "failed", activeKey: null, leaseUntil: null, leaseToken: null,
       completedAt: new Date(), errorMessage: error.message };
     if (error.scannerErrors) failure.scannerErrors = error.scannerErrors;
-    await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
+    const failedScan = await Scan.findOneAndUpdate({ _id: scanId, status: "running", cancelledAt: null, leaseToken },
       { $set: failure });
+    if (failedScan) {
+      const scanRecord = typeof scan.toObject === "function" ? scan.toObject() : scan;
+      await bestEffortScanNotification({ ...scanRecord, ...failure, _id: scan._id });
+    }
     throw error;
   } finally {
     clearTimeout(deadline);
@@ -261,13 +277,19 @@ const createBullMqWorker = () => {
   worker.on("error", (err) => {
     console.error("[ScanWorker] Worker error:", err.message);
   });
-  const schedules = setInterval(() => require("../services/automation.service").runDueSchedules().catch(() => {}), 60000);
+  const schedules = setInterval(() => runMaintenance().catch(() => {}), 60000);
   schedules.unref();
   worker.on("closed", () => clearInterval(schedules));
   const pulse = setInterval(() => heartbeatWorker().catch(() => {}), 30000);
   pulse.unref(); worker.on("closed", () => clearInterval(pulse));
   return worker;
 };
+
+async function runMaintenance() {
+  try { await require("../services/organization-deletion.service").purgeDueOrganizations(); }
+  catch (error) { console.error(`[ScanWorker] Organization erasure pass failed (${error.name || "Error"}).`); }
+  await require("../services/automation.service").runDueSchedules();
+}
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -294,7 +316,7 @@ const startVercelQueueWorker = async () => {
         { $set: { status: "failed", activeKey: null, leaseUntil: null, leaseToken: null,
           errorMessage: "Scan deadline expired", completedAt: new Date() } });
       if (Date.now() - lastScheduleCheck > 60000) {
-        await require("../services/automation.service").runDueSchedules();
+        await runMaintenance();
         lastScheduleCheck = Date.now();
       }
       const token = await getVercelOidcToken();

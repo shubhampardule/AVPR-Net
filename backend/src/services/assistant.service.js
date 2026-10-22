@@ -1,11 +1,17 @@
 const { sanitize, SYSTEM_POLICY } = require("./ai-safety");
 const { invalid, isText, isList, parseObject, resolveSources } = require("./ai-output");
 const { validateCode } = require("./code-validation");
+const path = require("node:path");
 const ALL_LANGUAGES = ["python", "javascript", "typescript", "c", "cpp", "bash"];
 const CODE_FIELDS = ["language", "format", "code", "explanation", "assumptions", "dependencies",
   "security_considerations", "validation_instructions", "tests", "sources"];
 
 const badInput = (message) => Object.assign(new Error(message), { code: "AI_INVALID_INPUT", statusCode: 400 });
+function safeTargetPath(value) {
+  return isText(value, 500) && !value.includes("\\") && !value.includes("\0") &&
+    !path.posix.isAbsolute(value) && !path.win32.isAbsolute(value) &&
+    value.split("/").every(part => part && part !== "." && part !== "..");
+}
 const bounded = (value, bytes = 16000) => {
   if (Buffer.byteLength(JSON.stringify(value) || "") > bytes) throw badInput("Input exceeds size limit");
 };
@@ -65,14 +71,16 @@ class AssistantService {
   async generateCode(input, retryInvalid = true) {
     bounded(input);
     if (!input || typeof input !== "object" || Array.isArray(input) ||
-      Object.keys(input).some((key) => !["request", "language", "mode", "originalCode"].includes(key)) ||
+      Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath"].includes(key)) ||
       !isText(input.request, 3000) || !this.languages().includes(input.language) ||
       !["generate", "review"].includes(input.mode) ||
       (input.originalCode !== undefined && !isText(input.originalCode, 8000)) ||
+      (input.targetPath !== undefined && !safeTargetPath(input.targetPath)) ||
       (input.mode === "review" && !input.originalCode)) {
       throw badInput("Provide a bounded defensive request, supported language, mode and source for reviews");
     }
     const clean = sanitize(input);
+    const targetPath = input.targetPath || "source";
     let retrieval;
     try {
       retrieval = await this.rag.retrieve(`${clean.language} secure coding guidance ${clean.request}`.slice(0, 1500),
@@ -85,7 +93,7 @@ Return one JSON object, without markdown fences or surrounding text, with exactl
 language must match the request. For review mode return format code:
 return the complete corrected source file, preserving unrelated lines and public names.
 The application will compute the unified diff deterministically from originalCode.
-If returning format diff, use the target path in the request (otherwise a/source and b/source),
+If returning format diff, use exactly ${JSON.stringify(`a/${targetPath}`)} and ${JSON.stringify(`b/${targetPath}`)},
 with exact hunk counts and unchanged context. The patch must apply without fuzzy matching.
 For generate mode return standalone source code. code and tests
 are plain strings (no markdown fences). explanation is a short string. assumptions,
@@ -99,8 +107,7 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
       ], { json: true });
       const proposal = parseObject(response.text, CODE_FIELDS);
       if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16000)) {
-        const target = clean.request.match(/unified diff for a\/([\w./-]+) and b\/\1(?:[.\s]|$)/)?.[1] || "source";
-        proposal.code = require("diff").createTwoFilesPatch(`a/${target}`, `b/${target}`, clean.originalCode, proposal.code, "", "");
+        proposal.code = require("diff").createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
         proposal.format = "diff";
       }
       // Hosted responses sometimes encode a single textual item as a string.
@@ -121,7 +128,8 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
         try {
           const { parsePatch, applyPatch } = require("diff");
           const patches = parsePatch(proposal.code, { strict: true });
-          if (patches.length !== 1 || !patches[0].hunks.length) throw invalid();
+          if (patches.length !== 1 || !patches[0].hunks.length ||
+            patches[0].oldFileName !== `a/${targetPath}` || patches[0].newFileName !== `b/${targetPath}`) throw invalid();
           const changed = applyPatch(clean.originalCode, patches[0], { fuzzFactor: 0 });
           if (changed === false || changed === clean.originalCode || changed.length > 16000) throw invalid();
         } catch { throw invalid(); }

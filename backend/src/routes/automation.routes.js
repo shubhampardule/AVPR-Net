@@ -5,7 +5,10 @@ const { requireRole } = require("../middleware/rbac.middleware");
 const handler = require("../utils/asyncHandler");
 const service = require("../services/automation.service");
 router.post("/webhooks/github", handler(async (req, res) => {
-  if (!service.verifySignature(req.body, req.get("X-Hub-Signature-256"), process.env.GITHUB_WEBHOOK_SECRET)) return res.status(401).json({ success: false, error: { code: "WEBHOOK_SIGNATURE", message: "Invalid webhook signature" } });
+  if (!service.verifySignature(req.body, req.get("X-Hub-Signature-256"), process.env.GITHUB_WEBHOOK_SECRET)) {
+    void require("../services/operations.service").recordSignal("webhook_reject");
+    return res.status(401).json({ success: false, error: { code: "WEBHOOK_SIGNATURE", message: "Invalid webhook signature" } });
+  }
   res.status(202).json({ success: true, data: await service.receive(req.body, req.get("X-GitHub-Event"), req.get("X-GitHub-Delivery")) });
 }));
 const route = "/organizations/:organizationId/repositories/:owner/:repo/automation";

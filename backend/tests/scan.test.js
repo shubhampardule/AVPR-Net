@@ -123,33 +123,29 @@ describe("Scan Pipeline Core Logic Unit Tests", () => {
   });
 
   describe("DeduplicatorService", () => {
-    it("eliminates duplicates and generates deterministic SHA-256 fingerprints", () => {
+    it("deduplicates only within the same scanner rule and preserves separate scanner evidence", () => {
+      const base = { filePath: "src/routes/auth.js", startLine: 42, cwe: "CWE-79", ruleId: "xss-rule-1", severity: "high", title: "XSS Vulnerability", evidenceSnippet: "unsafe(input)" };
       const findings = [
-        {
-          scanner: "semgrep",
-          filePath: "src/routes/auth.js",
-          startLine: 42,
-          cwe: "CWE-79",
-          ruleId: "xss-rule-1",
-          severity: "high",
-          title: "XSS Vulnerability",
-        },
-        {
-          scanner: "bandit",
-          filePath: "src/routes/auth.js",
-          startLine: 42,
-          cwe: "CWE-79",
-          ruleId: "xss-rule-1",
-          severity: "critical", // higher severity should win
-          title: "XSS Vulnerability Richer Info",
-        },
+        { ...base, scanner: "semgrep" },
+        { ...base, scanner: "semgrep", severity: "critical", title: "More specific Semgrep result" },
+        { ...base, scanner: "bandit", severity: "high", title: "Bandit independently reports the same line" },
+        { ...base, scanner: "semgrep", ruleId: "sql-injection-rule" },
       ];
 
       const deduped = DeduplicatorService.deduplicate("testorg", "testrepo", findings);
-      expect(deduped).toHaveLength(1);
-      expect(deduped[0].fingerprint).toBeDefined();
-      expect(deduped[0].fingerprint.length).toBe(64);
-      expect(deduped[0].severity).toBe("critical");
+      expect(deduped).toHaveLength(3);
+      expect(deduped.map(f => f.scanner).sort()).toEqual(["bandit", "semgrep", "semgrep"]);
+      expect(new Set(deduped.map(f => f.fingerprint)).size).toBe(3);
+      expect(deduped.every(f => /^[a-f0-9]{64}$/.test(f.fingerprint))).toBe(true);
+      const semgrep = deduped.find(f => f.scanner === "semgrep" && f.ruleId === "xss-rule-1");
+      expect(semgrep.severity).toBe("critical");
+      expect(semgrep.provenance).toEqual([
+        { scanner: "semgrep", ruleId: "xss-rule-1", severity: "high" },
+        { scanner: "semgrep", ruleId: "xss-rule-1", severity: "critical" },
+      ]);
+      expect(semgrep.evidenceSnippet).toBe("unsafe(input)");
+      expect(semgrep.correlationKey).not.toBe(deduped.find(f => f.scanner === "bandit").correlationKey);
+      expect(semgrep.correlationKey).not.toBe(deduped.find(f => f.ruleId === "sql-injection-rule").correlationKey);
     });
   });
 

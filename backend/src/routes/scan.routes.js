@@ -16,6 +16,9 @@ const Scan = require("../models/Scan");
 const Finding = require("../models/Finding");
 const { bad, objectId } = require("../utils/input");
 const remediation = require("../services/remediation.service");
+const remediationVerification = require("../services/remediation-verification.service");
+const { recordAuditEvent } = require("../services/audit.service");
+const logger = require("../config/logger");
 async function findingContext(req) {
   objectId(req.params.findingId);
   const scan = await Scan.findById(req.params.scanId).lean();
@@ -29,29 +32,92 @@ router.get("/:scanId/findings/:findingId/source", requireAuth, requireScanMember
 }));
 router.post("/:scanId/findings/:findingId/validate", requireAuth, requireScanMember, handler(async (req, res) => {
   const { scan, finding } = await findingContext(req);
-  const result = await remediation.validate(scan, finding, req.body?.patch);
-  res.json({ success: true, data: { applies: true, syntax: result.syntax, tests: "not_executed" } });
+  await require("../services/budget.service").consume(`patch-validate:${scan.organization}`, 60, 3600000);
+  let result;
+  try {
+    result = await remediation.validate(scan, finding, req.body?.patch, { allowSyntaxFailure: true });
+  } catch (error) {
+    if (error.code === "PATCH_INTEGRITY_FAILED" && error.validationContext) {
+      try {
+        await remediationVerification.recordFailedIntegrity({ scan, finding, actorId: req.user._id,
+          patch: req.body?.patch, context: error.validationContext });
+        res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+      } catch (recordError) {
+        logger.error(`remediation_verification_write_failed action=validation request=${req.requestId || "unknown"} error=${recordError.name || "Error"}`);
+        res.setHeader("X-SecurePatch-Verification-Recorded", "false");
+      }
+    }
+    throw error;
+  }
+  const verification = await remediationVerification.recordVerification({ scan, finding, actorId: req.user._id,
+    patch: req.body?.patch, validation: result, action: "validation" });
+  res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+  res.json({ success: true, data: { applies: true, syntax: result.syntax, tests: "not_executed", verification } });
 }));
 router.post("/:scanId/findings/:findingId/pull-request", requireAuth, requireScanMember,
   require("../middleware/rbac.middleware").requireRole("owner", "admin"), handler(async (req, res) => {
     const { scan, finding } = await findingContext(req);
-    res.status(201).json({ success: true, data: await remediation.createPullRequest(scan, finding, req.body || {}) });
+    const result = await remediation.createPullRequest(scan, finding, req.body || {});
+    const { verificationMaterial, ...publicResult } = result;
+    await recordAuditEvent(req, {
+      organizationId: scan.organization,
+      action: "pull_request.draft_created",
+      target: `pull-request/${scan.owner}/${scan.repo}#${result.number}`,
+      details: { repository: `${scan.owner}/${scan.repo}`, pullRequestNumber: result.number,
+        pullRequestUrl: result.url, baseSha: result.baseSha || scan.commitSha },
+    });
+    let verification = null;
+    try {
+      verification = await remediationVerification.recordVerification({ scan, finding, actorId: req.user._id,
+        patch: req.body?.patch, validation: verificationMaterial, action: "draft_pr", pullRequest: result });
+      res.setHeader("X-SecurePatch-Verification-Recorded", "true");
+    } catch (error) {
+      logger.error(`remediation_verification_write_failed action=draft_pr request=${req.requestId || "unknown"} error=${error.name || "Error"}`);
+      res.setHeader("X-SecurePatch-Verification-Recorded", "false");
+    }
+    res.status(201).json({ success: true, data: { ...publicResult, verification, verificationRecorded: Boolean(verification) } });
   }));
+router.get("/:scanId/findings/:findingId/verifications", requireAuth, requireScanMember, handler(async (req, res) => {
+  const { scan } = await findingContext(req);
+  const verifications = await remediationVerification.listVerifications({ organizationId: scan.organization,
+    scanId: scan._id, findingId: req.params.findingId, limit: 20 });
+  res.json({ success: true, data: { verifications } });
+}));
 router.get("/organizations/:organizationId/findings", requireAuth, requireOrganizationMember, handler(async (req, res) => {
   objectId(req.params.organizationId);
   const { integer } = require("../utils/input");
   const page = integer(req.query.page, 1, 10000), limit = integer(req.query.limit, 25, 100);
-  const latest = await Scan.aggregate([
-    { $match: { organization: new (require("mongoose").Types.ObjectId)(req.params.organizationId), status: "completed", scannerErrors: { $size: 0 } } },
-    { $sort: { createdAt: -1 } }, { $group: { _id: { owner: "$owner", repo: "$repo" }, scan: { $first: "$_id" }, commitSha: { $first: "$commitSha" } } },
+  const organization = new (require("mongoose").Types.ObjectId)(req.params.organizationId);
+  const [latest, latestActivity] = await Promise.all([
+    Scan.aggregate([
+      { $match: { organization, status: "completed", scannersUsed: { $exists: true, $ne: [] }, scannerErrors: { $size: 0 } } },
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $group: { _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } }, scan: { $first: "$_id" }, commitSha: { $first: "$commitSha" } } },
+    ]),
+    Scan.aggregate([
+      { $match: { organization } },
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $group: { _id: { owner: { $toLower: "$owner" }, repo: { $toLower: "$repo" } }, scan: { $first: "$_id" }, status: { $first: "$status" } } },
+    ]),
   ]);
+  const key = item => `${item._id.owner}/${item._id.repo}`;
+  const successfulByRepository = new Map(latest.map(scan => [key(scan), scan]));
+  const latestFindingsFreshness = {
+    repositoriesWithSuccessfulBaseline: latest.length,
+    repositoriesUsingEarlierSuccessfulResult: latestActivity.filter(activity => {
+      const successful = successfulByRepository.get(key(activity));
+      return successful && String(successful.scan) !== String(activity.scan);
+    }).length,
+    repositoriesWithoutSuccessfulBaseline: latestActivity.filter(activity => !successfulByRepository.has(key(activity))).length,
+  };
   const filter = { organization: req.params.organizationId, scan: { $in: latest.map(s => s.scan) }, status: { $nin: ["resolved", "dismissed"] } };
   if (req.query.riskCategory) {
     if (!["critical", "high", "medium", "low"].includes(req.query.riskCategory)) throw bad("Invalid risk category");
     filter.riskCategory = req.query.riskCategory;
   }
   const [findings, total] = await Promise.all([Finding.find(filter).populate("reviewHistory.reviewedBy", "name githubUsername").sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
-  res.json({ success: true, data: { findings, latestScans: latest, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } } });
+  res.json({ success: true, data: { findings, latestScans: latest, latestFindingsFreshness,
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } } });
 }));
 
 router.get("/:scanId/comparison", requireAuth, requireScanMember, handler(async (req, res) => {
@@ -68,6 +134,12 @@ router.post("/:scanId/cancel", requireAuth, requireScanMember, handler(async (re
     { $set: { cancelledAt: new Date(), status: "failed", errorMessage: "Cancelled by organization member",
       activeKey: null, leaseUntil: null, leaseToken: null, completedAt: new Date() } }, { returnDocument: "after" });
   if (!scan) throw bad("No active scan to cancel", 409);
+  await recordAuditEvent(req, {
+    organizationId: scan.organization,
+    action: "scan.cancelled",
+    target: `scan/${scan._id}`,
+    details: { repository: `${scan.owner}/${scan.repo}`, scanId: String(scan._id) },
+  });
   res.json({ success: true, data: scan });
 }));
 router.patch("/:scanId/findings/:findingId", requireAuth, requireScanMember, handler(async (req, res) => {
@@ -80,6 +152,13 @@ router.patch("/:scanId/findings/:findingId", requireAuth, requireScanMember, han
       $push: { reviewHistory: { status, reason: reason.trim(), reviewedBy: req.user._id, reviewedAt } } },
     { returnDocument: "after", runValidators: true });
   if (!finding) throw bad("Finding not found", 404);
+  await recordAuditEvent(req, {
+    organizationId: finding.organization,
+    action: "finding.reviewed",
+    target: `finding/${finding._id}`,
+    details: { repository: `${finding.owner}/${finding.repo}`, scanId: String(finding.scan),
+      findingId: String(finding._id), status },
+  });
   res.json({ success: true, data: finding });
 }));
 

@@ -12,7 +12,7 @@ const healthCheck = (req, res) => {
       database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       ai: new NvidiaService().health(),
     },
-    "SecurePatch backend is healthy"
+    "AVPR-Net backend is healthy"
   );
 };
 

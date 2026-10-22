@@ -14,6 +14,7 @@ router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);
 router.use("/organizations", organizationRoutes);
 router.use("/organizations", memberRoutes);
+router.use("/organizations", require("./notification.routes"));
 router.use("/github", githubRoutes);
 router.use("/scans", scanRoutes);
 router.use("/dashboard", dashboardRoutes);

@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    accessRevision: { type: Number, default: 0 },
+    deletedAt: { type: Date, default: null },
     profileImage: {
       type: String,
       default: null,
@@ -33,7 +35,7 @@ const userSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["active", "suspended"],
+      enum: ["active", "suspended", "deleted"],
       default: "active",
     },
   },

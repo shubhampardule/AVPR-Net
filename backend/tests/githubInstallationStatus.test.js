@@ -1,10 +1,12 @@
 jest.mock("../src/models/Organization", () => ({ findById: jest.fn() }));
 jest.mock("../src/config/github", () => ({ githubApp: { octokit: { request: jest.fn() } } }));
 jest.mock("../src/controllers/githubAuth.controller", () => ({ authorizedInstallations: jest.fn(() => []) }));
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 
 const Organization = require("../src/models/Organization");
 const { githubApp } = require("../src/config/github");
 const { getGitHubStatus } = require("../src/controllers/github.controller");
+const { recordAuditEvent } = require("../src/services/audit.service");
 
 const response = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn() });
 const organization = () => ({ githubInstallationId: "10", save: jest.fn().mockResolvedValue() });
@@ -33,6 +35,9 @@ test("a revoked GitHub App installation is cleared and reported as recoverable",
   expect(res.status).toHaveBeenCalledWith(200);
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
     data: { connected: false, installation: null, revoked: true, revokedInstallationId: "10" },
+  }));
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+    action: "github.installation_disconnected", details: { installationId: "10", reason: "revoked" },
   }));
 });
 

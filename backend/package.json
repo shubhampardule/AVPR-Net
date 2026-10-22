@@ -20,6 +20,8 @@
     "assistant": "node src/cli/assistant.js",
     "demo": "node src/cli/demo.js",
     "evaluate": "node src/cli/evaluate.js",
+    "ops:check": "node src/cli/operations.js",
+    "benchmark": "node src/cli/benchmark.js",
     "build:vercel": "esbuild src/app.js --bundle --platform=node --format=cjs --packages=external --outfile=src/app.vercel.cjs"
   },
   "keywords": [],

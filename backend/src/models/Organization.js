@@ -19,7 +19,7 @@ const organizationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["active", "suspended"],
+      enum: ["active", "suspended", "deleting", "deleted"],
       default: "active",
     },
 
@@ -29,6 +29,10 @@ const organizationSchema = new mongoose.Schema(
       index: true,
     },
 
+    deletionRequestedAt: { type: Date, default: null },
+    purgeAfter: { type: Date, default: null, index: true },
+    purgeAttemptedAt: { type: Date, default: null },
+    purgedAt: { type: Date, default: null },
     hostedAiEnabled: {
       type: Boolean,
       default: false,

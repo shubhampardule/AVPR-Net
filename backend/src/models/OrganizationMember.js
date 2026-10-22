@@ -25,6 +25,9 @@ const organizationMemberSchema = new mongoose.Schema(
       enum: ["active", "invited", "suspended"],
       default: "active",
     },
+    notificationPreferences: {
+      scanResults: { type: Boolean, default: true },
+    },
   },
   {
     timestamps: true,

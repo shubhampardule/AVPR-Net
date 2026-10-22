@@ -4,6 +4,7 @@ const { googleCallback, getCurrentUser, logout, } = require("../controllers/auth
 const { requireAuth, } = require("../middleware/auth.middleware");
 
 const router = express.Router();
+router.delete("/me", requireAuth, require("../controllers/account.controller").deleteMyAccount);
 const { startGitHubLogin, finishGitHubLogin } = require("../controllers/githubAuth.controller");
 const safeReturnTo = require("../utils/safeReturnTo");
 

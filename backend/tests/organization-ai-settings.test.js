@@ -1,5 +1,7 @@
 const Organization = require("../src/models/Organization");
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 const { getAiSettings, updateAiSettings } = require("../src/controllers/organization.controller");
+const { recordAuditEvent } = require("../src/services/audit.service");
 
 function response() {
   return { statusCode: 200, body: null,
@@ -32,6 +34,7 @@ test("owner or admin update writes only the hosted AI flag", async () => {
   expect(update).toHaveBeenCalledWith({ _id: "org-1", status: "active" },
     { $set: { hostedAiEnabled: true } }, { new: true, runValidators: true });
   expect(res.body.data.hostedAiEnabled).toBe(true);
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "ai.settings_changed", details: { hostedAiEnabled: true } }));
 });
 
 test("AI setting updates reject extra or non-boolean values without touching MongoDB", async () => {

@@ -1,6 +1,8 @@
 const Organization = require("../models/Organization");
 const OrganizationMember = require("../models/OrganizationMember");
 const ApiResponse = require("../utils/ApiResponse");
+const { recordAuditEvent } = require("../services/audit.service");
+const { buildOrganizationExport } = require("../services/organization-export.service");
 
 const createOrganization = async (req, res, next) => {
   try {
@@ -49,9 +51,16 @@ const createOrganization = async (req, res, next) => {
 
     let organization;
     await require("mongoose").connection.transaction(async (session) => {
+      await require("../services/account-lock.service").lockActiveAccount(req.user._id, session);
       [organization] = await Organization.create([{ name: trimmedName, slug }], { session });
       await OrganizationMember.create([{ user: req.user._id, organization: organization._id,
         role: "owner", status: "active" }], { session });
+    });
+    await recordAuditEvent(req, {
+      organizationId: organization._id,
+      action: "organization.created",
+      target: `organization/${organization._id}`,
+      details: { organizationName: organization.name, slug: organization.slug },
     });
 
     return ApiResponse.success(
@@ -160,8 +169,38 @@ const updateAiSettings = async (req, res, next) => {
     ).select("hostedAiEnabled");
     if (!organization) return res.status(404).json({ success: false,
       error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+    await recordAuditEvent(req, {
+      action: "ai.settings_changed",
+      target: `organization/${req.params.organizationId}/hosted-ai`,
+      details: { hostedAiEnabled: organization.hostedAiEnabled === true },
+    });
     return ApiResponse.success(res, { hostedAiEnabled: organization.hostedAiEnabled });
   } catch (error) { next(error); }
+};
+
+const exportOrganization = async (req, res, next) => {
+  try {
+    const exported = await buildOrganizationExport(req.params.organizationId);
+    if (!exported) {
+      return res.status(404).json({ success: false,
+        error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+    }
+
+    await recordAuditEvent(req, {
+      action: "organization.exported",
+      target: `organization/${req.params.organizationId}`,
+      details: { recordCount: exported.counts.total },
+    });
+
+    const date = new Date().toISOString().slice(0, 10);
+    const slug = String(exported.organization.slug || "organization").replace(/[^a-z0-9-]/gi, "-").slice(0, 100);
+    const filename = `securepatch-${slug}-export-${date}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.type("application/json");
+    return res.send(JSON.stringify(exported, null, 2));
+  } catch (error) {
+    next(error);
+  }
 };
 
 module.exports = {
@@ -170,4 +209,5 @@ module.exports = {
   getOrganization,
   getAiSettings,
   updateAiSettings,
+  exportOrganization,
 };

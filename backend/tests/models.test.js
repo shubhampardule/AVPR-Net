@@ -3,8 +3,11 @@ const mongoose = require("mongoose");
 const User = require("../src/models/User");
 const Organization = require("../src/models/Organization");
 const OrganizationMember = require("../src/models/OrganizationMember");
+const AuditEvent = require("../src/models/AuditEvent");
+const RemediationVerification = require("../src/models/RemediationVerification");
+const Notification = require("../src/models/Notification");
 
-describe("SecurePatch Models", () => {
+describe("AVPR-Net Models", () => {
   describe("User Model", () => {
     test("should require name and email", async () => {
       const user = new User({});
@@ -41,7 +44,7 @@ describe("SecurePatch Models", () => {
 
     test("should accept a valid organization", async () => {
       const organization = new Organization({
-        name: "SecurePatch Technologies",
+        name: "AVPR-Net Technologies",
         slug: "securepatch-technologies",
       });
 
@@ -75,6 +78,7 @@ describe("SecurePatch Models", () => {
 
       expect(error).toBeUndefined();
       expect(member.status).toBe("active");
+      expect(member.notificationPreferences.scanResults).toBe(true);
     });
   });
 
@@ -136,6 +140,99 @@ describe("SecurePatch Models", () => {
       await expect(finding.validate()).resolves.toBeUndefined();
       expect(finding.reviewHistory).toHaveLength(1);
       expect(finding.reviewHistory[0].reviewedBy.toString()).toBe(reviewer.toString());
+    });
+  });
+
+  describe("Audit Event Model", () => {
+    test("requires a supported action and identifies an actor and organization", async () => {
+      const event = new AuditEvent({
+        organization: new mongoose.Types.ObjectId(),
+        actor: new mongoose.Types.ObjectId(),
+        actorLabel: "Reviewer",
+        action: "finding.reviewed",
+        target: "finding/1",
+      });
+      await expect(event.validate()).resolves.toBeUndefined();
+      expect(AuditEvent.schema.path("createdAt").options.immutable).toBe(true);
+
+      const transferEvent = new AuditEvent({
+        organization: new mongoose.Types.ObjectId(), actor: new mongoose.Types.ObjectId(), actorLabel: "Former owner",
+        action: "member.ownership_transferred", target: "member/new-owner",
+        details: { previousOwnerId: "former-owner", newOwnerId: "new-owner" },
+      });
+      await expect(transferEvent.validate()).resolves.toBeUndefined();
+
+      const exportEvent = new AuditEvent({
+        organization: new mongoose.Types.ObjectId(), actor: new mongoose.Types.ObjectId(), actorLabel: "Owner",
+        action: "organization.exported", target: "organization/org-1", details: { recordCount: 42 },
+      });
+      await expect(exportEvent.validate()).resolves.toBeUndefined();
+
+      const leaveEvent = new AuditEvent({
+        organization: new mongoose.Types.ObjectId(), actor: new mongoose.Types.ObjectId(), actorLabel: "Former member",
+        action: "member.left", target: "member/former-member", details: { memberId: "former-member", previousRole: "developer" },
+      });
+      await expect(leaveEvent.validate()).resolves.toBeUndefined();
+
+      const invalid = new AuditEvent({ action: "unknown.action" });
+      const error = await invalid.validate().catch(value => value);
+      expect(error.errors.action).toBeDefined();
+      expect(error.errors.organization).toBeDefined();
+      expect(error.errors.actor).toBeDefined();
+    });
+
+    test("rejects application-level updates and deletes", async () => {
+      await expect(AuditEvent.updateOne({}, { $set: { action: "scan.started" } }).exec()).rejects.toThrow("Audit events are append-only");
+      await expect(AuditEvent.deleteMany({}).exec()).rejects.toThrow("Audit events are append-only");
+    });
+  });
+
+  describe("Remediation Verification Model", () => {
+    const validRecord = () => new RemediationVerification({
+      organization: new mongoose.Types.ObjectId(), scan: new mongoose.Types.ObjectId(), finding: new mongoose.Types.ObjectId(),
+      requestedBy: new mongoose.Types.ObjectId(), repository: "team/project", sourceCommitSha: "a".repeat(40),
+      targetPath: "src/index.js", patchSha256: "b".repeat(64), sourceSha256: "c".repeat(64), proposedSha256: "d".repeat(64),
+      action: "validation", checks: [
+        { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
+        { name: "syntax", status: "unavailable", detailCode: "parser_unavailable" },
+        { name: "allowed_tests", status: "unavailable", detailCode: "isolated_runner_unavailable" },
+        { name: "security_rescan", status: "unavailable", detailCode: "proposal_branch_scan_unavailable" },
+      ],
+    });
+
+    test("requires exactly one result for each verification check", async () => {
+      await expect(validRecord().validate()).resolves.toBeUndefined();
+      const invalid = validRecord();
+      invalid.checks = invalid.checks.slice(0, 3);
+      const error = await invalid.validate().catch(value => value);
+      expect(error.errors.checks).toBeDefined();
+    });
+
+    test("rejects mutation and deletion after a verification record has been saved", async () => {
+      await expect(RemediationVerification.updateOne({}, { $set: { action: "draft_pr" } }).exec())
+        .rejects.toThrow("Remediation verification records are append-only");
+      await expect(RemediationVerification.deleteMany({}).exec())
+        .rejects.toThrow("Remediation verification records are append-only");
+    });
+  });
+
+  describe("Notification Model", () => {
+    test("accepts scan outcome events and expires them through a TTL index", async () => {
+      const notice = new Notification({ organization: new mongoose.Types.ObjectId(), recipient: new mongoose.Types.ObjectId(),
+        type: "scan.partial", dedupeKey: "scan-1:scan.partial", title: "Scan needs review", body: "Review scan coverage.",
+        href: "/github/team/repo/scan?scanId=scan-1", scan: new mongoose.Types.ObjectId(), repository: "team/repo",
+        expiresAt: new Date(Date.now() + 86400000) });
+      await expect(notice.validate()).resolves.toBeUndefined();
+      expect(Notification.schema.indexes()).toContainEqual([expect.objectContaining({ expiresAt: 1 }), expect.objectContaining({ expireAfterSeconds: 0 })]);
+      expect(Notification.schema.indexes()).toContainEqual([expect.objectContaining({ recipient: 1, dedupeKey: 1 }), expect.objectContaining({ unique: true })]);
+    });
+
+    test("rejects event types outside the documented scan notification policy", async () => {
+      const notice = new Notification({ organization: new mongoose.Types.ObjectId(), recipient: new mongoose.Types.ObjectId(),
+        type: "invitation.created", dedupeKey: "invite-1", title: "Invite", body: "Invite.", href: "/settings",
+        scan: new mongoose.Types.ObjectId(), repository: "team/repo", expiresAt: new Date() });
+      const error = await notice.validate().catch(value => value);
+      expect(error.errors.type).toBeDefined();
     });
   });
 });

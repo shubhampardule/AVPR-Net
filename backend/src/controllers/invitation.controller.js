@@ -5,6 +5,8 @@ const OrganizationInvitation = require("../models/OrganizationInvitation");
 const OrganizationMember = require("../models/OrganizationMember");
 const User = require("../models/User");
 const ApiResponse = require("../utils/ApiResponse");
+const { recordAuditEvent } = require("../services/audit.service");
+const invitationEmail = require("../services/invitation-email.service");
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PENDING_INVITATIONS = 100;
@@ -29,6 +31,13 @@ async function createInvitation(req, res, next) {
   try {
     const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
     const role = req.body.role;
+    if (req.body.sendEmail !== undefined && typeof req.body.sendEmail !== "boolean") {
+      return fail(res, 400, "INVALID_EMAIL_OPTION", "Email delivery must be true or false");
+    }
+    const sendEmail = req.body.sendEmail === true;
+    if (sendEmail && !invitationEmail.available()) {
+      return fail(res, 503, "INVITATION_EMAIL_UNAVAILABLE", "Email delivery is unavailable. Create and share an invitation link instead.");
+    }
     if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return fail(res, 400, "INVALID_EMAIL", "Enter a valid email address for the invite");
     }
@@ -62,6 +71,9 @@ async function createInvitation(req, res, next) {
       email,
       status: "pending",
     });
+    if (sendEmail && existing?.emailAttemptedAt && Date.now() - new Date(existing.emailAttemptedAt).getTime() < 60000) {
+      return fail(res, 429, "INVITATION_EMAIL_COOLDOWN", "Wait one minute before emailing this invitation again.");
+    }
     if (!existing && pendingCount >= MAX_PENDING_INVITATIONS) {
       return fail(res, 429, "INVITATION_LIMIT", "This organization has reached its pending invitation limit");
     }
@@ -77,16 +89,40 @@ async function createInvitation(req, res, next) {
       acceptedAt: null,
       revokedAt: null,
       status: "pending",
+      emailStatus: sendEmail ? "unknown" : "manual",
+      ...(sendEmail ? { emailAttemptedAt: new Date() } : {}),
     };
     let invitation;
     if (existing) {
-      Object.assign(existing, fields);
-      invitation = await existing.save();
+      invitation = await OrganizationInvitation.findOneAndUpdate({ _id: existing._id, status: "pending",
+        ...(sendEmail ? { $or: [{ emailAttemptedAt: null }, { emailAttemptedAt: { $lte: new Date(Date.now() - 60000) } }] } : {}),
+      }, { $set: fields }, { returnDocument: "after", runValidators: true });
+      if (!invitation) return fail(res, 409, "INVITATION_CHANGED", "This invitation changed or was just emailed. Refresh the list and wait one minute before emailing again.");
     } else {
       invitation = await OrganizationInvitation.create({
         ...fields,
         organization: req.params.organizationId,
       });
+    }
+    await recordAuditEvent(req, {
+      action: "invitation.created",
+      target: `invitation/${invitation._id}`,
+      details: { invitationId: String(invitation._id), role, refreshed: Boolean(existing) },
+    });
+
+    const url = invitationUrl(token);
+    let emailDelivery = { status: "manual" };
+    if (sendEmail) {
+      emailDelivery = await invitationEmail.send({ email, url, role, expiresAt, tokenHash: fields.tokenHash });
+      // A newer invitation may already have replaced this token. Never overwrite its status.
+      try {
+        await OrganizationInvitation.updateOne({ _id: invitation._id, tokenHash: fields.tokenHash, status: "pending" },
+          { $set: { emailStatus: emailDelivery.status === "not_configured" ? "failed" : emailDelivery.status } });
+      } catch {
+        emailDelivery = { ...emailDelivery, statusRecorded: false };
+      }
+      // Provider IDs are not needed by clients or stored invitation records.
+      delete emailDelivery.providerId;
     }
 
     return ApiResponse.success(res, {
@@ -96,7 +132,8 @@ async function createInvitation(req, res, next) {
         role: invitation.role,
         status: invitation.status,
         expiresAt: invitation.expiresAt,
-        url: invitationUrl(token),
+        url,
+        emailDelivery,
       },
     }, existing ? "Invitation link refreshed" : "Invitation created", existing ? 200 : 201);
   } catch (error) {
@@ -112,10 +149,11 @@ async function listInvitations(req, res, next) {
     const invitations = await OrganizationInvitation.find({
       organization: req.params.organizationId,
       status: "pending",
-    }).select("email role invitedBy expiresAt createdAt").populate("invitedBy", "name email").sort({ createdAt: -1 }).limit(MAX_PENDING_INVITATIONS);
+    }).select("email role invitedBy expiresAt createdAt emailStatus emailAttemptedAt").populate("invitedBy", "name email").sort({ createdAt: -1 }).limit(MAX_PENDING_INVITATIONS);
 
     const now = Date.now();
     return ApiResponse.success(res, {
+      emailDeliveryAvailable: invitationEmail.available(),
       invitations: invitations.map((invitation) => ({
         id: invitation._id,
         email: invitation.email,
@@ -124,6 +162,7 @@ async function listInvitations(req, res, next) {
         expiresAt: invitation.expiresAt,
         createdAt: invitation.createdAt,
         status: invitation.expiresAt.getTime() > now ? "pending" : "expired",
+        emailStatus: invitation.emailStatus || "manual",
       })),
     }, "Organization invitations retrieved successfully");
   } catch (error) {
@@ -146,6 +185,11 @@ async function revokeInvitation(req, res, next) {
     invitation.tokenHash = undefined;
     invitation.revokedAt = new Date();
     await invitation.save();
+    await recordAuditEvent(req, {
+      action: "invitation.revoked",
+      target: `invitation/${invitation._id}`,
+      details: { invitationId: String(invitation._id) },
+    });
     return ApiResponse.success(res, null, "Invitation revoked");
   } catch (error) {
     next(error);
@@ -160,9 +204,10 @@ async function acceptInvitation(req, res, next) {
     }
 
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    let result;
+    let result, acceptedInvitationId;
     try {
       await mongoose.connection.transaction(async (session) => {
+        await require("../services/account-lock.service").lockActiveAccount(req.user._id, session);
         const invitation = await OrganizationInvitation.findOne({
           tokenHash,
           status: "pending",
@@ -202,6 +247,7 @@ async function acceptInvitation(req, res, next) {
         invitation.tokenHash = undefined;
         invitation.acceptedAt = new Date();
         await invitation.save({ session });
+        acceptedInvitationId = invitation._id;
         result = {
           organization: { id: organization._id, name: organization.name, slug: organization.slug },
           role: membership.role,
@@ -211,6 +257,13 @@ async function acceptInvitation(req, res, next) {
       if (error.statusCode) return fail(res, error.statusCode, error.code, error.message);
       throw error;
     }
+
+    await recordAuditEvent(req, {
+      organizationId: result.organization.id,
+      action: "invitation.accepted",
+      target: `invitation/${acceptedInvitationId}`,
+      details: { role: result.role },
+    });
 
     return ApiResponse.success(res, result, "Organization invitation accepted");
   } catch (error) {

@@ -2,15 +2,15 @@ const crypto = require("crypto");
 
 /**
  * DeduplicatorService:
- * Creates deterministic SHA-256 fingerprints and eliminates duplicate findings
- * across multiple scanning runs and scanners.
+ * Creates deterministic SHA-256 fingerprints and groups findings from the same
+ * scanner rule, file, CWE and line. Cross-scanner findings remain independently reviewable.
  */
 class DeduplicatorService {
   /**
    * Generates a deterministic SHA-256 fingerprint for a finding.
    *
    * Fingerprint basis:
-   * owner + repo + normalizedFilePath + cwe + ruleId + startLine
+   * owner + repo + scanner + normalizedFilePath + cwe + ruleId + startLine
    */
   static generateFingerprint(owner, repo, finding) {
     const normPath = (finding.filePath || "").trim().replace(/\\/g, "/");
@@ -18,7 +18,8 @@ class DeduplicatorService {
     const rule = (finding.ruleId || "").trim();
     const line = finding.startLine || 1;
 
-    const payload = `${owner.toLowerCase()}:${repo.toLowerCase()}:${normPath}:${cwe}:${rule}:${line}`;
+    const scanner = String(finding.scanner || "unknown").trim().toLowerCase();
+    const payload = `${owner.toLowerCase()}:${repo.toLowerCase()}:${scanner}:${normPath}:${cwe}:${rule}:${line}`;
     return crypto.createHash("sha256").update(payload).digest("hex");
   }
 
@@ -39,7 +40,8 @@ class DeduplicatorService {
       item.fingerprint = fingerprint;
       const evidence = (item.evidenceSnippet || "").replace(/^\s*\d+\s+/gm, "").replace(/\s+/g, " ").trim();
       item.correlationKey = crypto.createHash("sha256").update(JSON.stringify([
-        owner.toLowerCase(), repo.toLowerCase(), item.filePath, item.cwe?.match(/CWE-\d+/)?.[0],
+        owner.toLowerCase(), repo.toLowerCase(), item.scanner, item.filePath, item.startLine || 1,
+        item.cwe?.match(/CWE-\d+/)?.[0], item.ruleId,
         evidence || `${item.ruleId}:${item.startLine}`,
       ])).digest("hex");
       item.provenance = [{ scanner: item.scanner, ruleId: item.ruleId, severity: item.severity }];

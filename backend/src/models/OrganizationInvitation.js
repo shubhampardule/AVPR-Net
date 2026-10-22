@@ -14,6 +14,8 @@ const organizationInvitationSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
   acceptedAt: { type: Date, default: null },
   revokedAt: { type: Date, default: null },
+  emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown"], default: "manual" },
+  emailAttemptedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 organizationInvitationSchema.index(

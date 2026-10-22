@@ -30,10 +30,10 @@ test.each(Object.keys(snippets))("shared code service supports %s without execut
 
 test("review requires a diff and source; no file is changed", async () => {
   const { service, provider } = setup();
-  const request = { language: "javascript", mode: "review", request: "Review input validation", originalCode: "let x = 1;" };
+  const request = { language: "javascript", mode: "review", request: "Review input validation", originalCode: "let x = 1;", targetPath: "input.js" };
   const generated = await service.generateCode(request);
   expect(generated.status).toBe("complete");
-  expect(generated.proposal.code).toContain("--- a/source");
+  expect(generated.proposal.code).toContain("--- a/input.js");
   provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "diff", code: "--- a/input.js\n+++ b/input.js\n@@ -1 +1 @@\n-let x = 1;\n+const x = 1;" }) });
   expect((await service.generateCode(request)).proposal.format).toBe("diff");
   await expect(service.generateCode({ ...request, originalCode: undefined })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
@@ -42,11 +42,21 @@ test("review requires a diff and source; no file is changed", async () => {
 test("review replacement source becomes a deterministic diff for the finding path", async () => {
   const { service, provider } = setup();
   provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), code: "const x = 1;\n" }) });
-  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Return a minimal unified diff for a/src/main.js and b/src/main.js. Preserve behavior.", originalCode: "let x = 1;\n" });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Review the selected source and preserve behavior.", targetPath: "src/main.js", originalCode: "let x = 1;\n" });
   expect(result.status).toBe("complete");
   expect(result.proposal.format).toBe("diff");
   expect(result.proposal.code).toContain("--- a/src/main.js");
   expect(require("diff").applyPatch("let x = 1;\n", result.proposal.code)).toBe("const x = 1;\n");
+  expect(result.proposal.code).toContain("--- a/src/main.js");
+});
+
+test("review rejects a one-file patch whose path differs from the scanned target", async () => {
+  const { service, provider, validator } = setup();
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "diff",
+    code: "--- a/other.js\n+++ b/other.js\n@@ -1 +1 @@\n-let x = 1;\n+const x = 1;" }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", targetPath: "src/main.js", request: "Review source", originalCode: "let x = 1;\n" });
+  expect(result).toMatchObject({ status: "unavailable", proposal: null });
+  expect(validator).not.toHaveBeenCalled();
 });
 
 test("configurable languages, bounds and unknown fields are enforced", async () => {
@@ -54,6 +64,7 @@ test("configurable languages, bounds and unknown fields are enforced", async () 
   await expect(service.generateCode({ language: "python", mode: "generate", request: "x" })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
   await expect(service.generateCode({ language: "javascript", mode: "generate", request: "x", execute: true })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
   await expect(service.generateCode({ language: "javascript", mode: "generate", request: "x".repeat(3001) })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
+  await expect(service.generateCode({ language: "javascript", mode: "review", request: "Review", originalCode: "let x = 1;", targetPath: "../other.js" })).rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
 });
 
 test.each([

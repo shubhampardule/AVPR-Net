@@ -1,4 +1,5 @@
 const ScanService = require("../services/scan.service");
+const { recordAuditEvent } = require("../services/audit.service");
 
 /**
  * Controller handling scan initiation and telemetry endpoints
@@ -12,6 +13,17 @@ const enqueueScan = async (req, res, next) => {
       owner,
       repo,
       includeDependencies: req.body?.includeDependencies === true,
+    });
+    await recordAuditEvent(req, {
+      action: "scan.started",
+      target: `scan/${result.scanId}`,
+      details: {
+        repository: `${owner}/${repo}`,
+        scanId: String(result.scanId),
+        branch: result.branch,
+        commitSha: result.commitSha,
+        includeDependencies: result.includeDependencies,
+      },
     });
 
     // Return 202 Accepted immediately as per async background architecture

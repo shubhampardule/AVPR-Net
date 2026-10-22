@@ -20,6 +20,28 @@ test("oversized declared archive fails before extraction", async () => {
   jest.spyOn(globalThis, "fetch").mockResolvedValue(new Response("small", { headers: { "content-length": String(51 * 1024 * 1024) } }));
   await expect(createEphemeralWorkspace("1", "owner", "repo", sha)).rejects.toMatchObject({ statusCode: 413 });
 });
+test("GitHub archive rate limits return a retryable 429", async () => {
+  jest.spyOn(globalThis, "fetch").mockResolvedValue(new Response("rate limited", {
+    status: 429,
+    headers: { "retry-after": "23" },
+  }));
+  await expect(createEphemeralWorkspace("1", "owner", "repo", sha)).rejects.toMatchObject({
+    statusCode: 429,
+    code: "GITHUB_RATE_LIMITED",
+    retryAfterSeconds: 23,
+  });
+});
+test("GitHub secondary archive limits without Retry-After use the documented minimum wait", async () => {
+  jest.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit." }), {
+    status: 403,
+    headers: { "content-type": "application/json", "x-github-request-id": "ABC:321" },
+  }));
+  await expect(createEphemeralWorkspace("1", "owner", "repo", sha)).rejects.toMatchObject({
+    statusCode: 429,
+    code: "GITHUB_RATE_LIMITED",
+    retryAfterSeconds: 60,
+  });
+});
 test("symbolic link entries are rejected", async () => {
   const zip = archive(); zip.getEntry("repo-root/src/example.js").attr = (0xa1ff << 16) >>> 0;
   jest.spyOn(globalThis, "fetch").mockResolvedValue(new Response(zip.toBuffer()));

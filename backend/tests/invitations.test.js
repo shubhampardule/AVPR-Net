@@ -1,7 +1,8 @@
+jest.mock("../src/services/account-lock.service", () => ({ lockActiveAccount: jest.fn().mockResolvedValue({ status: "active" }) }));
 jest.mock("../src/models/Organization", () => ({ findOne: jest.fn() }));
 jest.mock("../src/models/User", () => ({ findOne: jest.fn() }));
 jest.mock("../src/models/OrganizationInvitation", () => ({
-  create: jest.fn(), findOne: jest.fn(), countDocuments: jest.fn(),
+  create: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn(), countDocuments: jest.fn(), updateOne: jest.fn(),
 }));
 jest.mock("../src/models/OrganizationMember", () => {
   const Model = jest.fn().mockImplementation(function (fields) {
@@ -11,6 +12,7 @@ jest.mock("../src/models/OrganizationMember", () => {
   Model.findOne = jest.fn();
   return Model;
 });
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn() }));
 
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
@@ -19,6 +21,7 @@ const OrganizationInvitation = require("../src/models/OrganizationInvitation");
 const OrganizationMember = require("../src/models/OrganizationMember");
 const User = require("../src/models/User");
 const { createInvitation, acceptInvitation, revokeInvitation } = require("../src/controllers/invitation.controller");
+const { recordAuditEvent } = require("../src/services/audit.service");
 
 const response = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() });
 const inviter = { _id: "inviter-id", email: "owner@example.test" };
@@ -26,6 +29,7 @@ const organizationId = "507f1f77bcf86cd799439011";
 
 beforeEach(() => {
   jest.clearAllMocks();
+  recordAuditEvent.mockResolvedValue(null);
   process.env.FRONTEND_URL = "https://securepatch.example";
 });
 
@@ -48,6 +52,7 @@ test("creates an email-bound invitation and stores only a hash of its random tok
   expect(stored.tokenHash).toBe(crypto.createHash("sha256").update(token).digest("hex"));
   expect(stored.tokenHash).not.toContain(token);
   expect(stored.expiresAt.getTime()).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60 * 1000);
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "invitation.created", details: { invitationId: "invite-id", role: "developer", refreshed: false } }));
 });
 
 test("rejects malformed email and unsupported privilege before creating an invitation", async () => {
@@ -103,9 +108,11 @@ test("acceptance atomically activates the invited role and consumes the invitati
   expect(membership.status).toBe("active");
   expect(membership.role).toBe("admin");
   expect(membership.save).toHaveBeenCalledWith({ session: { id: "session" } });
+  expect(require("../src/services/account-lock.service").lockActiveAccount).toHaveBeenCalledWith("new-user", { id: "session" });
   expect(invitation.status).toBe("accepted");
   expect(invitation.tokenHash).toBeUndefined();
   expect(invitation.save).toHaveBeenCalledWith({ session: { id: "session" } });
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ organizationId, action: "invitation.accepted", details: { role: "admin" } }));
 });
 
 test("a valid invitation restores suspended membership only after acceptance", async () => {
@@ -125,6 +132,7 @@ test("a valid invitation restores suspended membership only after acceptance", a
   expect(suspendedMembership.status).toBe("active");
   expect(suspendedMembership.role).toBe("developer");
   expect(suspendedMembership.save).toHaveBeenCalledWith({ session: { id: "session" } });
+  expect(require("../src/services/account-lock.service").lockActiveAccount).toHaveBeenCalledWith("new-user", { id: "session" });
   expect(invitation.status).toBe("accepted");
 });
 
@@ -137,4 +145,61 @@ test("revocation invalidates a pending invitation", async () => {
   expect(invitation.tokenHash).toBeUndefined();
   expect(invitation.revokedAt).toBeInstanceOf(Date);
   expect(invitation.save).toHaveBeenCalled();
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "invitation.revoked" }));
+});
+
+
+describe("optional invitation email", () => {
+  afterEach(() => jest.restoreAllMocks());
+  const emailService = require("../src/services/invitation-email.service");
+  const req = () => ({ params: { organizationId }, body: { email: "member@example.test", role: "developer", sendEmail: true }, user: inviter, organizationMembership: { role: "owner" } });
+  function setup() {
+    User.findOne.mockResolvedValue(null);
+    OrganizationInvitation.countDocuments.mockResolvedValue(0);
+    OrganizationInvitation.findOne.mockResolvedValue(null);
+    OrganizationInvitation.create.mockImplementation(async document => ({ _id: "email-invite", ...document }));
+    OrganizationInvitation.updateOne.mockResolvedValue({ matchedCount: 1 });
+  }
+  test("unconfigured email refuses before changing any invitation", async () => {
+    jest.spyOn(emailService, "available").mockReturnValue(false);
+    const res = response();
+    await createInvitation(req(), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(OrganizationInvitation.create).not.toHaveBeenCalled();
+  });
+  test.each(["accepted", "failed", "unknown"])("retains a usable manual link when email status is %s", async status => {
+    setup();
+    jest.spyOn(emailService, "available").mockReturnValue(true);
+    jest.spyOn(emailService, "send").mockResolvedValue({ status, providerId: "hidden-id" });
+    const res = response(), next = jest.fn();
+    await createInvitation(req(), res, next);
+    expect(next).not.toHaveBeenCalled();
+    const result = res.json.mock.calls[0][0].data.invitation;
+    expect(result.url).toContain("/invite/accept?token=");
+    expect(result.emailDelivery).toEqual({ status });
+    expect(OrganizationInvitation.updateOne).toHaveBeenCalledWith(expect.objectContaining({ _id: "email-invite", status: "pending", tokenHash: expect.any(String) }), { $set: { emailStatus: status } });
+  });
+  test("email cooldown preserves the existing link and prevents another send", async () => {
+    setup();
+    OrganizationInvitation.findOne.mockResolvedValue({ emailAttemptedAt: new Date() });
+    jest.spyOn(emailService, "available").mockReturnValue(true);
+    const send = jest.spyOn(emailService, "send");
+    const res = response();
+    await createInvitation(req(), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(send).not.toHaveBeenCalled();
+    expect(OrganizationInvitation.create).not.toHaveBeenCalled();
+  });
+  test("a concurrent refresh or acceptance cannot bypass the email cooldown or revive an accepted invite", async () => {
+    setup();
+    OrganizationInvitation.findOne.mockResolvedValue({ _id: "existing", emailAttemptedAt: null });
+    OrganizationInvitation.findOneAndUpdate.mockResolvedValue(null);
+    jest.spyOn(emailService, "available").mockReturnValue(true);
+    const send = jest.spyOn(emailService, "send");
+    const res = response();
+    await createInvitation(req(), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(OrganizationInvitation.findOneAndUpdate.mock.calls[0][0]).toMatchObject({ _id: "existing", status: "pending", $or: expect.any(Array) });
+    expect(send).not.toHaveBeenCalled();
+  });
 });

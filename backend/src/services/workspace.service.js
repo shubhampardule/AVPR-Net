@@ -4,15 +4,39 @@ const path = require("node:path");
 const AdmZip = require("adm-zip");
 const { getInstallationOctokit } = require("../config/github");
 const { repository, bad } = require("../utils/input");
+const { fromResponse: githubRateLimit } = require("../utils/github-rate-limit");
 const context = require("./scan-context");
 const MAX_ARCHIVE = 50 * 1024 * 1024;
 const MAX_EXPANDED = 200 * 1024 * 1024;
+async function archiveRateLimit(response) {
+  let message = "";
+  if (response.status === 403 && response.body) {
+    const reader = response.clone().body?.getReader();
+    if (reader) {
+      const decoder = new TextDecoder();
+      let text = "", bytes = 0;
+      try {
+        while (bytes < 4096) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = value.subarray(0, 4096 - bytes);
+          bytes += chunk.byteLength;
+          text += decoder.decode(chunk, { stream: bytes < 4096 });
+          if (bytes === 4096) await reader.cancel();
+        }
+        text += decoder.decode();
+        try { message = JSON.parse(text).message || text; } catch { message = text; }
+      } catch { /* A malformed upstream error body must not hide the original response. */ }
+    }
+  }
+  return githubRateLimit({ status: response.status, headers: response.headers, message });
+}
 async function download(installationId, owner, repo, ref) {
   const client = await getInstallationOctokit(installationId);
   const { token } = await client.auth({ type: "installation" });
   const signal = AbortSignal.any([AbortSignal.timeout(30000), ...(context.getStore()?.signal ? [context.getStore().signal] : [])]);
   let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "SecurePatch" }, redirect: "manual", signal,
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" }, redirect: "manual", signal,
   });
   if ([301, 302, 307, 308].includes(response.status)) {
     const url = new URL(response.headers.get("location"));
@@ -20,7 +44,12 @@ async function download(installationId, owner, repo, ref) {
     if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
     response = await fetch(url, { redirect: "error", signal });
   }
-  if (!response.ok || !response.body) throw bad("GitHub archive download failed", 502);
+  if (!response.ok || !response.body) {
+    const limited = await archiveRateLimit(response);
+    await response.body?.cancel().catch(() => {});
+    if (limited) throw limited;
+    throw bad("GitHub archive download failed", 502);
+  }
   if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) { await response.body.cancel(); throw bad("Repository archive exceeds 50 MiB", 413); }
   const parts = []; let bytes = 0;
   for await (const part of response.body) {

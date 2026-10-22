@@ -2,7 +2,11 @@ jest.mock("../src/config/env", () => ({ github: {
   clientId: "test-client", clientSecret: "test-secret", callbackUrl: "https://example.test/api/v1/auth/github/callback",
 } }));
 jest.mock("../src/models/User", () => ({ findOne: jest.fn(), findById: jest.fn(), create: jest.fn() }));
+jest.mock("../src/models/Organization", () => ({ findById: jest.fn() }));
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 const User = require("../src/models/User");
+const Organization = require("../src/models/Organization");
+const { recordAuditEvent } = require("../src/services/audit.service");
 const { startGitHubLogin, finishGitHubLogin, authorizedInstallations } = require("../src/controllers/githubAuth.controller");
 const { connectGitHubInstallation } = (() => {
   jest.mock("../src/config/github", () => require("./__mocks__/github"));
@@ -134,4 +138,27 @@ test("connecting an unapproved installation is forbidden before any GitHub app r
   await connectGitHubInstallation(req, res, jest.fn());
   expect(res.status).toHaveBeenCalledWith(403);
   expect(githubApp.octokit.request).not.toHaveBeenCalled();
+});
+
+test("an authorized GitHub installation is connected and recorded without token data", async () => {
+  const organization = { id: "org-1", save: jest.fn().mockResolvedValue() };
+  Organization.findById.mockResolvedValue(organization);
+  githubApp.octokit.request.mockResolvedValue({ data: {
+    id: 10, account: { login: "team", type: "Organization" }, html_url: "https://github.com/settings/installations/10",
+  } });
+  const req = {
+    user: { _id: "user-1", id: "user-1", name: "Reviewer" },
+    session: { githubAccess: { userId: "user-1", checkedAt: Date.now(), installations: [{ id: 10, account: "team" }] } },
+    params: { organizationId: "org-1" }, body: { installationId: "10" }, requestId: "req-1",
+  };
+  const res = buildResponse();
+
+  await connectGitHubInstallation(req, res, jest.fn());
+
+  expect(organization.githubInstallationId).toBe("10");
+  expect(organization.save).toHaveBeenCalled();
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  expect(recordAuditEvent).toHaveBeenCalledWith(req, expect.objectContaining({
+    action: "github.installation_connected", details: { installationId: "10", account: "team", accountType: "Organization" },
+  }));
 });

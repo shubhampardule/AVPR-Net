@@ -1,6 +1,7 @@
 const Organization = require("../models/Organization");
 const { githubApp } = require("../config/github");
 const { authorizedInstallations } = require("./githubAuth.controller");
+const { recordAuditEvent } = require("../services/audit.service");
 
 const connectGitHubInstallation = async (req, res, next) => {
   try {
@@ -45,6 +46,12 @@ const connectGitHubInstallation = async (req, res, next) => {
 
     organization.githubInstallationId = String(installation.id);
     await organization.save();
+    await recordAuditEvent(req, {
+      action: "github.installation_connected",
+      target: `github-installation/${installation.id}`,
+      details: { installationId: String(installation.id), account: installation.account?.login || "unknown",
+        accountType: installation.account?.type || "unknown" },
+    });
 
     return res.status(200).json({
       success: true,
@@ -106,6 +113,11 @@ const getGitHubStatus = async (req, res, next) => {
           .filter((item) => String(item.id) !== revokedInstallationId);
         await new Promise((resolve, reject) => req.session.save((saveError) => saveError ? reject(saveError) : resolve()));
       }
+      await recordAuditEvent(req, {
+        action: "github.installation_disconnected",
+        target: `github-installation/${revokedInstallationId}`,
+        details: { installationId: revokedInstallationId, reason: "revoked" },
+      });
       return res.status(200).json({
         success: true,
         data: { connected: false, installation: null, revoked: true, revokedInstallationId },

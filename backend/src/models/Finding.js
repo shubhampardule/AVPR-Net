@@ -88,6 +88,10 @@ const findingSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    remediationGuidance: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     fingerprint: {
       type: String,
       required: true,
@@ -123,6 +127,7 @@ const findingSchema = new mongoose.Schema(
 
 findingSchema.index({ scan: 1, fingerprint: 1 });
 findingSchema.index({ scan: 1, fingerprint: 1 }, { unique: true, name: "scan_fingerprint_unique" });
+findingSchema.index({ organization: 1, scan: 1, status: 1 });
 findingSchema.index({ organization: 1, owner: 1, repo: 1 });
 
 module.exports = mongoose.models.Finding || mongoose.model("Finding", findingSchema);

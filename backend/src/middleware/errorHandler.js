@@ -1,6 +1,8 @@
 const logger = require("../config/logger");
+const { fromOctokitError } = require("../utils/github-rate-limit");
 
 const errorHandler = (err, req, res, next) => {
+  err = fromOctokitError(err) || err;
   if (err.code === 11000) {
     err.statusCode = 409;
     err.code = "RESOURCE_CONFLICT";
@@ -20,6 +22,13 @@ const errorHandler = (err, req, res, next) => {
         .replace(/mongodb(?:\+srv)?:\/\/\S+/gi, "[redacted MongoDB URI]")
         .slice(0, 240)}`;
   logger.error(`${code} status=${statusCode} requestId=${req.requestId || "unknown"}${diagnostic}`);
+  if (statusCode >= 500 || err.name === "NvidiaError") {
+    void require("../services/operations.service").recordSignal(err.name === "NvidiaError" ? "provider_failure" : "request_failure");
+  }
+
+  if (Number.isSafeInteger(err.retryAfterSeconds) && err.retryAfterSeconds > 0) {
+    res.set("Retry-After", String(err.retryAfterSeconds));
+  }
 
   res.status(statusCode).json({
     success: false,
@@ -29,6 +38,9 @@ const errorHandler = (err, req, res, next) => {
         parserError ? "Request must be valid JSON within the size limit" : statusCode >= 500
           ? "Internal server error"
           : err.message,
+      ...(Number.isSafeInteger(err.retryAfterSeconds) && err.retryAfterSeconds > 0
+        ? { retryAfterSeconds: err.retryAfterSeconds }
+        : {}),
     },
   });
 };

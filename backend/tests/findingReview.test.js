@@ -4,11 +4,13 @@ jest.mock("../src/middleware/auth.middleware", () => ({ requireAuth: (req, res, 
 jest.mock("../src/middleware/scanAccess.middleware", () => ({ requireScanMember: (req, res, next) => next() }));
 jest.mock("../src/models/Scan", () => ({ findById: jest.fn() }));
 jest.mock("../src/models/Finding", () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 
 const express = require("express");
 const request = require("supertest");
 const Scan = require("../src/models/Scan");
 const Finding = require("../src/models/Finding");
+const { recordAuditEvent } = require("../src/services/audit.service");
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => { req.user = { _id: "507f1f77bcf86cd799439011" }; next(); });
@@ -19,7 +21,7 @@ beforeEach(() => {
   Scan.findById.mockResolvedValue({ _id: "507f1f77bcf86cd799439012", organization: "org" });
   Finding.findOne.mockResolvedValue({ _id: "507f1f77bcf86cd799439013" });
   Finding.findOneAndUpdate.mockImplementation(async (filter, update) => ({
-    _id: filter._id, status: update.$set.status, statusReason: update.$set.statusReason,
+    _id: filter._id, organization: "org", scan: filter.scan, owner: "team", repo: "project", status: update.$set.status, statusReason: update.$set.statusReason,
     reviewedBy: update.$set.reviewedBy, reviewedAt: update.$set.reviewedAt,
     reviewHistory: [update.$push.reviewHistory],
   }));
@@ -38,6 +40,7 @@ test("review updates save the decision and append an audit entry", async () => {
     { returnDocument: "after", runValidators: true },
   );
   expect(response.body.data.reviewHistory[0].reviewedAt).toBeTruthy();
+  expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "finding.reviewed", details: expect.objectContaining({ status: "dismissed" }) }));
 });
 
 test("review updates reject a missing reason", async () => {

@@ -18,7 +18,7 @@ const startServer = async () => {
 
   const server = app.listen(env.port, env.demoMode ? "127.0.0.1" : undefined, () => {
     logger.info(
-      `SecurePatch backend listening on port ${env.port}${env.demoMode ? " (local synthetic demo mode)" : ""}`
+      `AVPR-Net backend listening on port ${env.port}${env.demoMode ? " (local synthetic demo mode)" : ""}`
     );
   });
 

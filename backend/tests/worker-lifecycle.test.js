@@ -1,14 +1,18 @@
+jest.mock("../src/models/Organization", () => ({ exists: jest.fn().mockResolvedValue(true) }));
 jest.mock("mongoose", () => ({ connection: { readyState: 1 } }));
 jest.mock("../src/config/env", () => ({}));
 jest.mock("../src/config/redis", () => ({ redisConnection: null }));
 jest.mock("../src/queues/scanQueue", () => ({ SCAN_QUEUE_NAME: "test", SCAN_QUEUE_REGION: "bom1" }));
 jest.mock("../src/models/Scan", () => ({ findOneAndUpdate: jest.fn() }));
-jest.mock("../src/models/Finding", () => ({ bulkWrite: jest.fn(), aggregate: jest.fn() }));
+jest.mock("../src/models/Finding", () => ({ init: jest.fn().mockResolvedValue(), bulkWrite: jest.fn(), aggregate: jest.fn() }));
 jest.mock("../src/services/workspace.service", () => ({ createEphemeralWorkspace: jest.fn() }));
+jest.mock("../src/services/notification.service", () => ({ notifyScanResult: jest.fn().mockResolvedValue({ delivered: 1 }) }));
 jest.mock("../src/scanners/orchestrator", () => jest.fn());
 jest.mock("../src/scanners/semgrep.adapter", () => jest.fn());
 jest.mock("../src/scanners/bandit.adapter", () => jest.fn());
 const Scan = require("../src/models/Scan");
+const Finding = require("../src/models/Finding");
+const { notifyScanResult } = require("../src/services/notification.service");
 const Orchestrator = require("../src/scanners/orchestrator");
 const SemgrepAdapter = require("../src/scanners/semgrep.adapter");
 const BanditAdapter = require("../src/scanners/bandit.adapter");
@@ -51,6 +55,7 @@ test("scanner-wide failure records failure and releases the active key", async (
   expect(Scan.findOneAndUpdate.mock.calls[1][1].$set).toMatchObject({ status: "failed", activeKey: null, leaseToken: null });
   expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.scannerErrors).toHaveLength(1);
   expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(notifyScanResult).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", _id: "scan" }));
 });
 test("successful empty analysis pins the archive and finalizes only a still-active job", async () => {
   await expect(processScanJob(job)).resolves.toMatchObject({ success: true, summary: { total: 0 } });
@@ -58,7 +63,50 @@ test("successful empty analysis pins the archive and finalizes only a still-acti
   const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
   expect(Scan.findOneAndUpdate.mock.calls[1][0]).toEqual({ _id: "scan", status: "running", cancelledAt: null, leaseToken: token });
   expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.leaseToken).toBeNull();
+  expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.scannerPolicyHash).toMatch(/^[a-f0-9]{64}$/);
   expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(notifyScanResult).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", scannersUsed: ["semgrep"] }));
+});
+test("notification failures cannot change a completed scan or leak provider error text", async () => {
+  notifyScanResult.mockRejectedValueOnce(new Error("private notification database detail"));
+  const log = jest.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await expect(processScanJob(job)).resolves.toMatchObject({ success: true, summary: { total: 0 } });
+    expect(Scan.findOneAndUpdate.mock.calls[1][1].$set).toMatchObject({ status: "completed", activeKey: null, leaseToken: null });
+    expect(log).toHaveBeenCalledWith("[ScanWorker] Notification delivery failed for scan scan (Error).");
+    expect(log.mock.calls.flat().join(" ")).not.toContain("private notification database detail");
+  } finally { log.mockRestore(); }
+});
+test("scan findings persist reviewed deterministic guidance with the original rule evidence", async () => {
+  runAll.mockResolvedValue({ scannersRun: ["semgrep"], scannerErrors: [], coverage: [], results: [{ scanner: "semgrep", findings: [{
+    path: "src/query.js", start: { line: 12, col: 1 }, end: { line: 12 }, check_id: "securepatch.js.sql-concatenation",
+    extra: { severity: "ERROR", message: "Parameterize SQL queries instead of concatenating values.", lines: "db.query(sql + input)", metadata: { cwe: ["CWE-89"] } },
+  }] }] });
+  Finding.aggregate.mockResolvedValue([]);
+  await processScanJob(job);
+  const inserted = Finding.bulkWrite.mock.calls[0][0][0].updateOne.update.$setOnInsert;
+  expect(inserted).toMatchObject({
+    scanner: "semgrep", ruleId: "securepatch.js.sql-concatenation", filePath: "src/query.js", startLine: 12,
+    remediationGuidance: { source: "deterministic", version: "securepatch-guidance-v1", title: "Bind SQL parameters" },
+  });
+  expect(inserted.evidenceSnippet).toContain("db.query(sql + input)");
+});
+test("a resolved issue found again is inserted as open evidence for the new scan without rewriting history", async () => {
+  runAll.mockResolvedValue({ scannersRun: ["semgrep"], scannerErrors: [], coverage: [], results: [{ scanner: "semgrep", findings: [{
+    path: "src/query.js", start: { line: 12, col: 1 }, end: { line: 12 }, check_id: "securepatch.js.sql-concatenation",
+    extra: { severity: "ERROR", message: "Parameterize SQL queries instead of concatenating values.", lines: "db.query(sql + input)", metadata: { cwe: ["CWE-89"] } },
+  }] }] });
+  Finding.aggregate.mockImplementation(async pipeline => [{ _id: pipeline[0].$match.correlationKey.$in[0], review: {
+    status: "resolved", statusReason: "Fixed in a prior change", reviewedAt: new Date("2026-10-20T00:00:00Z"),
+  } }]);
+
+  await processScanJob(job);
+
+  const operation = Finding.bulkWrite.mock.calls[0][0][0].updateOne;
+  expect(operation.filter).toMatchObject({ scan: "scan" });
+  expect(operation.update.$setOnInsert).toMatchObject({ scan: "scan", status: "open" });
+  expect(operation.update.$setOnInsert).not.toHaveProperty("statusReason");
+  expect(operation.update.$setOnInsert).not.toHaveProperty("reviewHistory");
 });
 test("cancellation wins a race with successful scanner completion", async () => {
   Scan.findOneAndUpdate.mockResolvedValueOnce(record).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
@@ -66,6 +114,7 @@ test("cancellation wins a race with successful scanner completion", async () => 
   const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
   expect(Scan.findOneAndUpdate.mock.calls[2][0]).toMatchObject({ status: "running", cancelledAt: null, leaseToken: token });
   expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(notifyScanResult).not.toHaveBeenCalled();
 });
 test("a stale worker cannot finalize or fail a scan after its lease is reclaimed", async () => {
   let currentToken;
@@ -86,4 +135,11 @@ test("a stale worker cannot finalize or fail a scan after its lease is reclaimed
   expect(oldToken).not.toBe("new-worker-lease");
   expect(Scan.findOneAndUpdate.mock.calls.slice(1).every(([filter]) => filter.leaseToken === oldToken)).toBe(true);
   expect(cleanup).toHaveBeenCalledTimes(1);
+});
+
+test("a queued job for a deleting organization cannot download source or run scanners", async () => {
+  require("../src/models/Organization").exists.mockResolvedValueOnce(false);
+  expect(await processScanJob(job)).toMatchObject({ skipped: true });
+  expect(Scan.findOneAndUpdate).not.toHaveBeenCalled();
+  expect(createEphemeralWorkspace).not.toHaveBeenCalled();
 });
