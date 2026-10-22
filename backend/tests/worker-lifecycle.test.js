@@ -6,10 +6,14 @@ jest.mock("../src/models/Scan", () => ({ findOneAndUpdate: jest.fn() }));
 jest.mock("../src/models/Finding", () => ({ bulkWrite: jest.fn(), aggregate: jest.fn() }));
 jest.mock("../src/services/workspace.service", () => ({ createEphemeralWorkspace: jest.fn() }));
 jest.mock("../src/scanners/orchestrator", () => jest.fn());
+jest.mock("../src/scanners/semgrep.adapter", () => jest.fn());
+jest.mock("../src/scanners/bandit.adapter", () => jest.fn());
 const Scan = require("../src/models/Scan");
 const Orchestrator = require("../src/scanners/orchestrator");
+const SemgrepAdapter = require("../src/scanners/semgrep.adapter");
+const BanditAdapter = require("../src/scanners/bandit.adapter");
 const { createEphemeralWorkspace } = require("../src/services/workspace.service");
-const { processScanJob } = require("../src/workers/scanWorker");
+const { processScanJob, reportScannerReadiness } = require("../src/workers/scanWorker");
 let record, cleanup, runAll;
 const job = { id: "job", data: { scanId: "scan", organizationId: "org", installationId: "1", owner: "owner", repo: "repo" } };
 beforeEach(() => {
@@ -23,6 +27,20 @@ test("a duplicate or cancelled job that cannot claim a lease does not run scanne
   Scan.findOneAndUpdate.mockResolvedValue(null);
   expect(await processScanJob(job)).toMatchObject({ skipped: true });
   expect(createEphemeralWorkspace).not.toHaveBeenCalled();
+});
+test("worker startup reports each scanner's installed or unavailable state", async () => {
+  SemgrepAdapter.mockImplementation(() => ({ name: "semgrep", version: "1.181.0", isAvailable: jest.fn().mockResolvedValue(true) }));
+  BanditAdapter.mockImplementation(() => ({ name: "bandit", version: null, isAvailable: jest.fn().mockResolvedValue(false) }));
+  const info = jest.spyOn(console, "info").mockImplementation(() => {});
+  const error = jest.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await reportScannerReadiness();
+    expect(info).toHaveBeenCalledWith("[ScanWorker] semgrep scanner ready (1.181.0).");
+    expect(error).toHaveBeenCalledWith("[ScanWorker] bandit scanner unavailable; scan coverage will be partial.");
+  } finally {
+    info.mockRestore();
+    error.mockRestore();
+  }
 });
 test("scanner-wide failure records failure and releases the active key", async () => {
   runAll.mockRejectedValue(Object.assign(new Error("All failed"), { scannerErrors: [{ scanner: "semgrep", message: "Failed" }] }));

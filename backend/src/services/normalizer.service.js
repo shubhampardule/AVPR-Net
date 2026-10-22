@@ -24,6 +24,9 @@ class NormalizerService {
   }
 
   static cleanFilePath(fullPath, workspacePath) {
+    if (!path.isAbsolute(fullPath) && !path.win32.isAbsolute(fullPath)) {
+      return String(fullPath).replace(/\\/g, "/").replace(/^\.\//, "");
+    }
     let rel = path.relative(workspacePath, fullPath).replace(/\\/g, "/");
     if (rel.startsWith("./")) rel = rel.substring(2);
     return rel;

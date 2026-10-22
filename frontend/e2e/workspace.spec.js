@@ -191,6 +191,60 @@ test("scan history follows the polled status and pinned commit", async ({ page }
   await expect(page.getByRole("combobox", { name: "Scan history" }).getByRole("option", { selected: true })).toHaveText(/completed · abc1234/);
 });
 
+test("scan details explain the pinned run, partial coverage, and finding next steps", async ({ page }) => {
+  const scan = {
+    _id: "scan-evidence", owner: "team", repo: "project", organization: "test-org",
+    createdAt: "2026-10-20T12:00:00.000Z", startedAt: "2026-10-20T12:01:00.000Z",
+    completedAt: "2026-10-20T12:03:00.000Z", branch: "main",
+    commitSha: "abc123456789abcdef0123456789abcdef012345", status: "completed",
+    includeDependencies: false, scannersUsed: ["semgrep"],
+    scannerErrors: [{ scanner: "bandit", message: "Python scanner unavailable" }],
+    coverage: [{ scanner: "semgrep", scanned: 112, skipped: 3 }],
+    summary: { total: 1 },
+  };
+  const finding = {
+    _id: "finding-evidence", scan: scan._id, organization: "test-org",
+    owner: "team", repo: "project", title: "Untrusted query input",
+    severity: "high", riskCategory: "high", riskScore: 7.5,
+    riskFactors: { severity: 7.5, exploitability: 9, occurrence: 2, businessImpact: 7 },
+    scanner: "semgrep", cwe: "CWE-89", ruleId: "securepatch.js.sql-concatenation",
+    filePath: "src/db.js", startLine: 24, status: "open",
+    description: "Untrusted input is concatenated into a query.",
+    evidenceSnippet: "db.query(`SELECT * FROM users WHERE id=${id}`)",
+    remediation: "Use a parameterized query.",
+  };
+  await page.route("**/api/v1/scans/organizations/test-org/repositories/team/project", route =>
+    route.fulfill({ json: { success: true, data: { scans: [scan] } } }));
+  await page.route(`**/api/v1/scans/${scan._id}/findings**`, route =>
+    route.fulfill({ json: { success: true, data: { findings: [finding], pagination: { page: 1, total: 1, totalPages: 1 } } } }));
+  await page.route(`**/api/v1/scans/${scan._id}`, route =>
+    route.fulfill({ json: { success: true, data: scan } }));
+
+  await page.goto(`/github/team/project/scan?scanId=${scan._id}`);
+  await expect(page.getByText("Finished with partial scanner coverage")).toBeVisible();
+  await expect(page.getByText("team/project", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("main", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "View scanned commit abc123456789" }))
+    .toHaveAttribute("href", `https://github.com/team/project/commit/${scan.commitSha}`);
+  await expect(page.getByText("Semgrep rules: 112 files checked, 3 skipped")).toBeVisible();
+  await expect(page.getByText("bandit: Python scanner unavailable")).toBeVisible();
+  const dateLabel = value => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  await expect(page.getByText(dateLabel(scan.startedAt))).toBeVisible();
+  await expect(page.getByText(dateLabel(scan.completedAt))).toBeVisible();
+
+  await expect(page.getByText("Untrusted query input")).toBeVisible();
+  await expect(page.getByText("src/db.js:24")).toBeVisible();
+  await expect(page.getByText("Rule: securepatch.js.sql-concatenation")).toBeVisible();
+  await expect(page.locator('[title="Scanner severity: high"]')).toBeVisible();
+  await page.getByRole("button", { name: "Expand finding" }).click();
+  await expect(page.getByText(/Static analysis matched a security rule in this code/)).toBeVisible();
+  await expect(page.getByText(/Review the cited lines and the data flowing into them/)).toBeVisible();
+  await expect(page.getByText("Automated signal · not yet verified by a person")).toBeVisible();
+  await expect(page.getByText("Deterministic Risk Factors")).toBeVisible();
+  await expect(page.getByRole("link", { name: "View exact scanned source" }))
+    .toHaveAttribute("href", `https://github.com/team/project/blob/${scan.commitSha}/src/db.js#L24`);
+});
+
 test("repository CTAs lead directly to the supported sign-in providers", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
@@ -315,7 +369,7 @@ test("finding filters use server pagination and review changes are submitted", a
   await page.getByRole("button", { name: "Expand finding", exact: true }).click();
   await page.getByLabel("Review status").selectOption("acknowledged");
   await page.getByLabel("Reason").fill("Confirmed, tracking in sprint.");
-  await page.getByRole("button", { name: "Save review" }).click();
+  await page.getByRole("button", { name: "Save decision" }).click();
   await expect.poll(() => savedReview?.status).toBe("acknowledged");
   expect(savedReview.reason).toBe("Confirmed, tracking in sprint.");
   await page.getByRole("button", { name: "Next" }).click();
@@ -336,6 +390,8 @@ test("GitHub installation can be connected and repository access modal can be cl
   });
   await page.goto("/github");
   await expect(page.getByRole("heading", { name: "Connect your GitHub account" })).toBeVisible();
+  await expect(page.getByText(/App installation is separate.*install AVPR-Net on the GitHub account that owns the repositories/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute("href", "https://github.com/apps/avpr-net/installations/new");
   await page.getByLabel("GitHub installation").selectOption("10");
   await page.getByRole("button", { name: "Connect installation" }).click();
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();

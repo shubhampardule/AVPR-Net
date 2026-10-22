@@ -5,6 +5,8 @@ const path = require("node:path");
 const Orchestrator = require("../scanners/orchestrator");
 const Semgrep = require("../scanners/semgrep.adapter");
 const Bandit = require("../scanners/bandit.adapter");
+const NormalizerService = require("../services/normalizer.service");
+const { cleanupWslWorkspace } = require("../scanners/process");
 
 const expectedSemgrep = new Set([
   "unsafe.js:securepatch.js.dynamic-eval",
@@ -25,7 +27,9 @@ async function main() {
   const fixtureRoot = process.argv[2] || "/fixtures";
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "securepatch-sast-v1-"));
   try {
-    const repositoryFixtureScan = await new Orchestrator([new Semgrep(), new Bandit()]).runAll(fixtureRoot);
+    let repositoryFixtureScan;
+    try { repositoryFixtureScan = await new Orchestrator([new Semgrep(), new Bandit()]).runAll(fixtureRoot); }
+    finally { await cleanupWslWorkspace(fixtureRoot); }
     assert.equal(repositoryFixtureScan.scannerErrors.length, 0, "Scanners must run on the fixture directory");
     const fixtureFindings = repositoryFixtureScan.results.flatMap((item) => item.findings);
     assert.deepEqual(fixtureFindings, [], "Fixture-only source files must not appear as product findings in a normal repository scan");
@@ -54,12 +58,16 @@ async function main() {
     }
     assert.deepEqual(missedRules, [], `Semgrep missed baseline cases: ${missedRules.join(", ")}`);
     assert.deepEqual(unexpectedSemgrep, [], `Semgrep produced findings outside baseline cases: ${unexpectedSemgrep.join(", ")}`);
+    assert.ok(NormalizerService.normalize("semgrep", semgrep, workspace).some((finding) => finding.filePath === "unsafe.js"),
+      "Semgrep paths must normalize to workspace-relative repository paths");
 
     const bandit = result.results.find((item) => item.scanner === "bandit")?.findings || [];
     const banditUnsafe = bandit.filter((finding) => path.basename(finding.filename) === "unsafe.py");
     const banditFixed = bandit.filter((finding) => path.basename(finding.filename) === "fixed.py");
     assert.ok(banditUnsafe.some((finding) => finding.test_id === "B602"), "Bandit must detect the shell=True contract");
     assert.deepEqual(banditFixed, [], "Bandit must not report the safe Python fixture");
+    assert.ok(NormalizerService.normalize("bandit", bandit, workspace).some((finding) => finding.filePath === "unsafe.py"),
+      "Bandit paths must normalize to workspace-relative repository paths");
 
     console.log(JSON.stringify({
       status: "passed",
@@ -73,6 +81,7 @@ async function main() {
       interpretation: "Synthetic regression coverage only; these counts are not real-world precision or recall estimates.",
     }));
   } finally {
+    await cleanupWslWorkspace(workspace);
     await fs.rm(workspace, { recursive: true, force: true });
   }
 }

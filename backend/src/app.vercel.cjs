@@ -1277,6 +1277,15 @@ var require_Finding = __commonJS({
         statusReason: { type: String, maxlength: 1e3, default: "" },
         reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
         reviewedAt: { type: Date, default: null },
+        reviewHistory: {
+          type: [{
+            status: { type: String, enum: ["open", "acknowledged", "dismissed", "resolved"], required: true },
+            reason: { type: String, maxlength: 1e3, required: true },
+            reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+            reviewedAt: { type: Date, required: true }
+          }],
+          default: []
+        },
         correlationKey: { type: String, default: null, index: true },
         provenance: { type: [mongoose.Schema.Types.Mixed], default: [] },
         scan: {
@@ -1579,6 +1588,20 @@ var require_github_service = __commonJS({
       if (!/^[a-f0-9]{40}$/.test(data.sha)) throw bad("GitHub returned an invalid commit", 502);
       return { sha: data.sha, branch: metadata.default_branch, permissions: metadata.permissions };
     }
+    async function getRepositoryMetadata(installationId, owner, repo) {
+      repository(owner, repo);
+      const client = await getInstallationOctokit(installationId);
+      const { data } = await client.request("GET /repos/{owner}/{repo}", { owner, repo });
+      return {
+        id: data.id,
+        name: data.name,
+        fullName: data.full_name,
+        owner: data.owner?.login || owner,
+        private: Boolean(data.private),
+        defaultBranch: data.default_branch || null,
+        htmlUrl: data.html_url || null
+      };
+    }
     async function getRepositoryFiles(installationId, owner, repo) {
       const commit = await resolveCommit(installationId, owner, repo);
       const client = await getInstallationOctokit(installationId);
@@ -1602,7 +1625,7 @@ var require_github_service = __commonJS({
       if (buffer.includes(0)) throw bad("Binary files are not supported", 415, "BINARY_FILE");
       return { path: data.path, name: data.name, size: data.size, sha: data.sha, content: buffer.toString("utf8") };
     }
-    module2.exports = { getRepositories, resolveCommit, getRepositoryFiles, getFileContent };
+    module2.exports = { getRepositories, getRepositoryMetadata, resolveCommit, getRepositoryFiles, getFileContent };
   }
 });
 
@@ -3155,7 +3178,7 @@ var require_github_routes = __commonJS({
     var { requireOrganizationMember } = require_organization_middleware();
     var { requireRole } = require_rbac_middleware();
     var { connectGitHubInstallation, getGitHubStatus } = require_github_controller();
-    var { getRepositories, getRepositoryFiles, getFileContent } = require_github_service();
+    var { getRepositories, getRepositoryMetadata, getRepositoryFiles, getFileContent } = require_github_service();
     var Organization = require_Organization();
     var { optionalCommitSha } = require_input();
     var router = express2.Router();
@@ -3228,6 +3251,22 @@ var require_github_routes = __commonJS({
             },
             message: "GitHub repositories fetched successfully"
           });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+    router.get(
+      "/organizations/:organizationId/repositories/:owner/:repo/metadata",
+      requireAuth,
+      requireOrganizationMember,
+      async (req, res, next) => {
+        try {
+          const organization = await Organization.findById(req.params.organizationId);
+          if (!organization) return res.status(404).json({ success: false, error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+          if (!organization.githubInstallationId) return res.status(404).json({ success: false, error: { code: "GITHUB_NOT_CONNECTED", message: "GitHub is not connected to this organization" } });
+          const repository = await getRepositoryMetadata(organization.githubInstallationId, req.params.owner, req.params.repo);
+          return res.status(200).json({ success: true, data: { repository }, message: "Repository details fetched successfully" });
         } catch (error) {
           next(error);
         }
@@ -3399,6 +3438,1309 @@ var require_redis = __commonJS({
   }
 });
 
+// src/config/scan-timing.js
+var require_scan_timing = __commonJS({
+  "src/config/scan-timing.js"(exports2, module2) {
+    var SCAN_JOB_TIMEOUT_MS = 10 * 60 * 1e3;
+    var SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS = 660;
+    var SCAN_RECORD_DEADLINE_MS = 25 * 60 * 1e3;
+    if (SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 <= SCAN_JOB_TIMEOUT_MS || SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 + SCAN_JOB_TIMEOUT_MS >= SCAN_RECORD_DEADLINE_MS) {
+      throw new Error("Scan record deadline must allow queue redelivery and another full worker attempt");
+    }
+    module2.exports = {
+      SCAN_JOB_TIMEOUT_MS,
+      SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS,
+      SCAN_RECORD_DEADLINE_MS
+    };
+  }
+});
+
+// src/services/scan-context.js
+var require_scan_context = __commonJS({
+  "src/services/scan-context.js"(exports2, module2) {
+    module2.exports = new (require("node:async_hooks")).AsyncLocalStorage();
+  }
+});
+
+// src/services/workspace.service.js
+var require_workspace_service = __commonJS({
+  "src/services/workspace.service.js"(exports2, module2) {
+    var os = require("node:os");
+    var fs = require("node:fs");
+    var path = require("node:path");
+    var AdmZip = require("adm-zip");
+    var { getInstallationOctokit } = require_github();
+    var { repository, bad } = require_input();
+    var context = require_scan_context();
+    var MAX_ARCHIVE = 50 * 1024 * 1024;
+    var MAX_EXPANDED = 200 * 1024 * 1024;
+    async function download(installationId, owner, repo, ref) {
+      const client = await getInstallationOctokit(installationId);
+      const { token } = await client.auth({ type: "installation" });
+      const signal = AbortSignal.any([AbortSignal.timeout(3e4), ...context.getStore()?.signal ? [context.getStore().signal] : []]);
+      let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "SecurePatch" },
+        redirect: "manual",
+        signal
+      });
+      if ([301, 302, 307, 308].includes(response.status)) {
+        const url = new URL(response.headers.get("location"));
+        await response.body?.cancel();
+        if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+        response = await fetch(url, { redirect: "error", signal });
+      }
+      if (!response.ok || !response.body) throw bad("GitHub archive download failed", 502);
+      if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) {
+        await response.body.cancel();
+        throw bad("Repository archive exceeds 50 MiB", 413);
+      }
+      const parts = [];
+      let bytes = 0;
+      for await (const part of response.body) {
+        bytes += part.byteLength;
+        if (bytes > MAX_ARCHIVE) {
+          throw bad("Repository archive exceeds 50 MiB", 413);
+        }
+        parts.push(Buffer.from(part));
+      }
+      return Buffer.concat(parts);
+    }
+    async function createEphemeralWorkspace(installationId, owner, repo, ref) {
+      repository(owner, repo);
+      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
+      const workspacePath = path.join(base, "workspace");
+      const cleanup = () => {
+        const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
+        fs.rmSync(base, { recursive: true, force: true });
+      };
+      try {
+        const zip = new AdmZip(await download(installationId, owner, repo, ref));
+        const entries = zip.getEntries();
+        if (entries.length > 2e4) throw bad("Repository contains too many archive entries", 413);
+        let expanded = 0;
+        for (const entry of entries) {
+          const name = entry.entryName;
+          expanded += entry.header.size;
+          if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
+          if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || (entry.attr >>> 16 & 61440) === 40960) throw bad("Unsafe archive path or symbolic link");
+        }
+        fs.mkdirSync(workspacePath);
+        zip.extractAllTo(workspacePath, false);
+        const names = fs.readdirSync(workspacePath);
+        const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
+        return { workspacePath: nested ? path.join(workspacePath, names[0]) : workspacePath, cleanup };
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
+    }
+    module2.exports = { createEphemeralWorkspace, download };
+  }
+});
+
+// src/scanners/base.adapter.js
+var require_base_adapter = __commonJS({
+  "src/scanners/base.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = class _BaseScannerAdapter {
+      constructor(name) {
+        if (new.target === _BaseScannerAdapter) {
+          throw new TypeError("Cannot construct BaseScannerAdapter instances directly");
+        }
+        this.name = name;
+      }
+      /**
+       * Check if scanner binary/tool is available on host system
+       * @returns {Promise<boolean>}
+       */
+      async isAvailable() {
+        throw new Error("Method 'isAvailable()' must be implemented.");
+      }
+      /**
+       * Execute scanner against ephemeral workspace directory
+       * @param {string} workspacePath - Absolute path to extracted repository code
+       * @returns {Promise<Array<Object>>} Array of raw scanner finding objects
+       */
+      async scan(workspacePath) {
+        throw new Error("Method 'scan()' must be implemented.");
+      }
+    };
+    module2.exports = BaseScannerAdapter;
+  }
+});
+
+// src/scanners/process.js
+var require_process = __commonJS({
+  "src/scanners/process.js"(exports2, module2) {
+    var { execFile } = require("node:child_process");
+    var os = require("node:os");
+    var path = require("node:path");
+    function scannerEnv() {
+      const scannerBinDir = process.env.SECUREPATCH_SCANNER_BIN_DIR;
+      const inheritedPath = process.env.PATH || process.env.Path;
+      const searchPath = [scannerBinDir, inheritedPath].filter(Boolean).join(path.delimiter);
+      return Object.fromEntries(Object.entries({
+        PATH: searchPath,
+        SystemRoot: process.env.SystemRoot,
+        TEMP: os.tmpdir(),
+        TMP: os.tmpdir(),
+        LANG: "C.UTF-8",
+        SEMGREP_SEND_METRICS: "off",
+        SEMGREP_ENABLE_VERSION_CHECK: "0",
+        SEMGREP_SETTINGS_FILE: path.join(os.tmpdir(), "securepatch-semgrep-settings.yml"),
+        SEMGREP_LOG_FILE: path.join(os.tmpdir(), "securepatch-semgrep.log"),
+        SEMGREP_VERSION_CACHE_PATH: path.join(os.tmpdir(), "securepatch-semgrep-version")
+      }).filter(([, value]) => value));
+    }
+    function run(binary, args, { cwd, timeout = 12e4 } = {}) {
+      return new Promise((resolve, reject) => {
+        let child;
+        child = execFile(binary, args, {
+          cwd,
+          env: scannerEnv(),
+          timeout,
+          killSignal: "SIGKILL",
+          detached: process.platform !== "win32",
+          signal: require_scan_context().getStore()?.signal,
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true
+        }, (error, stdout, stderr) => {
+          const exitCode = error ? error.code : 0;
+          if (error && ![0, 1].includes(exitCode)) {
+            if (process.platform !== "win32" && child?.pid) {
+              try {
+                process.kill(-child.pid, "SIGKILL");
+              } catch {
+              }
+            } else if (process.platform === "win32" && child?.pid) {
+              execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {
+              });
+            }
+            return reject(Object.assign(
+              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
+              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
+            ));
+          }
+          resolve({ stdout, stderr, exitCode });
+        });
+      });
+    }
+    async function scanJSON(binary, args, cwd) {
+      const { stdout } = await run(binary, args, { cwd });
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        throw new Error(`${binary} returned malformed JSON`);
+      }
+      if (!parsed || !Array.isArray(parsed.results) || parsed.errors !== void 0 && (!Array.isArray(parsed.errors) || parsed.errors.length)) {
+        throw new Error(`${binary} reported analysis errors or an invalid result`);
+      }
+      return parsed;
+    }
+    module2.exports = { run, scanJSON, scannerEnv };
+    module2.exports.coverage = (paths, root, skipped = null) => ({
+      scanned: paths.length,
+      skipped,
+      filesHash: require("node:crypto").createHash("sha256").update(JSON.stringify(paths.map((p) => path.relative(root, p).replace(/\\/g, "/")).sort())).digest("hex")
+    });
+  }
+});
+
+// src/scanners/semgrep.adapter.js
+var require_semgrep_adapter = __commonJS({
+  "src/scanners/semgrep.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = require_base_adapter();
+    var { run, scanJSON } = require_process();
+    var Adapter = class extends BaseScannerAdapter {
+      constructor() {
+        super("semgrep");
+      }
+      async isAvailable() {
+        try {
+          this.version = (await run("semgrep", ["--version"], { timeout: 5e3 })).stdout.trim();
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      async scan(workspacePath) {
+        const parsed = await scanJSON("semgrep", ["scan", "--config", require("node:path").join(__dirname, "rules.yml"), "--json", "--quiet", "--metrics", "off", "--disable-version-check", workspacePath], workspacePath);
+        this.coverage = require_process().coverage(parsed.paths?.scanned || [], workspacePath, parsed.paths?.skipped?.length ?? null);
+        return parsed.results;
+      }
+    };
+    module2.exports = Adapter;
+  }
+});
+
+// src/scanners/bandit.adapter.js
+var require_bandit_adapter = __commonJS({
+  "src/scanners/bandit.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = require_base_adapter();
+    var { run, scanJSON } = require_process();
+    var Adapter = class extends BaseScannerAdapter {
+      constructor() {
+        super("bandit");
+      }
+      async isAvailable() {
+        try {
+          this.version = (await run("bandit", ["--version"], { timeout: 5e3 })).stdout.trim();
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      async scan(workspacePath) {
+        const parsed = await scanJSON("bandit", ["-r", workspacePath, "-f", "json", "-q"], workspacePath);
+        this.coverage = require_process().coverage(Object.keys(parsed.metrics || {}).filter((key) => key !== "_totals"), workspacePath);
+        return parsed.results;
+      }
+    };
+    module2.exports = Adapter;
+  }
+});
+
+// src/scanners/repository-data.adapter.js
+var require_repository_data_adapter = __commonJS({
+  "src/scanners/repository-data.adapter.js"(exports2, module2) {
+    var fs = require("node:fs/promises");
+    var path = require("node:path");
+    var Base = require_base_adapter();
+    var patterns = [
+      ["github-token", /\bgh[pousr]_[A-Za-z0-9_]{25,}\b/g],
+      ["nvidia-token", /\bnvapi-[A-Za-z0-9_-]{25,}\b/g],
+      ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
+      ["aws-access-id", /\bAKIA[A-Z0-9]{16}\b/g]
+    ];
+    async function files(root) {
+      const out = [];
+      async function walk(dir) {
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          require_scan_context().getStore()?.signal?.throwIfAborted();
+          if (["node_modules", ".git", "vendor", "dist", "build", ".venv"].includes(entry.name) || entry.isSymbolicLink()) continue;
+          const file = path.join(dir, entry.name);
+          if (entry.isDirectory()) await walk(file);
+          else if (entry.isFile() && (await fs.stat(file)).size <= 1024 * 1024) out.push(file);
+          if (out.length > 2e4) throw new Error("Repository data scan file limit exceeded");
+        }
+      }
+      await walk(root);
+      return out;
+    }
+    function finding(scanner, filePath, line, ruleId, title, cwe, severity, description) {
+      return {
+        scanner,
+        filePath,
+        startLine: line,
+        endLine: line,
+        ruleId,
+        title,
+        cwe,
+        severity,
+        description,
+        evidenceSnippet: "Sensitive values are not retained.",
+        remediation: ""
+      };
+    }
+    var SecretsAdapter = class extends Base {
+      constructor() {
+        super("secrets");
+        this.version = "securepatch-patterns-v1";
+      }
+      async isAvailable() {
+        return true;
+      }
+      async scan(root) {
+        const entries = await files(root);
+        const results = [];
+        for (const file of entries) {
+          const text = await fs.readFile(file, "utf8");
+          if (text.includes("\0")) continue;
+          for (const [id, regex] of patterns) {
+            regex.lastIndex = 0;
+            for (const match of text.matchAll(regex)) {
+              if (results.length >= 5e3) throw new Error("Credential pattern finding limit exceeded");
+              const line = text.slice(0, match.index).split("\n").length;
+              results.push(finding(
+                "secrets",
+                path.relative(root, file).replace(/\\/g, "/"),
+                line,
+                id,
+                "Possible credential material; validate and rotate if real",
+                "CWE-798",
+                "high",
+                `Pattern ${id} matched. This is unverified and may be a synthetic example. The matched value was not stored.`
+              ));
+            }
+          }
+        }
+        this.coverage = require_process().coverage(entries, root);
+        return results;
+      }
+    };
+    var DependencyAdapter = class extends Base {
+      constructor() {
+        super("dependency");
+        this.version = "osv-npm-lock-v1";
+      }
+      async isAvailable() {
+        return true;
+      }
+      async scan(root) {
+        const locks = (await files(root)).filter((p) => path.basename(p) === "package-lock.json");
+        const results = [];
+        let queried = 0;
+        for (const file of locks) {
+          let lock;
+          try {
+            lock = JSON.parse(await fs.readFile(file, "utf8"));
+          } catch {
+            throw new Error("Invalid npm lockfile");
+          }
+          if (![2, 3].includes(lock.lockfileVersion) || !lock.packages) throw new Error("Dependency checks require npm lockfile version 2 or 3");
+          const packages = [...new Map(Object.entries(lock.packages).filter(([key, p]) => key.includes("node_modules/") && typeof p.version === "string").map(([key, p]) => {
+            const name = p.name || key.split("node_modules/").pop();
+            return [`${name}@${p.version}`, { name, version: p.version }];
+          })).values()];
+          if (queried + packages.length > 2e3) throw new Error("Dependency checks are capped at 2000 packages per scan");
+          for (let start = 0; start < packages.length; start += 100) {
+            const batch = packages.slice(start, start + 100);
+            const response = await fetch("https://api.osv.dev/v1/querybatch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: AbortSignal.any([AbortSignal.timeout(15e3), ...require_scan_context().getStore()?.signal ? [require_scan_context().getStore().signal] : []]),
+              body: JSON.stringify({ queries: batch.map((p) => ({ package: { ecosystem: "npm", name: p.name }, version: p.version })) })
+            });
+            if (!response.ok) throw new Error("Dependency advisory service unavailable");
+            const data = await response.json();
+            if (!Array.isArray(data.results) || data.results.length !== batch.length) throw new Error("Invalid advisory response");
+            data.results.forEach((result, index) => {
+              for (const vuln of result.vulns || []) {
+                if (!/^[A-Za-z0-9_.-]{1,150}$/.test(vuln.id || "")) continue;
+                results.push(finding(
+                  "dependency",
+                  path.relative(root, file).replace(/\\/g, "/"),
+                  1,
+                  `${vuln.id}:${batch[index].name}@${batch[index].version}`,
+                  `${batch[index].name}@${batch[index].version}: ${vuln.id}`,
+                  "CWE-1395",
+                  "medium",
+                  `Advisory match for locked npm package ${batch[index].name}@${batch[index].version}. Severity is unassessed (medium baseline); verify runtime reachability and upstream guidance. See https://osv.dev/vulnerability/${vuln.id}`
+                ));
+              }
+            });
+          }
+          queried += packages.length;
+        }
+        this.coverage = { ...require_process().coverage(locks, root), packages: queried };
+        return results;
+      }
+    };
+    module2.exports = { SecretsAdapter, DependencyAdapter };
+  }
+});
+
+// src/scanners/orchestrator.js
+var require_orchestrator = __commonJS({
+  "src/scanners/orchestrator.js"(exports2, module2) {
+    var SemgrepAdapter = require_semgrep_adapter();
+    var BanditAdapter = require_bandit_adapter();
+    var ScannerOrchestrator = class {
+      constructor(adapters = null, { includeDependencies = false } = {}) {
+        this.adapters = adapters || [
+          new SemgrepAdapter(),
+          new BanditAdapter(),
+          new (require_repository_data_adapter()).SecretsAdapter(),
+          ...includeDependencies ? [new (require_repository_data_adapter()).DependencyAdapter()] : []
+        ];
+      }
+      /**
+       * Runs available adapters against the workspace
+       * @param {string} workspacePath
+       * @returns {Promise<Array<{ scanner: string, findings: Array<any> }>>}
+       */
+      async runAll(workspacePath) {
+        const results = [];
+        const scannersRun = [];
+        const scannerErrors = [];
+        const coverage = [];
+        let anyAvailable = false;
+        for (const adapter of this.adapters) {
+          const isAvail = await adapter.isAvailable();
+          if (isAvail) {
+            anyAvailable = true;
+            try {
+              const rawFindings = await adapter.scan(workspacePath);
+              results.push({
+                scanner: adapter.name,
+                findings: rawFindings
+              });
+              scannersRun.push(adapter.name);
+              coverage.push({ scanner: adapter.name, version: adapter.version || "unknown", ...adapter.coverage });
+            } catch (scanErr) {
+              scannerErrors.push({
+                scanner: adapter.name,
+                message: scanErr.message,
+                exitCode: scanErr.exitCode ?? null,
+                stderr: scanErr.stderr || ""
+              });
+              console.error(`[Scanner Error] ${adapter.name} failed during scan:`, scanErr.message);
+            }
+          } else {
+            console.info(`[Scanner Notice] ${adapter.name} is not installed or available on this system.`);
+            scannerErrors.push({
+              scanner: adapter.name,
+              message: "Scanner executable was not available on PATH."
+            });
+          }
+        }
+        if (!anyAvailable) {
+          const err = new Error("No supported security scanners (Semgrep, Bandit) were found installed on the system PATH.");
+          err.code = "SCANNER_UNAVAILABLE";
+          throw err;
+        }
+        if (!scannersRun.length) {
+          throw Object.assign(
+            new Error("Every available scanner failed; no valid analysis was produced."),
+            { code: "ALL_SCANNERS_FAILED", scannerErrors }
+          );
+        }
+        return {
+          results,
+          scannersRun,
+          scannerErrors,
+          coverage
+        };
+      }
+    };
+    module2.exports = ScannerOrchestrator;
+  }
+});
+
+// src/services/normalizer.service.js
+var require_normalizer_service = __commonJS({
+  "src/services/normalizer.service.js"(exports2, module2) {
+    var path = require("path");
+    var NormalizerService = class {
+      /**
+       * Normalizes findings from a specific scanner
+       * @param {string} scanner - "semgrep" | "bandit"
+       * @param {Array<any>} rawResults
+       * @param {string} workspacePath - base path to relativize file paths
+       * @returns {Array<Object>}
+       */
+      static normalize(scanner, rawResults, workspacePath) {
+        if (!Array.isArray(rawResults)) return [];
+        if (scanner === "semgrep") {
+          return this.normalizeSemgrep(rawResults, workspacePath);
+        } else if (scanner === "bandit") {
+          return this.normalizeBandit(rawResults, workspacePath);
+        }
+        if (["secrets", "dependency"].includes(scanner)) return rawResults;
+        return [];
+      }
+      static cleanFilePath(fullPath, workspacePath) {
+        let rel = path.relative(workspacePath, fullPath).replace(/\\/g, "/");
+        if (rel.startsWith("./")) rel = rel.substring(2);
+        return rel;
+      }
+      static isPythonTestFile(filePath) {
+        const normalizedPath = String(filePath || "").replace(/\\/g, "/").toLowerCase();
+        const segments = normalizedPath.split("/").filter(Boolean);
+        const fileName = segments.at(-1) || "";
+        const testDirectory = segments.slice(0, -1).some(
+          (segment) => ["test", "tests", "__tests__", "spec", "specs"].includes(segment)
+        );
+        const testFileName = /^(?:test|spec)\.py$/.test(fileName) || /^(?:test|spec)_.*\.py$/.test(fileName) || /.*_(?:test|spec)\.py$/.test(fileName) || fileName === "conftest.py";
+        return fileName.endsWith(".py") && (testDirectory || testFileName);
+      }
+      static normalizeSemgrep(results, workspacePath) {
+        return results.map((item) => {
+          const filePath = this.cleanFilePath(item.path, workspacePath);
+          const startLine = item.start?.line || 1;
+          const endLine = item.end?.line || startLine;
+          const column = item.start?.col || 1;
+          let cwe = "CWE-Unknown";
+          if (item.extra?.metadata?.cwe) {
+            const rawCwe = item.extra.metadata.cwe;
+            if (Array.isArray(rawCwe) && rawCwe.length > 0) {
+              cwe = String(rawCwe[0]);
+            } else if (typeof rawCwe === "string") {
+              cwe = rawCwe;
+            }
+          }
+          const rawSev = (item.extra?.severity || "").toLowerCase();
+          let severity = "medium";
+          if (rawSev === "error") severity = "high";
+          else if (rawSev === "warning") severity = "medium";
+          else if (rawSev === "info") severity = "low";
+          if (item.extra?.metadata?.impact === "HIGH" && severity === "high") {
+            severity = "critical";
+          }
+          const ruleId = item.check_id || "semgrep-finding";
+          const title = item.extra?.message?.split("\n")[0] || ruleId;
+          const description = item.extra?.message || "";
+          const evidenceSnippet = (item.extra?.lines || "").slice(0, 1e3);
+          const remediation = item.extra?.metadata?.fix || "";
+          return {
+            scanner: "semgrep",
+            filePath,
+            startLine,
+            endLine,
+            column,
+            cwe,
+            ruleId,
+            severity,
+            title,
+            description,
+            evidenceSnippet,
+            remediation
+          };
+        });
+      }
+      static normalizeBandit(results, workspacePath) {
+        return results.filter(
+          (item) => !(item.test_id === "B101" && this.isPythonTestFile(item.filename))
+        ).map((item) => {
+          const filePath = this.cleanFilePath(item.filename, workspacePath);
+          const startLine = item.line_number || 1;
+          const endLine = item.line_range ? item.line_range[item.line_range.length - 1] : startLine;
+          const column = item.col_offset || null;
+          let cwe = "CWE-Unknown";
+          if (item.issue_cwe?.id) {
+            cwe = `CWE-${item.issue_cwe.id}`;
+          }
+          const rawSev = (item.issue_severity || "").toLowerCase();
+          let severity = "medium";
+          if (rawSev === "high") severity = "high";
+          else if (rawSev === "medium") severity = "medium";
+          else if (rawSev === "low") severity = "low";
+          if (rawSev === "high" && (item.issue_confidence || "").toLowerCase() === "high") {
+            severity = "critical";
+          }
+          const ruleId = item.test_id || item.test_name || "bandit-finding";
+          const title = item.issue_text || ruleId;
+          const description = `${item.issue_text || ""} (Test ID: ${ruleId})`;
+          const evidenceSnippet = (item.code || "").slice(0, 1e3);
+          const remediation = item.more_info || "";
+          return {
+            scanner: "bandit",
+            filePath,
+            startLine,
+            endLine,
+            column,
+            cwe,
+            ruleId,
+            severity,
+            title,
+            description,
+            evidenceSnippet,
+            remediation
+          };
+        });
+      }
+    };
+    module2.exports = NormalizerService;
+  }
+});
+
+// src/services/deduplicator.service.js
+var require_deduplicator_service = __commonJS({
+  "src/services/deduplicator.service.js"(exports2, module2) {
+    var crypto = require("crypto");
+    var DeduplicatorService = class {
+      /**
+       * Generates a deterministic SHA-256 fingerprint for a finding.
+       *
+       * Fingerprint basis:
+       * owner + repo + normalizedFilePath + cwe + ruleId + startLine
+       */
+      static generateFingerprint(owner, repo, finding) {
+        const normPath = (finding.filePath || "").trim().replace(/\\/g, "/");
+        const cwe = (finding.cwe || "CWE-Unknown").trim().toUpperCase();
+        const rule = (finding.ruleId || "").trim();
+        const line = finding.startLine || 1;
+        const payload = `${owner.toLowerCase()}:${repo.toLowerCase()}:${normPath}:${cwe}:${rule}:${line}`;
+        return crypto.createHash("sha256").update(payload).digest("hex");
+      }
+      /**
+       * Deduplicates a list of normalized findings.
+       * If two scanners find the same issue, the one with higher severity or richer evidence is kept.
+       *
+       * @param {string} owner
+       * @param {string} repo
+       * @param {Array<Object>} findings
+       * @returns {Array<Object>} Deduplicated findings with assigned fingerprints
+       */
+      static deduplicate(owner, repo, findings) {
+        const seen = /* @__PURE__ */ new Map();
+        for (const item of findings) {
+          const fingerprint = this.generateFingerprint(owner, repo, item);
+          item.fingerprint = fingerprint;
+          const evidence = (item.evidenceSnippet || "").replace(/^\s*\d+\s+/gm, "").replace(/\s+/g, " ").trim();
+          item.correlationKey = crypto.createHash("sha256").update(JSON.stringify([
+            owner.toLowerCase(),
+            repo.toLowerCase(),
+            item.filePath,
+            item.cwe?.match(/CWE-\d+/)?.[0],
+            evidence || `${item.ruleId}:${item.startLine}`
+          ])).digest("hex");
+          item.provenance = [{ scanner: item.scanner, ruleId: item.ruleId, severity: item.severity }];
+          if (!seen.has(fingerprint)) {
+            seen.set(fingerprint, item);
+          } else {
+            const existing = seen.get(fingerprint);
+            item.provenance = [...existing.provenance, ...item.provenance];
+            const severityRank = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+            if ((severityRank[item.severity] || 0) > (severityRank[existing.severity] || 0)) {
+              seen.set(fingerprint, item);
+            } else {
+              existing.provenance = item.provenance;
+            }
+          }
+        }
+        return Array.from(seen.values());
+      }
+    };
+    module2.exports = DeduplicatorService;
+  }
+});
+
+// src/services/occurrence.service.js
+var require_occurrence_service = __commonJS({
+  "src/services/occurrence.service.js"(exports2, module2) {
+    var OccurrenceService = class {
+      /**
+       * Computes occurrence counts across a set of deduplicated findings
+       * @param {Array<Object>} deduplicatedFindings
+       * @returns {Map<string, number>} Map of CWE -> count
+       */
+      static computeOccurrences(deduplicatedFindings) {
+        const counts = /* @__PURE__ */ new Map();
+        for (const finding of deduplicatedFindings) {
+          const key = (finding.cwe || "CWE-Unknown").toUpperCase();
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        return counts;
+      }
+      /**
+       * Translates raw count into defined 0-10 scale:
+       * >= 10 instances -> 8.5
+       * 5 - 9 instances -> 6.5
+       * 2 - 4 instances -> 4.5
+       * 1 instance     -> 2.0
+       * 0              -> 0.0
+       *
+       * @param {number} count
+       * @returns {number} Score on 0-10 scale
+       */
+      static getOccurrenceFactor(count) {
+        if (count >= 10) return 8.5;
+        if (count >= 5) return 6.5;
+        if (count >= 2) return 4.5;
+        if (count === 1) return 2;
+        return 0;
+      }
+    };
+    module2.exports = OccurrenceService;
+  }
+});
+
+// src/services/risk.service.js
+var require_risk_service = __commonJS({
+  "src/services/risk.service.js"(exports2, module2) {
+    var OccurrenceService = require_occurrence_service();
+    var RiskService = class {
+      /**
+       * Severity factor (0 - 10)
+       */
+      static getSeverityScore(severity) {
+        switch ((severity || "").toLowerCase()) {
+          case "critical":
+            return 9.5;
+          case "high":
+            return 7.5;
+          case "medium":
+            return 5;
+          case "low":
+            return 2.5;
+          case "info":
+          default:
+            return 1;
+        }
+      }
+      /**
+       * Exploitability factor (0 - 10) derived deterministically from CWE category
+       */
+      static getExploitabilityScore(cwe) {
+        const norm = (cwe || "").toUpperCase().match(/\bCWE-\d+\b/)?.[0] || "";
+        if (norm === "CWE-78" || // OS Command Injection
+        norm === "CWE-89" || // SQL Injection
+        norm === "CWE-94" || // Code Injection
+        norm === "CWE-502" || // Deserialization
+        norm === "CWE-918") {
+          return 9;
+        }
+        if (norm === "CWE-79" || // XSS
+        norm === "CWE-22" || // Path Traversal
+        norm === "CWE-798" || // Hardcoded Credentials
+        norm === "CWE-287" || // Improper Authentication
+        norm === "CWE-306") {
+          return 7.5;
+        }
+        if (norm === "CWE-327" || // Broken Crypto
+        norm === "CWE-330" || // Insufficient Randomness
+        norm === "CWE-200" || // Exposure of Sensitive Information
+        norm === "CWE-312") {
+          return 5.5;
+        }
+        if (norm === "CWE-400" || norm === "CWE-770" || norm === "CWE-754") {
+          return 4;
+        }
+        return 4.5;
+      }
+      /**
+       * Business Impact factor (0 - 10) derived deterministically from file path context
+       */
+      static getBusinessImpactScore(filePath) {
+        const p = (filePath || "").toLowerCase();
+        if (p.includes("test") || p.includes("spec") || p.includes("mock") || p.includes("fixture") || p.includes("doc") || p.endsWith(".md")) {
+          return 2;
+        }
+        if (p.includes("auth") || p.includes("token") || p.includes("secret") || p.includes("credential") || p.includes("payment") || p.includes("billing") || p.includes("crypto") || p.includes(".env")) {
+          return 9;
+        }
+        if (p.includes("controller") || p.includes("route") || p.includes("api") || p.includes("model") || p.includes("service") || p.includes("server")) {
+          return 7;
+        }
+        if (p.includes("config") || p.includes("database") || p.includes("script") || p.includes("docker")) {
+          return 6;
+        }
+        if (p.includes("component") || p.includes("view") || p.includes("page") || p.includes("css") || p.includes("html")) {
+          return 4;
+        }
+        return 5;
+      }
+      /**
+       * Evaluates category based on standard thresholds
+       * Critical: 8.5 - 10.0
+       * High: 6.5 - 8.49
+       * Medium: 4.0 - 6.49
+       * Low: 0.0 - 3.99
+       */
+      static getRiskCategory(score) {
+        if (score >= 8.5) return "critical";
+        if (score >= 6.5) return "high";
+        if (score >= 4) return "medium";
+        return "low";
+      }
+      /**
+       * Evaluates the complete risk factor profile and computes the final weighted score
+       * @param {Object} finding
+       * @param {number} occurrenceCount
+       */
+      static evaluateRisk(finding, occurrenceCount = 1) {
+        const severityFactor = this.getSeverityScore(finding.severity);
+        const exploitabilityFactor = this.getExploitabilityScore(finding.cwe);
+        const occurrenceFactor = OccurrenceService.getOccurrenceFactor(occurrenceCount);
+        const businessImpactFactor = this.getBusinessImpactScore(finding.filePath);
+        const rawScore = 0.4 * severityFactor + 0.25 * exploitabilityFactor + 0.15 * occurrenceFactor + 0.2 * businessImpactFactor;
+        const riskScore = Math.min(10, Math.max(0, Math.round(rawScore * 100) / 100));
+        const riskCategory = this.getRiskCategory(riskScore);
+        return {
+          riskScore,
+          riskCategory,
+          riskFactors: {
+            severity: severityFactor,
+            exploitability: exploitabilityFactor,
+            occurrence: occurrenceFactor,
+            businessImpact: businessImpactFactor
+          }
+        };
+      }
+    };
+    module2.exports = RiskService;
+  }
+});
+
+// src/models/RepositoryAutomation.js
+var require_RepositoryAutomation = __commonJS({
+  "src/models/RepositoryAutomation.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var schema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
+      owner: { type: String, required: true },
+      repo: { type: String, required: true },
+      installationId: { type: String, required: true },
+      push: { type: Boolean, default: false },
+      pullRequest: { type: Boolean, default: false },
+      frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
+      nextRunAt: { type: Date, default: null },
+      leaseUntil: { type: Date, default: null },
+      lastError: { type: String, default: null },
+      lastScanId: { type: String, default: null },
+      pendingRefs: { type: [String], default: [] }
+    }, { timestamps: true });
+    schema.index({ organization: 1, owner: 1, repo: 1 }, { unique: true });
+    schema.index({ nextRunAt: 1 });
+    module2.exports = mongoose.models.RepositoryAutomation || mongoose.model("RepositoryAutomation", schema);
+  }
+});
+
+// src/services/automation.service.js
+var require_automation_service = __commonJS({
+  "src/services/automation.service.js"(exports2, module2) {
+    var crypto = require("node:crypto");
+    var Automation = require_RepositoryAutomation();
+    var Organization = require_Organization();
+    var UsageBucket = require_UsageBucket();
+    var ScanService = require_scan_service();
+    var { bad, repository } = require_input();
+    function nextRun(frequency, now = /* @__PURE__ */ new Date()) {
+      if (frequency === "off") return null;
+      const next = new Date(now);
+      if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+      else {
+        const day = next.getUTCDate();
+        next.setUTCDate(1);
+        next.setUTCMonth(next.getUTCMonth() + 1);
+        const end = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+        next.setUTCDate(Math.min(day, end));
+      }
+      return next;
+    }
+    async function settings(organization, owner, repo, body) {
+      repository(owner, repo);
+      owner = owner.toLowerCase();
+      repo = repo.toLowerCase();
+      const filter = { organization, owner, repo };
+      if (!body) return await Automation.findOne(filter).lean() || { push: false, pullRequest: false, frequency: "off" };
+      if (Object.keys(body).some((k) => !["push", "pullRequest", "frequency"].includes(k)) || typeof body.push !== "boolean" || typeof body.pullRequest !== "boolean" || !["off", "weekly", "monthly"].includes(body.frequency)) throw bad("Invalid automation settings");
+      if ((body.push || body.pullRequest) && !process.env.GITHUB_WEBHOOK_SECRET) throw bad("Configure the GitHub App webhook secret and URL before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
+      const org = await Organization.findById(organization);
+      if (!org?.githubInstallationId) throw bad("Connect GitHub first");
+      await require_github_service().resolveCommit(org.githubInstallationId, owner, repo);
+      return Automation.findOneAndUpdate(filter, { $set: { ...body, installationId: org.githubInstallationId, nextRunAt: nextRun(body.frequency), lastError: null } }, { upsert: true, returnDocument: "after", runValidators: true });
+    }
+    async function runDueSchedules() {
+      const pending = await Automation.find({ "pendingRefs.0": { $exists: true } }).limit(5);
+      for (const config of pending) {
+        const ref = config.pendingRefs[0];
+        try {
+          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo, ref });
+          await Automation.updateOne({ _id: config._id }, { $pull: { pendingRefs: ref }, $set: { lastError: null, lastScanId: String(job.scanId) } });
+        } catch {
+        }
+      }
+      for (let count = 0; count < 5; count++) {
+        const now = /* @__PURE__ */ new Date();
+        const config = await Automation.findOneAndUpdate({
+          frequency: { $ne: "off" },
+          nextRunAt: { $lte: now, $ne: null },
+          $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }]
+        }, { $set: { leaseUntil: new Date(Date.now() + 6e4) } }, { returnDocument: "after" });
+        if (!config) break;
+        try {
+          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo });
+          config.lastScanId = String(job.scanId);
+          config.lastError = null;
+          config.nextRunAt = nextRun(config.frequency);
+        } catch {
+          config.lastError = "Scheduled scan could not be queued. Check GitHub access, quota and active scans.";
+          config.nextRunAt = new Date(Date.now() + 15 * 60 * 1e3);
+        }
+        config.leaseUntil = null;
+        await config.save();
+      }
+    }
+    function verifySignature(body, signature, secret) {
+      if (!secret || !Buffer.isBuffer(body) || typeof signature !== "string" || !/^sha256=[a-f0-9]{64}$/.test(signature)) return false;
+      const expected = `sha256=${crypto.createHmac("sha256", secret).update(body).digest("hex")}`;
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    }
+    async function receive(body, event, delivery) {
+      if (typeof delivery !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(delivery)) throw bad("Invalid GitHub delivery identifier");
+      if (!["push", "pull_request"].includes(event)) return { skipped: true };
+      let payload;
+      try {
+        payload = JSON.parse(body.toString("utf8"));
+      } catch {
+        throw bad("Invalid webhook JSON");
+      }
+      const owner = payload.repository?.owner?.login?.toLowerCase(), repo = payload.repository?.name?.toLowerCase();
+      repository(owner, repo);
+      if (event === "push" && (payload.deleted || payload.ref !== `refs/heads/${payload.repository.default_branch}`)) return { skipped: true };
+      if (event === "pull_request" && !["opened", "reopened", "synchronize"].includes(payload.action)) return { skipped: true };
+      const ref = event === "push" ? payload.after : payload.pull_request?.head?.sha;
+      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("Invalid event commit");
+      try {
+        await UsageBucket.create({ _id: `delivery:${delivery}`, count: 1, expires: new Date(Date.now() + 864e5) });
+      } catch (error) {
+        if (error.code === 11e3) return { duplicate: true };
+        throw error;
+      }
+      try {
+        const configs = await Automation.find({ owner, repo, installationId: String(payload.installation?.id), [event === "push" ? "push" : "pullRequest"]: true }).limit(50);
+        for (const config of configs) {
+          const stored = await Automation.findOneAndUpdate(
+            { _id: config._id, $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }] },
+            { $addToSet: { pendingRefs: ref }, $set: { lastError: null } }
+          );
+          if (!stored) throw bad("Repository event queue is full (20 commits)", 429, "EVENT_QUEUE_FULL");
+        }
+        return { accepted: configs.length };
+      } catch (error) {
+        await UsageBucket.deleteOne({ _id: `delivery:${delivery}` });
+        throw error;
+      }
+    }
+    module2.exports = { nextRun, settings, runDueSchedules, verifySignature, receive };
+  }
+});
+
+// src/workers/scanWorker.js
+var require_scanWorker = __commonJS({
+  "src/workers/scanWorker.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var { Worker } = require("bullmq");
+    var dotenv = require("dotenv");
+    dotenv.config();
+    var env2 = require_env();
+    var { redisConnection } = require_redis();
+    var { SCAN_JOB_TIMEOUT_MS, SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS } = require_scan_timing();
+    var { SCAN_QUEUE_NAME, SCAN_QUEUE_REGION } = require_scanQueue();
+    var Scan = require_Scan();
+    var Finding = require_Finding();
+    var { createEphemeralWorkspace } = require_workspace_service();
+    var ScannerOrchestrator = require_orchestrator();
+    var NormalizerService = require_normalizer_service();
+    var DeduplicatorService = require_deduplicator_service();
+    var OccurrenceService = require_occurrence_service();
+    var RiskService = require_risk_service();
+    var heartbeatWorker = () => require_UsageBucket().updateOne(
+      { _id: "worker:bom1" },
+      { $set: { count: 1, expires: new Date(Date.now() + 9e4) } },
+      { upsert: true }
+    );
+    var ensureDatabase = async () => {
+      if (mongoose.connection.readyState === 0) {
+        await mongoose.connect(env2.databaseUrl);
+        console.info("[ScanWorker] Connected to MongoDB database.");
+      }
+    };
+    var processScanJobInternal = async (job, controller) => {
+      const { scanId, organizationId, installationId, owner, repo } = job.data;
+      console.info(`[ScanWorker] Processing job ${job.id} for scan ${scanId} (${owner}/${repo})...`);
+      await ensureDatabase();
+      const now = /* @__PURE__ */ new Date();
+      const leaseToken = require("node:crypto").randomUUID();
+      const scan = await Scan.findOneAndUpdate(
+        {
+          _id: scanId,
+          cancelledAt: null,
+          $and: [
+            { $or: [{ deadlineAt: null }, { deadlineAt: { $gt: now } }] },
+            { $or: [{ status: "queued" }, { status: "failed" }, { status: "running", leaseUntil: { $lt: now } }] }
+          ]
+        },
+        { $set: { status: "running", startedAt: now, leaseUntil: new Date(Date.now() + 6e4), leaseToken, errorMessage: null } },
+        { returnDocument: "after" }
+      );
+      if (!scan) {
+        return { success: true, skipped: true };
+      }
+      if (scan.status === "completed") {
+        console.info(`[ScanWorker] Scan ${scanId} was already completed; skipping duplicate delivery.`);
+        return { success: true, skipped: true, summary: scan.summary };
+      }
+      let workspaceHandle = null;
+      const deadline = setTimeout(() => controller.abort(), SCAN_JOB_TIMEOUT_MS);
+      const heartbeat = setInterval(async () => {
+        try {
+          await heartbeatWorker();
+          const renewed = await Scan.findOneAndUpdate(
+            { _id: scanId, status: "running", cancelledAt: null, leaseToken },
+            { $set: { leaseUntil: new Date(Date.now() + 6e4) } }
+          );
+          if (!renewed) controller.abort();
+        } catch {
+          controller.abort();
+        }
+      }, 15e3);
+      try {
+        if (!scan.commitSha) {
+          scan.commitSha = (await require_github_service().resolveCommit(installationId, owner, repo)).sha;
+        }
+        workspaceHandle = await createEphemeralWorkspace(installationId, owner, repo, scan.commitSha);
+        const { workspacePath } = workspaceHandle;
+        const orchestrator = new ScannerOrchestrator(null, { includeDependencies: scan.includeDependencies });
+        const { results, scannersRun, scannerErrors, coverage } = await orchestrator.runAll(workspacePath);
+        controller.signal.throwIfAborted();
+        scan.scannersUsed = scannersRun;
+        scan.scannerErrors = scannerErrors;
+        scan.coverage = coverage;
+        scan.rulesHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../scanners/rules.yml"))).digest("hex");
+        scan.normalizerHash = require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(require("node:path").join(__dirname, "../services/normalizer.service.js"))).digest("hex");
+        let allNormalized = [];
+        for (const res of results) {
+          const normalized = NormalizerService.normalize(res.scanner, res.findings, workspacePath);
+          const coverageEntry = scan.coverage.find((entry) => entry.scanner === res.scanner);
+          if (coverageEntry) {
+            coverageEntry.rawFindings = res.findings.length;
+            coverageEntry.retainedFindings = normalized.length;
+            coverageEntry.suppressedFindings = Math.max(0, res.findings.length - normalized.length);
+            coverageEntry.suppressionPolicy = res.scanner === "bandit" ? "Bandit B101 findings in recognized Python test files are suppressed." : "none";
+          }
+          console.info(
+            `[ScanWorker] ${res.scanner}: raw=${res.findings.length} normalized=${normalized.length}`
+          );
+          allNormalized = allNormalized.concat(normalized);
+        }
+        const deduplicated = DeduplicatorService.deduplicate(owner, repo, allNormalized);
+        console.info(
+          `[ScanWorker] Findings normalized=${allNormalized.length} deduplicated=${deduplicated.length}`
+        );
+        const occurrenceMap = OccurrenceService.computeOccurrences(deduplicated);
+        console.info(
+          `[ScanWorker] Occurrence processing completed for ${deduplicated.length} findings across ${occurrenceMap.size} CWE groups.`
+        );
+        const findingsToInsert = deduplicated.map((item) => {
+          const cweKey = (item.cwe || "CWE-Unknown").toUpperCase();
+          const count = occurrenceMap.get(cweKey) || 1;
+          const { riskScore, riskCategory, riskFactors } = RiskService.evaluateRisk(item, count);
+          return {
+            scan: scan._id,
+            organization: organizationId,
+            owner,
+            repo,
+            filePath: item.filePath,
+            startLine: item.startLine,
+            endLine: item.endLine,
+            column: item.column,
+            cwe: item.cwe,
+            ruleId: item.ruleId,
+            scanner: item.scanner,
+            severity: item.severity,
+            title: item.title,
+            description: item.description,
+            evidenceSnippet: item.evidenceSnippet,
+            remediation: item.remediation,
+            fingerprint: item.fingerprint,
+            correlationKey: item.correlationKey,
+            provenance: item.provenance,
+            riskScore,
+            riskFactors,
+            riskCategory,
+            status: "open"
+          };
+        });
+        console.info(`[ScanWorker] Risk calculation completed for ${findingsToInsert.length} findings.`);
+        if (findingsToInsert.length) {
+          const reviews = await Finding.aggregate([
+            { $match: { organization: scan.organization, correlationKey: { $in: findingsToInsert.map((f) => f.correlationKey) }, reviewedAt: { $ne: null } } },
+            { $sort: { reviewedAt: -1 } },
+            { $group: { _id: "$correlationKey", review: { $first: "$$ROOT" } } },
+            { $limit: 2e4 }
+          ]);
+          const previous = new Map(reviews.map((item) => [item._id, item.review]));
+          for (const finding of findingsToInsert) {
+            const review = previous.get(finding.correlationKey);
+            if (review && ["acknowledged", "dismissed"].includes(review.status)) {
+              Object.assign(finding, {
+                status: review.status,
+                statusReason: review.statusReason,
+                reviewedBy: review.reviewedBy,
+                reviewedAt: review.reviewedAt,
+                reviewHistory: review.reviewHistory || []
+              });
+            }
+          }
+        }
+        if (findingsToInsert.length > 0) {
+          await Finding.init();
+          await Finding.bulkWrite(findingsToInsert.map((finding) => ({
+            updateOne: {
+              filter: { scan: scan._id, fingerprint: finding.fingerprint },
+              update: { $setOnInsert: finding },
+              upsert: true
+            }
+          })), { ordered: false });
+        }
+        console.info(`[ScanWorker] Persisted ${findingsToInsert.length} findings to MongoDB.`);
+        const summary = {
+          total: findingsToInsert.length,
+          critical: findingsToInsert.filter((f) => f.riskCategory === "critical").length,
+          high: findingsToInsert.filter((f) => f.riskCategory === "high").length,
+          medium: findingsToInsert.filter((f) => f.riskCategory === "medium").length,
+          low: findingsToInsert.filter((f) => f.riskCategory === "low").length
+        };
+        scan.status = "completed";
+        scan.activeKey = null;
+        scan.leaseUntil = null;
+        scan.completedAt = /* @__PURE__ */ new Date();
+        scan.summary = summary;
+        const finalized = await Scan.findOneAndUpdate(
+          { _id: scanId, status: "running", cancelledAt: null, leaseToken },
+          { $set: {
+            status: scan.status,
+            completedAt: scan.completedAt,
+            summary,
+            coverage: scan.coverage,
+            scannersUsed: scan.scannersUsed,
+            scannerErrors: scan.scannerErrors,
+            rulesHash: scan.rulesHash,
+            normalizerHash: scan.normalizerHash,
+            commitSha: scan.commitSha,
+            activeKey: null,
+            leaseUntil: null,
+            leaseToken: null
+          } }
+        );
+        if (!finalized) throw new Error("Scan was cancelled before completion");
+        console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
+        return { success: true, summary };
+      } catch (error) {
+        console.error(`[ScanWorker] Scan ${scanId} failed:`, error.message);
+        const failure = {
+          status: "failed",
+          activeKey: null,
+          leaseUntil: null,
+          leaseToken: null,
+          completedAt: /* @__PURE__ */ new Date(),
+          errorMessage: error.message
+        };
+        if (error.scannerErrors) failure.scannerErrors = error.scannerErrors;
+        await Scan.findOneAndUpdate(
+          { _id: scanId, status: "running", cancelledAt: null, leaseToken },
+          { $set: failure }
+        );
+        throw error;
+      } finally {
+        clearTimeout(deadline);
+        clearInterval(heartbeat);
+        if (workspaceHandle && typeof workspaceHandle.cleanup === "function") {
+          workspaceHandle.cleanup();
+          console.info(`[ScanWorker] Ephemeral workspace cleaned up for scan ${scanId}.`);
+        }
+      }
+    };
+    var processScanJob = (job) => {
+      const controller = new AbortController();
+      return require_scan_context().run({ signal: controller.signal }, () => processScanJobInternal(job, controller));
+    };
+    var createBullMqWorker = () => {
+      if (!redisConnection) throw new Error("REDIS_URL is required to run the local BullMQ scan worker");
+      const worker = new Worker(SCAN_QUEUE_NAME, processScanJob, {
+        connection: redisConnection,
+        concurrency: 2
+      });
+      worker.on("ready", () => {
+        console.info(`[ScanWorker] Ready and listening for jobs on queue '${SCAN_QUEUE_NAME}'...`);
+      });
+      worker.on("failed", (job, err) => {
+        console.error(`[ScanWorker] Job ${job?.id} failed with error:`, err.message);
+      });
+      worker.on("error", (err) => {
+        console.error("[ScanWorker] Worker error:", err.message);
+      });
+      const schedules = setInterval(() => require_automation_service().runDueSchedules().catch(() => {
+      }), 6e4);
+      schedules.unref();
+      worker.on("closed", () => clearInterval(schedules));
+      const pulse = setInterval(() => heartbeatWorker().catch(() => {
+      }), 3e4);
+      pulse.unref();
+      worker.on("closed", () => clearInterval(pulse));
+      return worker;
+    };
+    var wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+    var startVercelQueueWorker = async () => {
+      const [{ PollingQueueClient }, { getVercelOidcToken }] = await Promise.all([
+        import("@vercel/queue"),
+        import("@vercel/oidc")
+      ]);
+      let shuttingDown = false;
+      process.once("SIGTERM", () => {
+        shuttingDown = true;
+        console.info("[ScanWorker] Shutdown requested; finishing the current job.");
+      });
+      console.info(`[ScanWorker] Polling Vercel Queue '${SCAN_QUEUE_NAME}' in ${SCAN_QUEUE_REGION}...`);
+      let pollDelayMs = 5e3;
+      let lastScheduleCheck = 0;
+      while (!shuttingDown) {
+        try {
+          await ensureDatabase();
+          await heartbeatWorker();
+          await Scan.updateMany(
+            { status: { $in: ["queued", "running"] }, deadlineAt: { $lt: /* @__PURE__ */ new Date() } },
+            { $set: {
+              status: "failed",
+              activeKey: null,
+              leaseUntil: null,
+              leaseToken: null,
+              errorMessage: "Scan deadline expired",
+              completedAt: /* @__PURE__ */ new Date()
+            } }
+          );
+          if (Date.now() - lastScheduleCheck > 6e4) {
+            await require_automation_service().runDueSchedules();
+            lastScheduleCheck = Date.now();
+          }
+          const token = await getVercelOidcToken();
+          const queue = new PollingQueueClient({
+            region: SCAN_QUEUE_REGION,
+            deploymentId: null,
+            token
+          });
+          const result = await queue.receive(
+            SCAN_QUEUE_NAME,
+            "scan-worker",
+            async (message) => {
+              if (!message || typeof message.scanId !== "string") {
+                throw new Error("Scan queue message is invalid");
+              }
+              await processScanJob({ id: message.scanId, data: message });
+            },
+            { limit: 1, visibilityTimeoutSeconds: SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS }
+          );
+          if (!result.ok) {
+            if (result.reason !== "empty") {
+              console.warn(`[ScanWorker] Queue receive returned ${result.reason}.`);
+            }
+            await wait(pollDelayMs);
+            pollDelayMs = Math.min(pollDelayMs * 2, 3e4);
+          } else {
+            pollDelayMs = 5e3;
+          }
+        } catch (error) {
+          console.error(`[ScanWorker] Vercel Queue poll failed: ${error.message}`);
+          await wait(pollDelayMs);
+          pollDelayMs = Math.min(pollDelayMs * 2, 3e4);
+        }
+      }
+      await mongoose.disconnect();
+      if (redisConnection) await redisConnection.quit();
+    };
+    if (require.main === module2) {
+      if (process.env.VERCEL_OIDC_TOKEN_FILE || process.env.VERCEL === "1" && process.env.VERCEL_ENV === "production") {
+        startVercelQueueWorker().catch((error) => {
+          console.error(`[ScanWorker] Vercel Queue worker stopped: ${error.message}`);
+          process.exitCode = 1;
+        });
+      } else {
+        createBullMqWorker();
+      }
+    }
+    module2.exports = {
+      createBullMqWorker,
+      processScanJob,
+      startVercelQueueWorker
+    };
+  }
+});
+
 // src/queues/scanQueue.js
 var require_scanQueue = __commonJS({
   "src/queues/scanQueue.js"(exports2, module2) {
@@ -3424,6 +4766,13 @@ var require_scanQueue = __commonJS({
       });
       return { id: result.messageId || data.scanId };
     };
+    var addToLocalInlineQueue = async (name, data) => {
+      const id = `local-${data.scanId}`;
+      setImmediate(() => {
+        require_scanWorker().processScanJob({ id, name, data }).catch((error) => console.error(`[ScanWorker] Local scan ${data.scanId} failed: ${error.message}`));
+      });
+      return { id };
+    };
     var scanQueue = useVercelQueue ? { add: addToVercelQueue, close: async () => {
     } } : redisConnection ? new Queue(SCAN_QUEUE_NAME, {
       connection: redisConnection,
@@ -3441,7 +4790,8 @@ var require_scanQueue = __commonJS({
           age: 48 * 3600
         }
       }
-    }) : {
+    }) : process.env.NODE_ENV === "development" ? { add: addToLocalInlineQueue, close: async () => {
+    } } : {
       add: async () => {
         throw new Error("No scan queue is configured; set REDIS_URL locally or deploy with Vercel Queues");
       },
@@ -3453,23 +4803,6 @@ var require_scanQueue = __commonJS({
       SCAN_QUEUE_NAME,
       SCAN_QUEUE_REGION,
       useVercelQueue
-    };
-  }
-});
-
-// src/config/scan-timing.js
-var require_scan_timing = __commonJS({
-  "src/config/scan-timing.js"(exports2, module2) {
-    var SCAN_JOB_TIMEOUT_MS = 10 * 60 * 1e3;
-    var SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS = 660;
-    var SCAN_RECORD_DEADLINE_MS = 25 * 60 * 1e3;
-    if (SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 <= SCAN_JOB_TIMEOUT_MS || SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS * 1e3 + SCAN_JOB_TIMEOUT_MS >= SCAN_RECORD_DEADLINE_MS) {
-      throw new Error("Scan record deadline must allow queue redelivery and another full worker attempt");
-    }
-    module2.exports = {
-      SCAN_JOB_TIMEOUT_MS,
-      SCAN_QUEUE_VISIBILITY_TIMEOUT_SECONDS,
-      SCAN_RECORD_DEADLINE_MS
     };
   }
 });
@@ -3563,6 +4896,9 @@ var require_scan_service = __commonJS({
           status: scan.status,
           owner,
           repo,
+          branch: scan.branch,
+          commitSha: scan.commitSha,
+          includeDependencies: scan.includeDependencies,
           createdAt: scan.createdAt
         };
       }
@@ -3597,7 +4933,7 @@ var require_scan_service = __commonJS({
         const take = integer(query.limit, 50, 100);
         const skip = (currentPage - 1) * take;
         const [findings, total] = await Promise.all([
-          Finding.find(filter).sort({ riskScore: -1, _id: -1 }).skip(skip).limit(take).lean(),
+          Finding.find(filter).populate("reviewHistory.reviewedBy", "name githubUsername").sort({ riskScore: -1, _id: -1 }).skip(skip).limit(take).lean(),
           Finding.countDocuments(filter)
         ]);
         return {
@@ -3819,7 +5155,7 @@ var require_scan_routes = __commonJS({
         if (!["critical", "high", "medium", "low"].includes(req.query.riskCategory)) throw bad("Invalid risk category");
         filter.riskCategory = req.query.riskCategory;
       }
-      const [findings, total] = await Promise.all([Finding.find(filter).sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
+      const [findings, total] = await Promise.all([Finding.find(filter).populate("reviewHistory.reviewedBy", "name githubUsername").sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
       res.json({ success: true, data: { findings, latestScans: latest, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } } });
     }));
     router.get("/:scanId/comparison", requireAuth, requireScanMember, handler(async (req, res) => {
@@ -3852,9 +5188,13 @@ var require_scan_routes = __commonJS({
       objectId(req.params.findingId);
       const { status, reason } = req.body || {};
       if (!["open", "acknowledged", "dismissed", "resolved"].includes(status) || typeof reason !== "string" || !reason.trim() || reason.length > 1e3) throw bad("Choose a status and a review reason (1\u20131000 characters)");
+      const reviewedAt = /* @__PURE__ */ new Date();
       const finding = await Finding.findOneAndUpdate(
         { _id: req.params.findingId, scan: req.params.scanId },
-        { $set: { status, statusReason: reason.trim(), reviewedBy: req.user._id, reviewedAt: /* @__PURE__ */ new Date() } },
+        {
+          $set: { status, statusReason: reason.trim(), reviewedBy: req.user._id, reviewedAt },
+          $push: { reviewHistory: { status, reason: reason.trim(), reviewedBy: req.user._id, reviewedAt } }
+        },
         { returnDocument: "after", runValidators: true }
       );
       if (!finding) throw bad("Finding not found", 404);
@@ -4038,141 +5378,6 @@ var require_dashboard_routes = __commonJS({
       getOrganizationOverview
     );
     module2.exports = router;
-  }
-});
-
-// src/models/RepositoryAutomation.js
-var require_RepositoryAutomation = __commonJS({
-  "src/models/RepositoryAutomation.js"(exports2, module2) {
-    var mongoose = require("mongoose");
-    var schema = new mongoose.Schema({
-      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
-      owner: { type: String, required: true },
-      repo: { type: String, required: true },
-      installationId: { type: String, required: true },
-      push: { type: Boolean, default: false },
-      pullRequest: { type: Boolean, default: false },
-      frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
-      nextRunAt: { type: Date, default: null },
-      leaseUntil: { type: Date, default: null },
-      lastError: { type: String, default: null },
-      lastScanId: { type: String, default: null },
-      pendingRefs: { type: [String], default: [] }
-    }, { timestamps: true });
-    schema.index({ organization: 1, owner: 1, repo: 1 }, { unique: true });
-    schema.index({ nextRunAt: 1 });
-    module2.exports = mongoose.models.RepositoryAutomation || mongoose.model("RepositoryAutomation", schema);
-  }
-});
-
-// src/services/automation.service.js
-var require_automation_service = __commonJS({
-  "src/services/automation.service.js"(exports2, module2) {
-    var crypto = require("node:crypto");
-    var Automation = require_RepositoryAutomation();
-    var Organization = require_Organization();
-    var UsageBucket = require_UsageBucket();
-    var ScanService = require_scan_service();
-    var { bad, repository } = require_input();
-    function nextRun(frequency, now = /* @__PURE__ */ new Date()) {
-      if (frequency === "off") return null;
-      const next = new Date(now);
-      if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
-      else {
-        const day = next.getUTCDate();
-        next.setUTCDate(1);
-        next.setUTCMonth(next.getUTCMonth() + 1);
-        const end = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
-        next.setUTCDate(Math.min(day, end));
-      }
-      return next;
-    }
-    async function settings(organization, owner, repo, body) {
-      repository(owner, repo);
-      owner = owner.toLowerCase();
-      repo = repo.toLowerCase();
-      const filter = { organization, owner, repo };
-      if (!body) return await Automation.findOne(filter).lean() || { push: false, pullRequest: false, frequency: "off" };
-      if (Object.keys(body).some((k) => !["push", "pullRequest", "frequency"].includes(k)) || typeof body.push !== "boolean" || typeof body.pullRequest !== "boolean" || !["off", "weekly", "monthly"].includes(body.frequency)) throw bad("Invalid automation settings");
-      if ((body.push || body.pullRequest) && !process.env.GITHUB_WEBHOOK_SECRET) throw bad("Configure the GitHub App webhook secret and URL before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
-      const org = await Organization.findById(organization);
-      if (!org?.githubInstallationId) throw bad("Connect GitHub first");
-      await require_github_service().resolveCommit(org.githubInstallationId, owner, repo);
-      return Automation.findOneAndUpdate(filter, { $set: { ...body, installationId: org.githubInstallationId, nextRunAt: nextRun(body.frequency), lastError: null } }, { upsert: true, returnDocument: "after", runValidators: true });
-    }
-    async function runDueSchedules() {
-      const pending = await Automation.find({ "pendingRefs.0": { $exists: true } }).limit(5);
-      for (const config of pending) {
-        const ref = config.pendingRefs[0];
-        try {
-          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo, ref });
-          await Automation.updateOne({ _id: config._id }, { $pull: { pendingRefs: ref }, $set: { lastError: null, lastScanId: String(job.scanId) } });
-        } catch {
-        }
-      }
-      for (let count = 0; count < 5; count++) {
-        const now = /* @__PURE__ */ new Date();
-        const config = await Automation.findOneAndUpdate({
-          frequency: { $ne: "off" },
-          nextRunAt: { $lte: now, $ne: null },
-          $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }]
-        }, { $set: { leaseUntil: new Date(Date.now() + 6e4) } }, { returnDocument: "after" });
-        if (!config) break;
-        try {
-          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo });
-          config.lastScanId = String(job.scanId);
-          config.lastError = null;
-          config.nextRunAt = nextRun(config.frequency);
-        } catch {
-          config.lastError = "Scheduled scan could not be queued. Check GitHub access, quota and active scans.";
-          config.nextRunAt = new Date(Date.now() + 15 * 60 * 1e3);
-        }
-        config.leaseUntil = null;
-        await config.save();
-      }
-    }
-    function verifySignature(body, signature, secret) {
-      if (!secret || !Buffer.isBuffer(body) || typeof signature !== "string" || !/^sha256=[a-f0-9]{64}$/.test(signature)) return false;
-      const expected = `sha256=${crypto.createHmac("sha256", secret).update(body).digest("hex")}`;
-      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-    }
-    async function receive(body, event, delivery) {
-      if (typeof delivery !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(delivery)) throw bad("Invalid GitHub delivery identifier");
-      if (!["push", "pull_request"].includes(event)) return { skipped: true };
-      let payload;
-      try {
-        payload = JSON.parse(body.toString("utf8"));
-      } catch {
-        throw bad("Invalid webhook JSON");
-      }
-      const owner = payload.repository?.owner?.login?.toLowerCase(), repo = payload.repository?.name?.toLowerCase();
-      repository(owner, repo);
-      if (event === "push" && (payload.deleted || payload.ref !== `refs/heads/${payload.repository.default_branch}`)) return { skipped: true };
-      if (event === "pull_request" && !["opened", "reopened", "synchronize"].includes(payload.action)) return { skipped: true };
-      const ref = event === "push" ? payload.after : payload.pull_request?.head?.sha;
-      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("Invalid event commit");
-      try {
-        await UsageBucket.create({ _id: `delivery:${delivery}`, count: 1, expires: new Date(Date.now() + 864e5) });
-      } catch (error) {
-        if (error.code === 11e3) return { duplicate: true };
-        throw error;
-      }
-      try {
-        const configs = await Automation.find({ owner, repo, installationId: String(payload.installation?.id), [event === "push" ? "push" : "pullRequest"]: true }).limit(50);
-        for (const config of configs) {
-          const stored = await Automation.findOneAndUpdate(
-            { _id: config._id, $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }] },
-            { $addToSet: { pendingRefs: ref }, $set: { lastError: null } }
-          );
-          if (!stored) throw bad("Repository event queue is full (20 commits)", 429, "EVENT_QUEUE_FULL");
-        }
-        return { accepted: configs.length };
-      } catch (error) {
-        await UsageBucket.deleteOne({ _id: `delivery:${delivery}` });
-        throw error;
-      }
-    }
-    module2.exports = { nextRun, settings, runDueSchedules, verifySignature, receive };
   }
 });
 

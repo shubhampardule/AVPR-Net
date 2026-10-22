@@ -50,6 +50,7 @@ function installWorkspaceApi(page, overrides = {}) {
     ],
     failNext: {},
     calls: [],
+    reviewDecisions: new Map(),
     ...overrides,
   };
 
@@ -166,23 +167,36 @@ function installWorkspaceApi(page, overrides = {}) {
       await route.fulfill({ status: 200, contentType: format === "sarif" ? "application/sarif+json" : "application/json", headers: { "content-disposition": `attachment; filename=scan.${format}` }, body: format === "sarif" ? JSON.stringify({ version: "2.1.0", runs: [] }) : JSON.stringify({ scans: state.scans }) });
       return;
     } else if (/\/scans\/[^/]+\/findings\/[^/]+$/.test(pathname) && method === "PATCH") {
-      if (!failOnce("review")) data = { ...finding(pathname.split("/").at(-1)), ...JSON.parse(request.postData()) };
+      if (!failOnce("review")) {
+        const findingId = pathname.split("/").at(-1);
+        const decision = JSON.parse(request.postData());
+        const previous = state.reviewDecisions.get(findingId)?.reviewHistory || [];
+        const entry = { status: decision.status, reason: decision.reason, reviewedBy: { name: "Demo Reviewer" }, reviewedAt: "2026-10-21T10:00:00.000Z" };
+        const updated = { ...entry, reviewHistory: [...previous, entry] };
+        state.reviewDecisions.set(findingId, updated);
+        data = { ...finding(findingId, decision.status), ...updated };
+      }
     } else if (/\/scans\/[^/]+\/findings$/.test(pathname)) {
       if (!failOnce("scanFindings")) {
         const pageNumber = Number(searchParams.get("page") || 1);
         const items = pageNumber === 1 ? [finding()] : [finding("finding-2")];
+        for (const item of items) Object.assign(item, state.reviewDecisions.get(item._id));
         data = { findings: items, pagination: { page: pageNumber, total: 30, totalPages: 2 } };
       }
     } else if (pathname.endsWith("/scans/organizations/org-a/findings")) {
       if (!failOnce("findings")) {
         const pageNumber = Number(searchParams.get("page") || 1);
         const items = pageNumber === 1 ? [finding()] : [finding("finding-2")];
+        for (const item of items) Object.assign(item, state.reviewDecisions.get(item._id));
         data = { findings: items, latestScans: [{ scan: "scan-1", commitSha: "abc123456789" }], pagination: { page: pageNumber, total: 30, totalPages: 2 } };
       }
     } else if (/\/scans\/[^/]+$/.test(pathname)) {
       if (!failOnce("scanStatus")) data = state.scans.find(scan => scan._id === pathname.split("/").at(-1)) || state.scans[0];
     } else if (pathname.endsWith("/organizations/invitations/accept") && method === "POST") data = { organization: { id: "org-a", name: "Demo Team" } };
 
+    const scanDelay = pathname.endsWith("/scans/scan-1/findings") ? state.scanFindingsDelayMs
+      : pathname.endsWith("/scans/organizations/org-a/repositories/team/project") && method === "GET" ? state.scanHistoryDelayMs : 0;
+    if (scanDelay) await new Promise(resolve => setTimeout(resolve, scanDelay));
     await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(status >= 400 ? { success: false, ...data } : { success: true, data }) });
   });
   return state;
@@ -225,7 +239,7 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(page.getByRole("button", { name: "Close navigation" })).toHaveCount(0);
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page.getByRole("navigation").getByRole("link", { name: "Repositories" }).click();
-    await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
   });
 
   test("settings controls change member access, create and revoke invitations, copy links, and update AI privacy", async ({ page }) => {
@@ -285,7 +299,7 @@ test.describe("workspace controls, with mocked APIs", () => {
     await page.getByRole("button", { name: "Connect installation" }).click();
     await expect(page.getByText("Installation could not be connected")).toBeVisible();
     await page.getByRole("button", { name: "Connect installation" }).click();
-    await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Repositories", exact: true })).toBeVisible();
     expect(state.connected).toBe(true);
 
     await page.getByRole("button", { name: "Refresh" }).click();
@@ -305,7 +319,7 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(dialog).toBeHidden();
 
     await page.getByRole("button", { name: "Add repository" }).click();
-    const manageAccess = page.getByRole("link", { name: "Manage GitHub Access" });
+    const manageAccess = page.getByRole("link", { name: "Open GitHub settings" });
     await expect(manageAccess).toHaveAttribute("href", "https://github.com/settings/installations/10");
     await expect(manageAccess).toHaveAttribute("target", "_blank");
     await page.context().route("https://github.com/settings/installations/10", route => route.fulfill({
@@ -373,14 +387,14 @@ test.describe("workspace controls, with mocked APIs", () => {
     const dependencyConsent = page.getByRole("checkbox", { name: /Include dependency advisories/ });
     await dependencyConsent.check();
     await page.getByRole("button", { name: "New scan" }).click();
-    await expect(page.getByRole("alert")).toHaveText("Scanner queue is unavailable Retry");
+    await expect(page.getByRole("alert")).toContainText("Scanner queue is unavailable");
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByRole("button", { name: "New scan" })).toBeVisible();
     await page.getByRole("button", { name: "New scan" }).click();
     expect(state.calls.filter(call => call.method === "POST" && call.pathname.endsWith("/repositories/team/project")).at(-1).body).toEqual({ includeDependencies: true });
     await expect(page.getByText("Waiting for the worker…")).toBeVisible();
     await page.getByRole("button", { name: "Cancel scan" }).click();
-    await expect(page.getByRole("alert")).toHaveText("Cancellation failed Retry");
+    await expect(page.getByRole("alert")).toContainText("Cancellation failed");
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByRole("button", { name: "Cancel scan" })).toBeVisible();
     await page.getByRole("button", { name: "Cancel scan" }).click();
@@ -413,9 +427,10 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(page.getByRole("link", { name: "Commit def987654321" })).toBeVisible();
     await history.selectOption("scan-1");
     await expect(page.getByRole("link", { name: "Commit abc123456789" })).toBeVisible();
-    await page.getByText("Scanner coverage and provenance").click();
+    await expect(page.getByRole("heading", { name: "What was checked" })).toBeVisible();
+    await page.getByText("Technical scan record").click();
     await expect(page.getByText(/rules-1/)).toBeVisible();
-    await page.getByText("Scanner coverage and provenance").click();
+    await page.getByText("Technical scan record").click();
     await expect(page.getByText(/rules-1/)).toBeHidden();
 
     for (const format of ["json", "sarif"]) {
@@ -449,24 +464,60 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(card.getByText("Untrusted input reaches a query.")).toBeVisible();
     await card.getByLabel("Review status").selectOption("acknowledged");
     await card.getByLabel("Reason").fill("Confirmed for the follow-up sprint.");
-    await card.getByRole("button", { name: "Save review" }).click();
+    await card.getByRole("button", { name: "Save decision" }).click();
     await expect(card.getByRole("alert")).toHaveText("Review save failed");
     await card.getByRole("button", { name: "Collapse finding" }).click();
     await expect(card.getByLabel("Reason")).toHaveCount(0);
     await card.getByRole("button", { name: "Expand finding" }).click();
     await expect(card.getByLabel("Reason")).toHaveValue("Confirmed for the follow-up sprint.");
-    await card.getByRole("button", { name: "Save review" }).click();
+    await card.getByRole("button", { name: "Save decision" }).click();
     await expect.poll(() => state.calls.filter(call => call.method === "PATCH" && call.pathname.endsWith("/findings/finding-1")).length).toBe(2);
     expect(state.calls.filter(call => call.method === "PATCH" && call.pathname.endsWith("/findings/finding-1")).at(-1).body).toEqual({ status: "acknowledged", reason: "Confirmed for the follow-up sprint." });
-    await expect(card.getByLabel("Reason")).toHaveCount(0);
+    await expect(card.getByLabel("Reason")).toHaveValue("");
+    await expect(card.getByRole("status")).toHaveText("Review decision saved with its reason and timestamp.");
+  });
+
+  test("scan refresh keeps the last good findings visible after a request fails", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/github/team/project/scan");
+    let card = page.getByRole("heading", { name: "Unsafe query" }).locator("xpath=ancestor::div[contains(@class,'overflow-hidden')][1]");
+    await expect(card).toBeVisible();
+    state.failNext.scanFindings = { message: "Latest findings could not be refreshed", remaining: 1 };
+    await card.getByRole("button", { name: "Expand finding" }).click();
+    await card.getByLabel("Review status").selectOption("acknowledged");
+    await card.getByLabel("Reason").fill("Confirmed during manual review.");
+    await card.getByRole("button", { name: "Save decision" }).click();
+    await expect(page.getByRole("alert")).toContainText("Latest findings could not be refreshed");
+    card = page.getByRole("heading", { name: "Unsafe query" }).locator("xpath=ancestor::div[contains(@class,'overflow-hidden')][1]");
+    await expect(card).toBeVisible();
+    await expect(page.getByText("Existing scan details remain from the last successful load.")).toBeVisible();
+  });
+
+  test("scan selection announces that scan details are loading", async ({ page }) => {
+    installWorkspaceApi(page, { scanFindingsDelayMs: 600 });
+    await page.goto("/github/team/project/scan");
+    await expect(page.getByRole("status")).toContainText("Loading scan details");
+    await expect(page.getByRole("heading", { name: "Unsafe query" })).toBeVisible();
+  });
+
+  test("scan history announces that its list is loading", async ({ page }) => {
+    installWorkspaceApi(page, { scanHistoryDelayMs: 600 });
+    await page.goto("/github/team/project/scan");
+    await expect(page.getByRole("status")).toContainText("Loading scan history");
+    await expect(page.getByRole("link", { name: "Commit abc123456789" })).toBeVisible();
   });
 
   test("organization findings page filters, retries, paginates, and expands review links", async ({ page }) => {
     const state = installWorkspaceApi(page, { failNext: { findings: { message: "Findings API temporarily unavailable", remaining: 2 }, review: "Review was rejected" } });
     await page.goto("/findings");
     await expect(page.getByRole("alert")).toContainText("Findings API temporarily unavailable");
+    const initialFindingsCalls = state.calls.filter(call => call.pathname.endsWith("/scans/organizations/org-a/findings")).length;
+    // StrictMode can dispatch and abort a duplicate initial request. Clear any
+    // fixture failures before Retry so this assertion tests the user's action.
+    state.failNext.findings.remaining = 0;
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByRole("heading", { name: "Unsafe query" })).toBeVisible();
+    expect(state.calls.filter(call => call.pathname.endsWith("/scans/organizations/org-a/findings")).length).toBeGreaterThan(initialFindingsCalls);
 
     const filter = page.getByRole("combobox", { name: "Risk filter" });
     for (const value of ["critical", "high", "medium", "low", "all"]) {
@@ -489,12 +540,54 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(card.getByRole("link", { name: "View exact scanned source" })).toHaveAttribute("href", "https://github.com/team/project/blob/abc123456789/src/index.js#L3");
     await card.getByLabel("Review status").selectOption("dismissed");
     await card.getByLabel("Reason").fill("False positive after manual review.");
-    await card.getByRole("button", { name: "Save review" }).click();
+    await card.getByRole("button", { name: "Save decision" }).click();
     await expect(card.getByRole("alert")).toHaveText("Review was rejected");
-    await card.getByRole("button", { name: "Save review" }).click();
+    await card.getByRole("button", { name: "Save decision" }).click();
     await expect.poll(() => state.calls.filter(call => call.method === "PATCH" && call.pathname.endsWith("/findings/finding-1")).length).toBe(2);
     await card.getByRole("button", { name: "Collapse finding" }).click();
     await expect(card.getByLabel("Reason")).toHaveCount(0);
+  });
+
+  test("finding review requires a reason and shows reviewer history after reload", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/findings");
+    let card = page.getByRole("heading", { name: "Unsafe query" }).locator("xpath=ancestor::div[contains(@class,'overflow-hidden')][1]");
+    await card.getByRole("button", { name: "Expand finding" }).click();
+    await card.getByLabel("Review status").selectOption("dismissed");
+    const save = card.getByRole("button", { name: "Save decision" });
+    await expect(save).toBeDisabled();
+    await card.getByLabel("Reason").fill("Manual review confirmed this path is unreachable.");
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(card.getByRole("status")).toHaveText("Review decision saved with its reason and timestamp.");
+    await expect(card.getByText("Review history (1)")).toBeVisible();
+    await card.getByText("Review history (1)").click();
+    await expect(card.getByText("Demo Reviewer")).toBeVisible();
+    await expect(card.getByText("Manual review confirmed this path is unreachable.")).toBeVisible();
+    await expect(card.locator("ol")).toContainText("2026");
+    expect(state.reviewDecisions.get("finding-1").reviewHistory).toHaveLength(1);
+
+    await page.reload();
+    card = page.getByRole("heading", { name: "Unsafe query" }).locator("xpath=ancestor::div[contains(@class,'overflow-hidden')][1]");
+    await expect(card).toContainText("Dismissed after review");
+    await card.getByRole("button", { name: "Expand finding" }).click();
+    await card.getByText("Review history (1)").click();
+    await expect(card.getByText("Demo Reviewer")).toBeVisible();
+    await expect(card.getByText("Manual review confirmed this path is unreachable.")).toBeVisible();
+  });
+
+  test("findings retain the last successful results when a refresh fails", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/findings");
+    const card = page.getByRole("heading", { name: "Unsafe query" }).locator("xpath=ancestor::div[contains(@class,'overflow-hidden')][1]");
+    await card.getByRole("button", { name: "Expand finding" }).click();
+    await card.getByLabel("Review status").selectOption("acknowledged");
+    await card.getByLabel("Reason").fill("Confirmed and assigned for remediation.");
+    state.failNext.findings = { message: "Refresh failed after review", remaining: 1 };
+    await card.getByRole("button", { name: "Save decision" }).click();
+    await expect(page.getByRole("alert")).toContainText("Refresh failed after review");
+    await expect(card.getByRole("heading", { name: "Unsafe query" })).toBeVisible();
+    await expect(page.getByText("The results below are from the last successful load and may be out of date.")).toBeVisible();
   });
 
   test("sign-out reports failure and remains retryable", async ({ page }) => {
@@ -533,9 +626,20 @@ test.describe("workspace controls, with mocked APIs", () => {
 
     state.failNext.repositories = "Repository list unavailable";
     await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByText("Repository list unavailable")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Repository list unavailable" })).toBeVisible();
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByRole("heading", { name: "No repositories found" })).toBeVisible();
+  });
+
+  test("GitHub keeps the last repository list visible when refresh fails", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    await page.goto("/github");
+    await expect(page.getByRole("heading", { name: "project", exact: true })).toBeVisible();
+    state.failNext.repositories = "Repository refresh unavailable";
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(page.getByRole("alert")).toContainText("Repository refresh unavailable");
+    await expect(page.getByRole("heading", { name: "project", exact: true })).toBeVisible();
+    await expect(page.getByText("Showing 1 repositories from the last successful load; they may be out of date.")).toBeVisible();
   });
 
   test("scan history retry reloads history after the initial list request fails", async ({ page }) => {

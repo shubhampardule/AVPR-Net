@@ -19,7 +19,7 @@ needed before teams can rely on SecurePatch beyond an internal pilot.
 
 ## Architecture and responsibilities
 
-- **Existing scanning path:** React -> authenticated Express API -> Vercel Queues in production (BullMQ/Redis locally) -> cloud
+- **Scanning path:** React -> authenticated Express API -> Vercel Queues in production; local development uses BullMQ/Redis when `REDIS_URL` is set, otherwise an in-process worker -> authorized GitHub archive -> scanners
   worker -> authorized GitHub archive -> Semgrep/Bandit -> normalization and
   SHA-256 deduplication -> occurrence counts -> deterministic weighted risk ->
   MongoDB findings. Temporary source workspaces are cleaned up by the worker.
@@ -98,12 +98,27 @@ send only tiny synthetic text. Each retry may consume additional quota.
 
 ## Run the original scanning application
 
-The default `npm start` / `npm run dev` keeps the existing authenticated server
-and requires DATABASE_URL, SESSION_SECRET, Google OAuth client settings, GitHub
-App settings/private-key path, MongoDB and Redis. The standalone scan worker
-also needs Semgrep and/or Bandit installed on PATH. Start MongoDB/Redis, then
-backend server, worker (`npm run worker` in backend) and frontend. Configure the
-callbacks in `.env.example` to match the OAuth/GitHub applications you own.
+The default `npm start` / `npm run dev` runs the authenticated application and
+requires DATABASE_URL, SESSION_SECRET, Google OAuth settings, and GitHub App
+settings/private-key path. Redis is optional for local development: without
+`REDIS_URL`, the backend runs scans in-process; with it, start Redis and the
+standalone worker (`npm run worker` in backend). Full static coverage requires
+Semgrep and Bandit on the worker PATH. If a scanner is missing, available
+detectors still run and the scan is marked with partial coverage. On Windows,
+the scanner worker can run the pinned Linux scanner binaries in WSL. In Ubuntu,
+install the same versions used by the production worker:
+
+```powershell
+wsl --distribution Ubuntu --exec bash -lc 'python3 -m venv "$HOME/.local/share/securepatch-scanners" && "$HOME/.local/share/securepatch-scanners/bin/pip" install --upgrade pip==26.2.1 setuptools==84.2.0 && "$HOME/.local/share/securepatch-scanners/bin/pip" install semgrep==1.181.0 bandit==1.9.4'
+wsl --distribution Ubuntu --exec printenv HOME
+```
+
+Set `SECUREPATCH_SCANNER_WSL_DISTRO=Ubuntu` and
+`SECUREPATCH_SCANNER_WSL_BIN_DIR=<the printed HOME>/.local/share/securepatch-scanners/bin`
+in `backend/.env`, then restart the backend. The worker copies each validated,
+temporary repository snapshot into WSL's Linux filesystem for the scan and
+removes that copy afterward. Configure OAuth callback URLs to match the local
+or production host you use.
 
 For the production deployment, set `FRONTEND_URL` to
 `https://avpr-psi.vercel.app` and register these exact callback URLs with the

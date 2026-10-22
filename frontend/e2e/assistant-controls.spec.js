@@ -5,7 +5,7 @@ const findingId = "64b64c0f8bd4f4f86f39b123";
 const originalCode = "export function parsePort(value) { return parseInt(value, 10); }\n";
 const proposalCode = "export function parsePort(value) {\n  if (!/^\\d+$/.test(value)) throw new Error('invalid port');\n  return Number(value);\n}\n";
 
-async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest } = {}) {
+async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured" } = {}) {
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -14,7 +14,7 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
 
     if (path.endsWith("/auth/me")) data = { user: { id: "assistant-test-user", name: "Assistant Test" } };
     else if (path.endsWith("/organizations")) data = { organizations: [{ id: "assistant-org", name: "Assistant Test Org", role: "owner" }] };
-    else if (path.endsWith("/ai/health")) data = { status: "configured", languages: ["javascript", "python", "typescript", "c", "cpp", "bash"], execution: "disabled" };
+    else if (path.endsWith("/ai/health")) data = { status: healthStatus, languages: ["javascript", "python", "typescript", "c", "cpp", "bash"], execution: "disabled" };
     else if (path.endsWith("/ai/policy")) data = { hostedAiEnabled: true, provider: "NVIDIA", consentRequired: true };
     else if (path.endsWith("/ai/knowledge")) data = { chunks: 2, sources: ["approved-security-guide.md"] };
     else if (path.endsWith("/ai/fixtures")) data = {
@@ -66,6 +66,9 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     }
     else if (path.endsWith("/findings")) data = { findings: [], pagination: { page: 1, total: 0, totalPages: 1 } };
 
+    if (path.endsWith("/ai/fixtures") && fixturesDelayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, fixturesDelayMs));
+    }
     await route.fulfill({ json: { success: true, data } });
   });
 }
@@ -136,12 +139,32 @@ test("assistant rejects malformed JSON and shows a recoverable validation error"
   let analyzeCount = 0;
   await mockAssistant(page, { onAnalyze: () => { analyzeCount += 1; } });
   await page.goto("/assistant");
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
   await page.getByLabel("Event JSON").fill("{bad json");
   await approve(page);
   await page.getByRole("button", { name: "Analyze evidence" }).click();
   await expect(page.getByRole("alert")).toHaveText("Event must contain valid JSON.");
   expect(analyzeCount).toBe(0);
   await expect(page.getByRole("button", { name: "Analyze evidence" })).toBeDisabled();
+});
+
+test("assistant preserves event JSON entered before examples finish loading", async ({ page }) => {
+  await mockAssistant(page, { fixturesDelayMs: 1000 });
+  await page.goto("/assistant");
+  const eventJson = page.getByLabel("Event JSON");
+  await eventJson.fill('{"category":"custom"}');
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
+  await expect(eventJson).toHaveValue('{"category":"custom"}');
+});
+
+test("assistant reports the provider connected after a successful request", async ({ page }) => {
+  await mockAssistant(page, { healthStatus: "configured_unverified" });
+  await page.goto("/assistant");
+  await expect(page.getByText("NVIDIA: Configured · verification pending")).toBeVisible();
+  await approve(page);
+  await page.getByRole("button", { name: "Analyze evidence" }).click();
+  await expect(page.getByText("Synthetic evidence reviewed.")).toBeVisible();
+  await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
 });
 
 test("assistant code controls submit the selected review, copy and download the proposal", async ({ page }) => {

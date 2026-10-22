@@ -59,8 +59,7 @@ export default function Findings() {
   }, [contextLoading, organizationId, page, risk, revision]);
 
   const retry = () => {
-    preserveCurrentResults.current = false;
-    setData(null);
+    preserveCurrentResults.current = Boolean(data);
     setRevision((value) => value + 1);
   };
   const refreshAfterReview = () => {
@@ -121,6 +120,7 @@ export default function Findings() {
                 <p className="mt-2 break-words font-mono-code">{error}</p>
               </details>
               <button type="button" onClick={retry} className="mt-4 rounded-md border border-rose-100/20 px-3 py-2 text-xs font-semibold hover:bg-rose-100/10">Retry</button>
+              {data && <p className="mt-3 text-xs text-amber-200">The results below are from the last successful load and may be out of date.</p>}
             </div>
           </div>
         </section>

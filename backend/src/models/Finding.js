@@ -5,6 +5,15 @@ const findingSchema = new mongoose.Schema(
     statusReason: { type: String, maxlength: 1000, default: "" },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     reviewedAt: { type: Date, default: null },
+    reviewHistory: {
+      type: [{
+        status: { type: String, enum: ["open", "acknowledged", "dismissed", "resolved"], required: true },
+        reason: { type: String, maxlength: 1000, required: true },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        reviewedAt: { type: Date, required: true },
+      }],
+      default: [],
+    },
     correlationKey: { type: String, default: null, index: true },
     provenance: { type: [mongoose.Schema.Types.Mixed], default: [] },
     scan: {

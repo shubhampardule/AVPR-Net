@@ -35,6 +35,7 @@ export default function Repository() {
   } = useOutletContext();
 
   const [files, setFiles] = useState([]);
+  const [repositoryDetails, setRepositoryDetails] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState(
     new Set()
   );
@@ -77,18 +78,13 @@ export default function Repository() {
         setLoading(true);
       }
 
-      const response = await fetch(
-        `${API_BASE_URL}/github/organizations/${organizationId}/repositories/${encodeURIComponent(
-          repository.owner
-        )}/${encodeURIComponent(
-          repository.name
-        )}/files`,
-        {
-          credentials: "include",
-        }
-      );
+      const repositoryPath = `${API_BASE_URL}/github/organizations/${organizationId}/repositories/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}`;
+      const [response, metadataResponse] = await Promise.all([
+        fetch(`${repositoryPath}/files`, { credentials: "include" }),
+        fetch(`${repositoryPath}/metadata`, { credentials: "include" }),
+      ]);
 
-      const data = await response.json();
+      const [data, metadataBody] = await Promise.all([response.json(), metadataResponse.json()]);
 
       if (!response.ok) {
         throw new Error(
@@ -96,6 +92,7 @@ export default function Repository() {
             "Failed to load repository files"
         );
       }
+      if (!metadataResponse.ok) throw new Error(metadataBody.error?.message || "Unable to load current repository details.");
 
       const repositoryFiles =
         data.data?.files ||
@@ -104,6 +101,7 @@ export default function Repository() {
         [];
 
       setFiles(repositoryFiles);
+      setRepositoryDetails(metadataBody.data?.repository || null);
     } catch (err) {
       console.error(
         "Failed to load repository files:",
@@ -297,7 +295,7 @@ export default function Repository() {
           <InfoCard
             icon={GitBranch}
             label="Default Branch"
-            value="main"
+          value={repositoryDetails?.defaultBranch || "Unavailable"}
           />
 
           <InfoCard
@@ -364,8 +362,16 @@ export default function Repository() {
 
           </div>
 
-          {loading || contextLoading ? (
+          {contextLoading || !organizationId ? (
+            <div className="rounded-xl border border-dashed border-border-subtle bg-bg-secondary p-8 text-sm text-text-secondary">{contextLoading ? "Loading workspace…" : "Choose a workspace to load this repository."}</div>
+          ) : loading ? (
             <LoadingTree />
+          ) : error && files.length === 0 ? (
+            <div role="alert" className="rounded-xl border border-red-400/20 bg-red-400/5 p-6">
+              <h3 className="font-medium text-red-200">Repository data could not be loaded</h3>
+              <p className="mt-2 text-sm text-text-secondary">{error}</p>
+              <button type="button" onClick={() => fetchFiles(true)} disabled={refreshing} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-text-primary disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Retry</button>
+            </div>
           ) : tree.length === 0 ? (
             <EmptyTree />
           ) : (
@@ -396,6 +402,7 @@ export default function Repository() {
 
             </div>
           )}
+          {error && files.length > 0 && <p role="status" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">Showing the last successfully loaded repository snapshot because refresh failed: {error}</p>}
 
         </section>
 

@@ -83,6 +83,9 @@ class ScanService {
       status: scan.status,
       owner,
       repo,
+      branch: scan.branch,
+      commitSha: scan.commitSha,
+      includeDependencies: scan.includeDependencies,
       createdAt: scan.createdAt,
     };
   }
@@ -123,6 +126,7 @@ class ScanService {
 
     const [findings, total] = await Promise.all([
       Finding.find(filter)
+        .populate("reviewHistory.reviewedBy", "name githubUsername")
         .sort({ riskScore: -1, _id: -1 })
         .skip(skip)
         .limit(take)

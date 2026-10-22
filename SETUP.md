@@ -73,20 +73,21 @@ SecurePatch features an asynchronous, orchestrated security scan pipeline powere
 - **Normalizer & Deduplicator**: Normalizes findings to a unified schema and generates deterministic SHA-256 fingerprints to eliminate duplicate reports.
 - **Auditable Weighted Risk Model**:
   $$\text{Risk} = 0.40 \times \text{Severity} + 0.25 \times \text{Exploitability} + 0.15 \times \text{Occurrence} + 0.20 \times \text{Business Impact}$$
-- **Vercel Queues in production / BullMQ with Redis locally**: HTTP requests enqueue scan jobs and immediately return `202 Accepted`. Background worker processes jobs separately.
+- **Vercel Queues in production / local scan worker in development**: with `REDIS_URL`, local HTTP requests enqueue BullMQ jobs and the standalone worker processes them; without it, the development API runs the worker in-process. HTTP requests return `202 Accepted` in both cases.
 
 ---
 
 ## Original Scanning Services and Processes
 
-The original scan environment requires MongoDB (DATABASE_URL), configured
-Google OAuth/GitHub App credentials, Redis, the API, the worker, and the frontend.
-Semgrep and/or Bandit must be installed on the worker PATH. MongoDB and original
-external integrations were not configured in this workspace during verification.
-The API/worker/Redis commands below describe the existing scan workflow.
+The authenticated scan application requires MongoDB (`DATABASE_URL`), configured
+OAuth/GitHub App credentials, the API, and the frontend. Redis is optional for
+local development; configure it only when running the standalone BullMQ worker.
+Full static scan coverage requires Semgrep and Bandit. Missing scanners are
+reported as partial coverage while available checks continue. Production uses
+Vercel Queues and the configured scanner daemon.
 
 ### Process 1: Redis Server
-Redis is required for the BullMQ queue (`securepatch-scan-queue`).
+Redis is only required when using the BullMQ queue (`securepatch-scan-queue`).
 ```bash
 # Via Docker
 docker run -d --name securepatch-redis -p 6379:6379 redis:alpine

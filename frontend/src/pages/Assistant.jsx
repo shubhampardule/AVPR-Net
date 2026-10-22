@@ -81,6 +81,8 @@ export default function Assistant({ demo = false }) {
   const [pullRequest, setPullRequest] = useState(null);
   const activeBase = useRef(base);
   const pendingRequest = useRef(null);
+  const eventTextEdited = useRef(false);
+  const requestEdited = useRef(false);
   activeBase.current = base;
   const requestFingerprint = JSON.stringify({ organizationId, tab, findingId: demo ? "" : findingId,
     eventText: tab === "investigate" ? eventText : "", language: tab === "code" ? language : "",
@@ -125,18 +127,22 @@ export default function Assistant({ demo = false }) {
     if (!base) return;
     let live = true;
     const controller = new AbortController();
+    eventTextEdited.current = false;
+    requestEdited.current = false;
     setResult(null); setError(""); setHealth(null); setPolicy(null); setKnowledge(null); setBusy(false);
+    setEventText(""); setRequest("");
     Promise.all([api("health", undefined, controller.signal), api("knowledge", undefined, controller.signal),
       api("fixtures", undefined, controller.signal), demo ? Promise.resolve({ hostedAiEnabled: true }) : api("policy", undefined, controller.signal)]).then(async ([h, k, f, p]) => {
       if (!live) return;
       setHealth(h); setPolicy(p); setKnowledge(k); setFixtures(f);
-      setEventText(JSON.stringify(f.events.suspicious, null, 2));
-      setRequest(f.code.javascript.request);
+      if (!eventTextEdited.current) setEventText(JSON.stringify(f.events.suspicious, null, 2));
+      if (!requestEdited.current) setRequest(f.code.javascript.request);
       if (!demo && params.get("mode") === "review" && params.get("findingId")) {
         const source = await api(`finding/${params.get("findingId")}`, undefined, controller.signal);
         if (!live) return;
         setDraftContext(source); setTab("code"); setLanguage(source.language); setMode("review");
-        setOriginalCode(source.originalCode); setRequest(source.request);
+        setOriginalCode(source.originalCode);
+        if (!requestEdited.current) setRequest(source.request);
       }
     }).catch((e) => { if (live) setError(demo ? `${e.message}. Start the backend with npm run demo.` : e.message); });
     return () => { live = false; controller.abort(); pendingRequest.current?.abort(); };
@@ -187,6 +193,9 @@ export default function Assistant({ demo = false }) {
         : tab === "code" ? await api("code", { language, mode, request, ...(mode === "review" ? { originalCode } : {}) }, controller.signal)
           : await api("retrieve", { query }, controller.signal);
       if (activeBase.current !== startedFor) return;
+      if (response.status !== "unavailable") {
+        setHealth(current => current ? { ...current, reachable: true, status: "configured" } : current);
+      }
       setResult(response);
       if (response.status === "unavailable") setError(response.error?.message || "AI assistance unavailable; original evidence is retained.");
     } catch (e) { if (activeBase.current === startedFor && e.name !== "AbortError") setError(e instanceof SyntaxError ? "Event must contain valid JSON." : e.message); }
@@ -263,7 +272,7 @@ export default function Assistant({ demo = false }) {
               className="rounded-md border border-white/15 px-3 py-1.5 text-xs capitalize transition-colors hover:border-white/30 hover:bg-white/[0.03] disabled:opacity-50">{name} fixture</button>)}</div>
             <label className="block text-xs text-[#9BA8A1]">Event JSON
               <textarea className={`${field} mt-2 font-mono text-xs`} aria-label="Event JSON" rows={12} maxLength={16000}
-                value={eventText} onChange={(e) => setEventText(e.target.value)} disabled={busy || Boolean(findingId && !demo)} />
+                value={eventText} onChange={(e) => { eventTextEdited.current = true; setEventText(e.target.value); }} disabled={busy || Boolean(findingId && !demo)} />
             </label>
           </>}
           {tab === "code" && <>
@@ -276,7 +285,7 @@ export default function Assistant({ demo = false }) {
             </div>
             <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-[#A8C4B1] underline underline-offset-2">Load review example</button>
             <label className="block text-xs text-[#9BA8A1]">Request<textarea aria-label="Code request" className={`${field} mt-2`} rows={8}
-              value={request} onChange={(e) => setRequest(e.target.value)} required maxLength={3000} /></label>
+              value={request} onChange={(e) => { requestEdited.current = true; setRequest(e.target.value); }} required maxLength={3000} /></label>
             {mode === "review" && <label className="block text-xs text-[#9BA8A1]">Source for review<textarea aria-label="Source for review"
               className={`${field} mt-2 font-mono`} rows={7} value={originalCode} onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
           </>}

@@ -35,10 +35,12 @@ async function createEphemeralWorkspace(installationId, owner, repo, ref) {
   if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
   const workspacePath = path.join(base, "workspace");
-  const cleanup = () => {
+  let scannerWorkspacePath = workspacePath;
+  const cleanup = async () => {
     const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
-    fs.rmSync(base, { recursive: true, force: true });
+    try { await require("../scanners/process").cleanupWslWorkspace(scannerWorkspacePath); }
+    finally { fs.rmSync(base, { recursive: true, force: true }); }
   };
   try {
     const zip = new AdmZip(await download(installationId, owner, repo, ref));
@@ -55,7 +57,8 @@ async function createEphemeralWorkspace(installationId, owner, repo, ref) {
     zip.extractAllTo(workspacePath, false);
     const names = fs.readdirSync(workspacePath);
     const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
-    return { workspacePath: nested ? path.join(workspacePath, names[0]) : workspacePath, cleanup };
-  } catch (error) { cleanup(); throw error; }
+    scannerWorkspacePath = nested ? path.join(workspacePath, names[0]) : workspacePath;
+    return { workspacePath: scannerWorkspacePath, cleanup };
+  } catch (error) { await cleanup(); throw error; }
 }
 module.exports = { createEphemeralWorkspace, download };

@@ -50,7 +50,7 @@ router.get("/organizations/:organizationId/findings", requireAuth, requireOrgani
     if (!["critical", "high", "medium", "low"].includes(req.query.riskCategory)) throw bad("Invalid risk category");
     filter.riskCategory = req.query.riskCategory;
   }
-  const [findings, total] = await Promise.all([Finding.find(filter).sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
+  const [findings, total] = await Promise.all([Finding.find(filter).populate("reviewHistory.reviewedBy", "name githubUsername").sort({ riskScore: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), Finding.countDocuments(filter)]);
   res.json({ success: true, data: { findings, latestScans: latest, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } } });
 }));
 
@@ -74,8 +74,11 @@ router.patch("/:scanId/findings/:findingId", requireAuth, requireScanMember, han
   objectId(req.params.findingId);
   const { status, reason } = req.body || {};
   if (!["open", "acknowledged", "dismissed", "resolved"].includes(status) || typeof reason !== "string" || !reason.trim() || reason.length > 1000) throw bad("Choose a status and a review reason (1–1000 characters)");
+  const reviewedAt = new Date();
   const finding = await Finding.findOneAndUpdate({ _id: req.params.findingId, scan: req.params.scanId },
-    { $set: { status, statusReason: reason.trim(), reviewedBy: req.user._id, reviewedAt: new Date() } }, { returnDocument: "after", runValidators: true });
+    { $set: { status, statusReason: reason.trim(), reviewedBy: req.user._id, reviewedAt },
+      $push: { reviewHistory: { status, reason: reason.trim(), reviewedBy: req.user._id, reviewedAt } } },
+    { returnDocument: "after", runValidators: true });
   if (!finding) throw bad("Finding not found", 404);
   res.json({ success: true, data: finding });
 }));

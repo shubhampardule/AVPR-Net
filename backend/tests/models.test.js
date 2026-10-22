@@ -120,5 +120,22 @@ describe("SecurePatch Models", () => {
       expect(error).toBeUndefined();
       expect(finding.riskScore).toBe(7.5);
     });
+
+    test("records review decisions with a reviewer and timestamp", async () => {
+      const Finding = require("../src/models/Finding");
+      const reviewer = new mongoose.Types.ObjectId();
+      const finding = new Finding({
+        scan: new mongoose.Types.ObjectId(), organization: new mongoose.Types.ObjectId(),
+        owner: "testorg", repo: "testrepo", filePath: "src/app.js", startLine: 10,
+        ruleId: "rule-1", scanner: "semgrep", severity: "high", title: "Test vulnerability",
+        fingerprint: "review-history-test", riskScore: 7.5,
+        riskFactors: { severity: 7.5, exploitability: 9, occurrence: 2, businessImpact: 7 },
+        riskCategory: "high",
+        reviewHistory: [{ status: "dismissed", reason: "Reviewed and not reachable", reviewedBy: reviewer, reviewedAt: new Date() }],
+      });
+      await expect(finding.validate()).resolves.toBeUndefined();
+      expect(finding.reviewHistory).toHaveLength(1);
+      expect(finding.reviewHistory[0].reviewedBy.toString()).toBe(reviewer.toString());
+    });
   });
 });

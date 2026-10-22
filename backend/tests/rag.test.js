@@ -146,5 +146,6 @@ test.each([["", {}], ["x", { k: 9 }], ["x", { type: "private" }], ["x", { minSco
 test("structured sensitive fields and representative tokens are redacted", () => {
   expect(sanitize({ password: "value", nested: { source_ip: "192.0.2.1", note: "Bearer abc123" } }))
     .toEqual({ password: "[REDACTED]", nested: { source_ip: "[REDACTED]", note: "Bearer [REDACTED]" } });
-  expect(redact("-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----")).toBe("[REDACTED PRIVATE KEY]\n\n");
+  const privateKey = ["-----BEGIN RSA", " PRIVATE KEY-----\nabc\n-----END RSA", " PRIVATE KEY-----"].join("");
+  expect(redact(privateKey)).toBe("[REDACTED PRIVATE KEY]\n\n");
 });

@@ -16,6 +16,8 @@ export default function GitHub() {
   const [error, setError] = useState(null);
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [installationUrl, setInstallationUrl] = useState(null);
+  const [installation, setInstallation] = useState(null);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
   const [connected, setConnected] = useState(false);
   const [installations, setInstallations] = useState([]);
   const [selectedInstallation, setSelectedInstallation] = useState("");
@@ -31,75 +33,64 @@ export default function GitHub() {
   const organizationName =
     selectedOrg?.name ||
     selectedOrg?.organization?.name ||
-    "SecurePatch Organization";
+    "Selected workspace";
 
-const fetchGitHubStatus = async () => {
-  if (!organizationId) return;
-
+const fetchGitHubStatus = async (isRefresh = false) => {
+  if (!organizationId) return null;
+  let statusChecked = false;
+  if (isRefresh) setRefreshing(true);
+  else setLoading(true);
+  setError(null);
   try {
-    const response = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/status`, {
-      credentials: "include",
-    });
+    const response = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/status`, { credentials: "include" });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || "Failed to load GitHub status");
+    statusChecked = true;
+    setStatusUnavailable(false);
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error?.message || "Failed to load GitHub status");
+    const isConnected = Boolean(body.data?.connected);
+    const connectedInstallation = body.data?.installation || null;
+    setConnected(isConnected);
+    setInstallation(connectedInstallation);
+    setInstallationUrl(connectedInstallation?.htmlUrl || null);
+    if (isConnected) {
+      const reposResponse = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/repositories`, { credentials: "include" });
+      const reposBody = await reposResponse.json();
+      if (!reposResponse.ok) throw new Error(reposBody.error?.message || "GitHub is connected, but its repository list could not be loaded.");
+      const nextRepositories = reposBody.data?.repositories || [];
+      setRepositories(nextRepositories);
+      setInstallations([]);
+      setInstallAppUrl(null);
+      return { connected: true, account: connectedInstallation?.account || null, repositories: nextRepositories };
     }
 
-    setConnected(Boolean(data.data?.connected));
-    setInstallationUrl(data.data?.installation?.htmlUrl || null);
-    if (data.data?.connected) {
-      await fetchRepositories();
-    } else {
-      setRepositories([]);
-      const [installResponse, appResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/github/installations`, { credentials: "include" }),
-        fetch(`${API_BASE_URL}/github/test`, { credentials: "include" }),
-      ]);
-      const installData = await installResponse.json();
-      const appData = await appResponse.json();
-      if (!installResponse.ok || !appResponse.ok) throw new Error("Unable to load GitHub App access.");
-      setInstallations(installData.data || []);
-      setSelectedInstallation(installData.data?.[0]?.id?.toString() || "");
-      setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
-    }
+    setInstallation(null);
+    setInstallationUrl(null);
+    setRepositories([]);
+    const [installResponse, appResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/github/installations`, { credentials: "include" }),
+      fetch(`${API_BASE_URL}/github/test`, { credentials: "include" }),
+    ]);
+    const [installData, appData] = await Promise.all([installResponse.json(), appResponse.json()]);
+    if (!installResponse.ok || !appResponse.ok) throw new Error("Unable to load GitHub App access.");
+    setInstallations(installData.data || []);
+    setSelectedInstallation(installData.data?.[0]?.id?.toString() || "");
+    setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
+    return { connected: false, account: null, repositories: [] };
   } catch (err) {
     console.error("Failed to load GitHub status:", err);
-    setError(err.message);
-    setInstallationUrl(null);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-};
-
-const fetchRepositories = async (isRefresh = false) => {
-  if (!organizationId) return;
-
-  try {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
+    setError(err.message || "Failed to load GitHub status");
+    if (!statusChecked) setStatusUnavailable(true);
+    // The installation status may have loaded successfully before the repository
+    // request failed. Keep that verified account state instead of showing a false
+    // disconnected state; only clear identity when status itself is unavailable.
+    if (!statusChecked && !isRefresh) {
+      setConnected(false);
+      setInstallation(null);
+      setInstallationUrl(null);
+      setRepositories([]);
     }
-
-    setError(null);
-
-    const response = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/repositories`, {
-      credentials: "include",
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error?.message || "Failed to load repositories");
-    }
-
-    setRepositories(data.data?.repositories || []);
-  } catch (err) {
-    console.error("Failed to load repositories:", err);
-    setError(err.message || "Failed to load repositories");
+    return { error: err.message || "Failed to load GitHub status" };
   } finally {
     setLoading(false);
     setRefreshing(false);
@@ -110,6 +101,11 @@ useEffect(() => {
   if (!contextLoading && organizationId) {
     setLoading(true);
     setError(null);
+    setStatusUnavailable(false);
+    setConnected(false);
+    setInstallation(null);
+    setInstallationUrl(null);
+    setRepositories([]);
     fetchGitHubStatus();
   }
 }, [contextLoading, organizationId]);
@@ -124,7 +120,7 @@ const connectInstallation = async () => {
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error?.message || "Unable to connect GitHub.");
-    await fetchGitHubStatus();
+    await fetchGitHubStatus(true);
   } catch (err) { setError(err.message); }
   finally { setConnecting(false); }
 };
@@ -146,10 +142,7 @@ const connectInstallation = async () => {
             <p className="mt-1 text-sm text-text-secondary">Manage repositories connected to SecurePatch</p>
           </div>
 
-          <button onClick={async () => {
-  setRefreshing(true);
-  await fetchGitHubStatus();
-}} disabled={refreshing || loading || !organizationId} className="flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-secondary transition hover:border-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
+          <button onClick={() => fetchGitHubStatus(true)} disabled={refreshing || loading || !organizationId} className="flex items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-secondary transition hover:border-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Refresh
           </button>
@@ -175,7 +168,14 @@ const connectInstallation = async () => {
                 </div>
 
                 <p className="mt-1 text-sm text-text-secondary">{organizationName}</p>
-                <p className="mt-2 font-mono-code text-xs text-text-muted">GitHub App Installation</p>
+                {connected && installation?.account ? (
+                  <p className="mt-2 text-xs text-text-muted">
+                    Installation owner: {installation.htmlUrl ? <a href={installation.htmlUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-text-secondary underline decoration-white/20 underline-offset-2 hover:text-white">{installation.account}</a> : <span className="font-medium text-text-secondary">{installation.account}</span>}
+                    {installation.accountType && <span> · {installation.accountType}</span>}
+                  </p>
+                ) : connected ? (
+                  <p className="mt-2 font-mono-code text-xs text-text-muted">Connected installation</p>
+                ) : null}
               </div>
             </div>
 
@@ -187,12 +187,14 @@ const connectInstallation = async () => {
         </motion.div>
 
         {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-400/20 bg-red-400/5 p-4">
+          <div role="alert" className="mb-6 flex items-start gap-3 rounded-xl border border-red-400/20 bg-red-400/5 p-4">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
 
             <div>
               <p className="text-sm font-medium text-red-300">Unable to load repositories</p>
               <p className="mt-1 text-sm text-text-secondary">{error}</p>
+              <button type="button" onClick={() => fetchGitHubStatus(true)} disabled={refreshing} className="mt-3 inline-flex items-center gap-2 rounded-md border border-red-200/20 px-3 py-1.5 text-xs font-medium text-red-100 hover:bg-red-100/5 disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} /> Retry</button>
+              {repositories.length > 0 && <p className="mt-3 text-xs text-amber-200">Showing {repositories.length} repositories from the last successful load; they may be out of date. Refresh to check for changes.</p>}
             </div>
           </div>
         )}
@@ -205,10 +207,10 @@ const connectInstallation = async () => {
           </div>
         )}
 
-        {organizationId && !connected && !loading && (
+        {organizationId && !connected && !loading && !statusUnavailable && (
           <section className="mb-6 rounded-xl border border-border-subtle bg-bg-secondary p-6">
             <h2 className="font-semibold">Connect your GitHub account</h2>
-            <p className="mt-2 text-sm text-text-secondary">Authorize your GitHub account, then choose the installation for this workspace.</p>
+            <p className="mt-2 text-sm text-text-secondary">Sign in with GitHub to authorize your identity. App installation is separate: if no installation is listed, install AVPR-Net on the GitHub account that owns the repositories, then return and connect it here.</p>
             <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-black"><GithubIcon className="h-4 w-4" /> Sign in with GitHub</a>
             {installAppUrl && <a href={installAppUrl} className="ml-4 inline-flex items-center gap-2 text-sm text-accent-blue">Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
             {installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -252,11 +254,17 @@ const connectInstallation = async () => {
                   <div key={item} className="h-40 animate-pulse rounded-xl border border-border-subtle bg-bg-secondary" />
                 ))}
               </div>
+            ) : error && repositories.length === 0 ? (
+              <div role="status" className="rounded-xl border border-dashed border-border-subtle bg-bg-secondary p-8 text-center">
+                <AlertCircle className="mx-auto h-7 w-7 text-text-muted" />
+                <h3 className="mt-3 font-medium">Repository list unavailable</h3>
+                <p className="mt-2 text-sm text-text-secondary">SecurePatch could not confirm which repositories this installation can access. Retry the request before changing GitHub permissions.</p>
+              </div>
             ) : repositories.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border-subtle bg-bg-secondary p-12 text-center">
                 <FolderGit2 className="mx-auto h-8 w-8 text-text-muted" />
                 <h3 className="mt-4 font-medium">No repositories found</h3>
-                <p className="mt-2 text-sm text-text-secondary">No repositories are currently available through this GitHub App installation.</p>
+                <p className="mt-2 text-sm text-text-secondary">This installation currently grants SecurePatch access to no repositories. Open GitHub’s app settings, select the missing repositories, then return here and refresh access.</p>
 
                 <button onClick={() => setAddRepoOpen(true)} className="mt-5 inline-flex items-center gap-2 rounded-lg border border-white/[0.10] bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-text-secondary transition hover:border-accent-blue/30 hover:text-white">
                   <Plus className="h-3.5 w-3.5" />
@@ -322,12 +330,27 @@ const connectInstallation = async () => {
         )}
       </main>
 
-      {addRepoOpen && <AddRepositoryModal onClose={() => setAddRepoOpen(false)} installationUrl={installationUrl} />}
+      {addRepoOpen && <AddRepositoryModal onClose={() => setAddRepoOpen(false)} installationUrl={installationUrl} installation={installation} repositoryCount={repositories.length} onRefresh={() => fetchGitHubStatus(true)} refreshing={refreshing} />}
     </div>
   );
 }
 
-function AddRepositoryModal({ onClose, installationUrl }) {
+function AddRepositoryModal({ onClose, installationUrl, installation, repositoryCount, onRefresh, refreshing }) {
+  const [refreshMessage, setRefreshMessage] = useState("");
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  async function refreshAccess() {
+    setRefreshMessage("");
+    setRefreshFailed(false);
+    const result = await onRefresh();
+    if (!result || result.error) {
+      setRefreshFailed(true);
+      setRefreshMessage(`Couldn’t refresh repository access: ${result?.error || "Please try again."}`);
+      return;
+    }
+    setRefreshMessage(result.connected
+      ? `Access refreshed. SecurePatch can now see ${result.repositories.length} ${result.repositories.length === 1 ? "repository" : "repositories"}${result.account ? ` for ${result.account}` : ""}.`
+      : "No GitHub installation is connected to this workspace yet. Connect one before loading repositories.");
+  }
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm" onClick={onClose}>
       <div onClick={(event) => event.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.09] bg-[#171D1F] shadow-2xl">
@@ -362,10 +385,16 @@ function AddRepositoryModal({ onClose, installationUrl }) {
             </div>
           </div>
 
+          <div className="mt-3 rounded-lg border border-white/[0.06] px-4 py-3 text-xs text-text-secondary">
+            <p><span className="text-text-muted">Current installation:</span> {installation?.account || "Unknown"}{installation?.accountType ? ` · ${installation.accountType}` : ""}</p>
+            <p className="mt-1"><span className="text-text-muted">Currently available:</span> {repositoryCount} {repositoryCount === 1 ? "repository" : "repositories"}</p>
+          </div>
+
           <div className="mt-6 space-y-4">
             <Step number="01" title="Open GitHub App settings" description="Manage which repositories SecurePatch can access." />
             <Step number="02" title="Select a repository" description="Grant SecurePatch access to the repository you want to scan." />
-            <Step number="03" title="Return to SecurePatch" description="Refresh this page to load the newly authorized repository." />
+            <Step number="03" title="Return and refresh access" description="Use the button below after saving your GitHub App settings. The list will reload from GitHub." />
+            {refreshMessage && <p role={refreshFailed ? "alert" : "status"} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-xs leading-5 text-text-secondary">{refreshMessage}</p>}
           </div>
         </div>
 
@@ -377,16 +406,22 @@ function AddRepositoryModal({ onClose, installationUrl }) {
           {installationUrl ? (
             <a href={installationUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black transition hover:bg-white/90">
               <GithubIcon className="h-4 w-4" />
-              Manage GitHub Access
+              Open GitHub settings
               <ExternalLink className="h-3 w-3" />
             </a>
           ) : (
-            <button type="button" disabled title="Refresh GitHub status to load the installation settings link" className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black opacity-50">
+            <span title="Refresh GitHub status to load the installation settings link" className="flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-xs font-semibold text-black opacity-50">
               <GithubIcon className="h-4 w-4" />
-              Manage GitHub Access
+              GitHub settings unavailable
               <ExternalLink className="h-3 w-3" />
-            </button>
+            </span>
           )}
+        </div>
+        <div className="flex justify-end px-6 pb-5">
+          <button type="button" onClick={refreshAccess} disabled={refreshing} className="flex items-center gap-2 rounded-lg border border-accent-blue/30 bg-accent-blue/10 px-3.5 py-2 text-xs font-semibold text-text-primary transition hover:bg-accent-blue/15 disabled:opacity-50">
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing access…" : "I’ve updated access — refresh"}
+          </button>
         </div>
       </div>
     </div>

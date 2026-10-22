@@ -14,7 +14,7 @@ test("bounded archive extraction uses the pinned commit and guarantees cleanup",
   const result = await createEphemeralWorkspace("1", "owner", "repo", sha);
   expect(fetch.mock.calls[0][0]).toContain(sha);
   expect(fs.readFileSync(`${result.workspacePath}/src/example.js`, "utf8")).toBe("const value = 1;");
-  result.cleanup(); expect(fs.existsSync(result.workspacePath)).toBe(false);
+  await result.cleanup(); expect(fs.existsSync(result.workspacePath)).toBe(false);
 });
 test("oversized declared archive fails before extraction", async () => {
   jest.spyOn(globalThis, "fetch").mockResolvedValue(new Response("small", { headers: { "content-length": String(51 * 1024 * 1024) } }));

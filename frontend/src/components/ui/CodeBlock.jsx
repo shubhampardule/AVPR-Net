@@ -100,7 +100,7 @@ function renderSyntaxHighlight(line) {
       return <span key={i} className="text-[#8AA7B2] font-medium">{part}</span>;
     }
     if (/^["'`].*["'`]$/.test(part)) {
-      if (part.includes('SELECT') || part.includes('ffmpeg') || part.includes('AKIA')) {
+      if (part.includes('SELECT') || part.includes('ffmpeg') || part.includes('AKIA') || part.includes('EXAMPLE_AWS')) {
         return <span key={i} className="text-[#F87171]">{part}</span>;
       }
       return <span key={i} className="text-[#78A88B]">{part}</span>;

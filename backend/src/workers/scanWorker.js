@@ -18,6 +18,20 @@ const OccurrenceService = require("../services/occurrence.service");
 const RiskService = require("../services/risk.service");
 const heartbeatWorker = () => require("../models/UsageBucket").updateOne({ _id: "worker:bom1" },
   { $set: { count: 1, expires: new Date(Date.now() + 90000) } }, { upsert: true });
+const reportScannerReadiness = async () => {
+  const adapters = [
+    new (require("../scanners/semgrep.adapter"))(),
+    new (require("../scanners/bandit.adapter"))(),
+  ];
+  const results = await Promise.all(adapters.map(async (adapter) => {
+    try { return { adapter, available: await adapter.isAvailable() }; }
+    catch (error) { return { adapter, available: false, error }; }
+  }));
+  for (const { adapter, available, error } of results) {
+    if (available) console.info(`[ScanWorker] ${adapter.name} scanner ready (${adapter.version || "unknown version"}).`);
+    else console.error(`[ScanWorker] ${adapter.name} scanner unavailable; scan coverage will be partial.${error ? ` ${error.message}` : ""}`);
+  }
+};
 
 // Connect to MongoDB if running standalone
 const ensureDatabase = async () => {
@@ -166,7 +180,8 @@ const processScanJobInternal = async (job, controller) => {
       for (const finding of findingsToInsert) {
         const review = previous.get(finding.correlationKey);
         if (review && ["acknowledged", "dismissed"].includes(review.status)) {
-          Object.assign(finding, { status: review.status, statusReason: review.statusReason, reviewedBy: review.reviewedBy, reviewedAt: review.reviewedAt });
+          Object.assign(finding, { status: review.status, statusReason: review.statusReason, reviewedBy: review.reviewedBy,
+            reviewedAt: review.reviewedAt, reviewHistory: review.reviewHistory || [] });
         }
       }
     }
@@ -220,7 +235,7 @@ const processScanJobInternal = async (job, controller) => {
     clearInterval(heartbeat);
     // Step 11: Cleanup workspace ephemeral directory guaranteed in finally
     if (workspaceHandle && typeof workspaceHandle.cleanup === "function") {
-      workspaceHandle.cleanup();
+      await workspaceHandle.cleanup();
       console.info(`[ScanWorker] Ephemeral workspace cleaned up for scan ${scanId}.`);
     }
   }
@@ -268,6 +283,7 @@ const startVercelQueueWorker = async () => {
   });
 
   console.info(`[ScanWorker] Polling Vercel Queue '${SCAN_QUEUE_NAME}' in ${SCAN_QUEUE_REGION}...`);
+  await reportScannerReadiness();
   let pollDelayMs = 5000;
   let lastScheduleCheck = 0;
   while (!shuttingDown) {
@@ -334,4 +350,5 @@ module.exports = {
   createBullMqWorker,
   processScanJob,
   startVercelQueueWorker,
+  reportScannerReadiness,
 };

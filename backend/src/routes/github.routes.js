@@ -7,7 +7,7 @@ const { requireRole } = require("../middleware/rbac.middleware");
 
 const { connectGitHubInstallation, getGitHubStatus } = require("../controllers/github.controller");
 
-const { getRepositories, getRepositoryFiles, getFileContent } = require("../services/github.service");
+const { getRepositories, getRepositoryMetadata, getRepositoryFiles, getFileContent } = require("../services/github.service");
 
 const Organization = require("../models/Organization");
 const { optionalCommitSha } = require("../utils/input");
@@ -97,6 +97,23 @@ router.get(
                 },
                 message: "GitHub repositories fetched successfully",
             });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
+
+router.get(
+    "/organizations/:organizationId/repositories/:owner/:repo/metadata",
+    requireAuth,
+    requireOrganizationMember,
+    async (req, res, next) => {
+        try {
+            const organization = await Organization.findById(req.params.organizationId);
+            if (!organization) return res.status(404).json({ success: false, error: { code: "ORGANIZATION_NOT_FOUND", message: "Organization not found" } });
+            if (!organization.githubInstallationId) return res.status(404).json({ success: false, error: { code: "GITHUB_NOT_CONNECTED", message: "GitHub is not connected to this organization" } });
+            const repository = await getRepositoryMetadata(organization.githubInstallationId, req.params.owner, req.params.repo);
+            return res.status(200).json({ success: true, data: { repository }, message: "Repository details fetched successfully" });
         } catch (error) {
             next(error);
         }

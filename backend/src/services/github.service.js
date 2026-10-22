@@ -20,6 +20,20 @@ async function resolveCommit(installationId, owner, repo, ref) {
   if (!/^[a-f0-9]{40}$/.test(data.sha)) throw bad("GitHub returned an invalid commit", 502);
   return { sha: data.sha, branch: metadata.default_branch, permissions: metadata.permissions };
 }
+async function getRepositoryMetadata(installationId, owner, repo) {
+  repository(owner, repo);
+  const client = await getInstallationOctokit(installationId);
+  const { data } = await client.request("GET /repos/{owner}/{repo}", { owner, repo });
+  return {
+    id: data.id,
+    name: data.name,
+    fullName: data.full_name,
+    owner: data.owner?.login || owner,
+    private: Boolean(data.private),
+    defaultBranch: data.default_branch || null,
+    htmlUrl: data.html_url || null,
+  };
+}
 async function getRepositoryFiles(installationId, owner, repo) {
   const commit = await resolveCommit(installationId, owner, repo);
   const client = await getInstallationOctokit(installationId);
@@ -40,4 +54,4 @@ async function getFileContent(installationId, owner, repo, filePath, ref) {
   if (buffer.includes(0)) throw bad("Binary files are not supported", 415, "BINARY_FILE");
   return { path: data.path, name: data.name, size: data.size, sha: data.sha, content: buffer.toString("utf8") };
 }
-module.exports = { getRepositories, resolveCommit, getRepositoryFiles, getFileContent };
+module.exports = { getRepositories, getRepositoryMetadata, resolveCommit, getRepositoryFiles, getFileContent };

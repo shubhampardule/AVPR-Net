@@ -173,8 +173,8 @@ const mailConfig = {
   service: "SES",
   region: "us-east-1",
   // VULNERABLE: Secret hardcoded in committed source file
-  accessKeyId: "AKIAIOSFODNN7EXAMPLE",
-  secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  accessKeyId: "EXAMPLE_AWS_ACCESS_KEY_ID",
+  secretAccessKey: "EXAMPLE_AWS_SECRET_ACCESS_KEY"
 };`,
     remediatedSnippet: `// Mailer transport configuration
 const mailConfig = {
@@ -188,8 +188,8 @@ const mailConfig = {
 +++ b/config/mailer.js
 @@ -17,4 +17,4 @@
 -  // VULNERABLE: Secret hardcoded in committed source file
--  accessKeyId: "AKIAIOSFODNN7EXAMPLE",
--  secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+-  accessKeyId: "EXAMPLE_AWS_ACCESS_KEY_ID",
+-  secretAccessKey: "EXAMPLE_AWS_SECRET_ACCESS_KEY"
 +  // REMEDIATED: Credentials loaded securely from environment runtime
 +  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
 +  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY`,

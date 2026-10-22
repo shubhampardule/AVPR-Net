@@ -25,6 +25,15 @@ const addToVercelQueue = async (name, data) => {
   return { id: result.messageId || data.scanId };
 };
 
+const addToLocalInlineQueue = async (name, data) => {
+  const id = `local-${data.scanId}`;
+  setImmediate(() => {
+    require("../workers/scanWorker").processScanJob({ id, name, data })
+      .catch((error) => console.error(`[ScanWorker] Local scan ${data.scanId} failed: ${error.message}`));
+  });
+  return { id };
+};
+
 const scanQueue = useVercelQueue
   ? { add: addToVercelQueue, close: async () => {} }
   : redisConnection
@@ -45,6 +54,8 @@ const scanQueue = useVercelQueue
         },
       },
     })
+  : process.env.NODE_ENV === "development"
+  ? { add: addToLocalInlineQueue, close: async () => {} }
   : {
       add: async () => {
         throw new Error("No scan queue is configured; set REDIS_URL locally or deploy with Vercel Queues");

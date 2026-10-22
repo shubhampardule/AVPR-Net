@@ -88,6 +88,13 @@ describe("Scan Pipeline Core Logic Unit Tests", () => {
       expect(normalized[0].severity).toBe("critical");
     });
 
+    it("keeps scanner paths relative when WSL returns project-relative filenames", () => {
+      const normalized = NormalizerService.normalize("semgrep", [{
+        check_id: "securepatch.js.shell-exec", path: "./src/routes/auth.js", start: { line: 8 }, extra: {},
+      }], "C:\\Users\\developer\\AppData\\Local\\Temp\\securepatch-1\\workspace");
+      expect(normalized[0].filePath).toBe("src/routes/auth.js");
+    });
+
     it("suppresses Bandit assert warnings in Python test files only", () => {
       const findings = [
         { test_id: "B101", filename: "/tmp/workspace/tests/test_auth.py", line_number: 3 },
