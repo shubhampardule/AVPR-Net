@@ -19,6 +19,7 @@ async function send({ email, url, role, expiresAt, tokenHash }) {
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`, "Content-Type": "application/json",
         "Idempotency-Key": `invitation/${tokenHash}` },
       body: JSON.stringify({ from: process.env.INVITATION_EMAIL_FROM.trim(), to: [email],
+        tags: [{ name: "invitation_attempt", value: tokenHash }],
         subject: "Your AVPR-Net workspace invitation",
         text: `You have been invited to a AVPR-Net workspace as ${role}.\n\nSign in with ${email} to accept:\n${url}\n\nThis single-use link expires ${new Date(expiresAt).toISOString()}. If you did not expect this invitation, ignore this email.` }),
     });

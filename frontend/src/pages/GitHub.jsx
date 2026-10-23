@@ -24,6 +24,7 @@ export default function GitHub() {
   const [installationRevoked, setInstallationRevoked] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [installAppUrl, setInstallAppUrl] = useState(null);
+  const [githubAuthorization, setGitHubAuthorization] = useState({ verified: false, username: null });
 
   const organizationId =
     selectedOrg?._id ||
@@ -80,6 +81,7 @@ const fetchGitHubStatus = async (isRefresh = false) => {
       revokedId == null || String(item.id) !== String(revokedId)
     );
     setInstallations(availableInstallations);
+    setGitHubAuthorization({ verified: installData.authorization?.verified === true, username: installData.authorization?.username || null });
     setSelectedInstallation(availableInstallations[0]?.id?.toString() || "");
     setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
     return { connected: false, account: null, repositories: [] };
@@ -113,6 +115,7 @@ useEffect(() => {
     setInstallation(null);
     setInstallationUrl(null);
     setRepositories([]);
+    setGitHubAuthorization({ verified: false, username: null });
     fetchGitHubStatus();
   }
 }, [contextLoading, organizationId]);
@@ -126,7 +129,10 @@ const connectInstallation = async () => {
       body: JSON.stringify({ installationId: selectedInstallation }),
     });
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error?.message || "Unable to connect GitHub.");
+    if (!response.ok) {
+      if (body.error?.code === "GITHUB_AUTHORIZATION_REQUIRED") setGitHubAuthorization(current => ({ ...current, verified: false }));
+      throw new Error(body.error?.message || "Unable to connect GitHub.");
+    }
     await fetchGitHubStatus(true);
   } catch (err) { setError(err.message); }
   finally { setConnecting(false); }
@@ -216,12 +222,15 @@ const connectInstallation = async () => {
 
         {organizationId && !connected && !loading && !statusUnavailable && (
           <section className="mb-6 rounded-xl border border-border-subtle bg-bg-secondary p-6">
-            <h2 className="font-semibold">Connect your GitHub account</h2>
-            <p className="mt-2 text-sm text-text-secondary">Sign in with GitHub to authorize your identity. App installation is separate: if no installation is listed, install AVPR-Net on the GitHub account that owns the repositories, then return and connect it here.</p>
+            <h2 className="font-semibold">{githubAuthorization.verified ? "Connect repositories to this workspace" : githubAuthorization.username ? "Refresh GitHub access" : "Connect your GitHub account"}</h2>
+            <p className="mt-2 text-sm text-text-secondary">{githubAuthorization.verified
+              ? `GitHub account${githubAuthorization.username ? ` @${githubAuthorization.username}` : ""} verified. ${installations.length ? "Choose an installation below to connect its repositories to this workspace." : "Install AVPR-Net on the account that owns your repositories, then return here and refresh."}`
+              : githubAuthorization.username ? `You’re signed in to AVPR-Net. Verify access for @${githubAuthorization.username} again before connecting a GitHub installation.`
+              : "Connect your GitHub identity to choose a repository installation. Signing in to AVPR-Net alone does not grant repository access."}</p>
             {installationRevoked && <p role="status" className="mt-3 rounded-lg border border-severity-medium/20 bg-severity-medium/5 p-3 text-sm text-severity-medium">GitHub reports that AVPR-Net was removed from this organization. Reinstall the app, then connect its new installation here.</p>}
-            <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent-security px-4 py-2 text-sm font-medium text-on-accent"><GithubIcon className="h-4 w-4" /> Sign in with GitHub</a>
-            {installAppUrl && <a href={installAppUrl} className="ml-4 inline-flex items-center gap-2 text-sm text-accent-blue">Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
-            {installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">
+            {!githubAuthorization.verified && <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent-security px-4 py-2 text-sm font-medium text-on-accent"><GithubIcon className="h-4 w-4" /> {githubAuthorization.username ? "Verify GitHub access" : "Sign in with GitHub"}</a>}
+            {installAppUrl && <a href={installAppUrl} className={`${githubAuthorization.verified ? "mt-4" : "ml-4"} inline-flex items-center gap-2 text-sm text-accent-blue`}>Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
+            {githubAuthorization.verified && installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">
               <label htmlFor="github-installation" className="text-sm">GitHub installation</label>
               <select id="github-installation" value={selectedInstallation} onChange={(event) => setSelectedInstallation(event.target.value)} className="rounded-lg border border-text-primary/10 bg-bg-elevated px-3 py-2 text-sm">
                 {installations.map((item) => <option key={item.id} value={item.id}>{item.account}</option>)}

@@ -6,6 +6,7 @@ const schema = new mongoose.Schema({
   push: { type: Boolean, default: false }, pullRequest: { type: Boolean, default: false },
   frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
   nextRunAt: { type: Date, default: null }, leaseUntil: { type: Date, default: null },
+  leaseToken: { type: String, default: null },
   lastError: { type: String, default: null }, lastScanId: { type: String, default: null },
   pendingRefs: { type: [String], default: [] },
 }, { timestamps: true });

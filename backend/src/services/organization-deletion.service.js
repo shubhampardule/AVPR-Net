@@ -31,7 +31,7 @@ async function requestOrganizationDeletion({ organizationId, actorId, confirmati
     await Invitation.updateMany({ organization: organizationId, status: "pending" },
       { $set: { status: "revoked", revokedAt: now }, $unset: { tokenHash: "" } }, { session });
     await Automation.updateMany({ organization: organizationId },
-      { $set: { frequency: "off", push: false, pullRequest: false, pendingRefs: [], nextRunAt: null, leaseUntil: null } }, { session });
+      { $set: { frequency: "off", push: false, pullRequest: false, pendingRefs: [], nextRunAt: null, leaseUntil: null, leaseToken: null } }, { session });
     await Scan.updateMany({ organization: organizationId, status: { $in: ["queued", "running"] } },
       { $set: { status: "failed", cancelledAt: now, completedAt: now, activeKey: null, leaseUntil: null, leaseToken: null,
         errorMessage: "Organization deletion requested" } }, { session });

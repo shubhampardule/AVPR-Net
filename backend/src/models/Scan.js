@@ -83,6 +83,7 @@ const scanSchema = new mongoose.Schema(
 );
 
 scanSchema.index({ organization: 1, owner: 1, repo: 1, createdAt: -1 });
+scanSchema.index({ status: 1, deadlineAt: 1, _id: 1 });
 scanSchema.index({ activeKey: 1 }, { unique: true, partialFilterExpression: { activeKey: { $type: "string" } } });
 
 module.exports = mongoose.models.Scan || mongoose.model("Scan", scanSchema);

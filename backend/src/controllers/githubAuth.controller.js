@@ -106,8 +106,15 @@ async function finishGitHubLogin(req, res, next) {
 
 function authorizedInstallations(req) {
   const access = req.session?.githubAccess;
-  return access?.userId === req.user?.id && Date.now() - access.checkedAt < 60 * 60 * 1000
+  return githubAuthorization(req).verified && Array.isArray(access.installations)
     ? access.installations : [];
 }
 
-module.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations };
+function githubAuthorization(req) {
+  const access = req.session?.githubAccess;
+  const age = Date.now() - access?.checkedAt;
+  return { verified: Boolean(req.user?.id && access?.userId === req.user.id &&
+    Number.isFinite(age) && age >= 0 && age < 60 * 60 * 1000), username: req.user?.githubUsername || null };
+}
+
+module.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization };

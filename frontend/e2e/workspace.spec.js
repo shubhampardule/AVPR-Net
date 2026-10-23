@@ -450,15 +450,16 @@ test("GitHub installation can be connected and repository access modal can be cl
   await page.route("**/api/v1/github/organizations/test-org/status", async route => {
     await route.fulfill({ json: { success: true, data: { connected, installation: connected ? { htmlUrl: "https://github.com/settings/installations/10" } : null } } });
   });
-  await page.route("**/api/v1/github/installations", route => route.fulfill({ json: { success: true, data: [{ id: 10, account: "team" }] } }));
+  await page.route("**/api/v1/github/installations", route => route.fulfill({ json: { success: true, data: [{ id: 10, account: "team" }], authorization:{verified:true,username:"team"} } }));
   await page.route("**/api/v1/github/test", route => route.fulfill({ json: { success: true, data: { slug: "avpr-net" } } }));
   await page.route("**/api/v1/github/organizations/test-org/connect", async route => {
     connected = true;
     await route.fulfill({ json: { success: true, data: { connected: true } } });
   });
   await page.goto("/github");
-  await expect(page.getByRole("heading", { name: "Connect your GitHub account" })).toBeVisible();
-  await expect(page.getByText(/App installation is separate.*install AVPR-Net on the GitHub account that owns the repositories/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect repositories to this workspace" })).toBeVisible();
+  await expect(page.getByText(/GitHub account @team verified/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in with GitHub" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute("href", "https://github.com/apps/avpr-net/installations/new");
   await page.getByLabel("GitHub installation").selectOption("10");
   await page.getByRole("button", { name: "Connect installation" }).click();

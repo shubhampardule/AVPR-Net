@@ -12,10 +12,15 @@ router.post("/webhooks/github", handler(async (req, res) => {
   res.status(202).json({ success: true, data: await service.receive(req.body, req.get("X-GitHub-Event"), req.get("X-GitHub-Delivery")) });
 }));
 const route = "/organizations/:organizationId/repositories/:owner/:repo/automation";
+async function automationData(settings) {
+  const readiness = await require("../services/github-webhook-readiness.service").getWebhookReadiness();
+  return { settings, webhookReady: readiness.push || readiness.pullRequest,
+    eventReadiness: { push: readiness.push, pullRequest: readiness.pullRequest }, webhookIssue: readiness.issue };
+}
 router.get(route, requireAuth, requireOrganizationMember, handler(async (req, res) => {
-  res.json({ success: true, data: { settings: await service.settings(req.params.organizationId, req.params.owner, req.params.repo), webhookReady: Boolean(process.env.GITHUB_WEBHOOK_SECRET) } });
+  res.json({ success: true, data: await automationData(await service.settings(req.params.organizationId, req.params.owner, req.params.repo)) });
 }));
 router.put(route, requireAuth, requireOrganizationMember, requireRole("owner", "admin"), handler(async (req, res) => {
-  res.json({ success: true, data: { settings: await service.settings(req.params.organizationId, req.params.owner, req.params.repo, req.body), webhookReady: Boolean(process.env.GITHUB_WEBHOOK_SECRET) } });
+  res.json({ success: true, data: await automationData(await service.settings(req.params.organizationId, req.params.owner, req.params.repo, req.body)) });
 }));
 module.exports = router;

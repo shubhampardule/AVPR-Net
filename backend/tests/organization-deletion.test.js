@@ -24,7 +24,7 @@ test("deletion rechecks current ownership and exact name before disabling access
   expect(result).toEqual({ status: "deleting", purgeAfter: new Date(now.getTime() + SETTLING_MS) });
   expect(Member.findOneAndUpdate).toHaveBeenCalledWith({ organization: organizationId, user: actorId, status: "active", role: "owner" }, expect.any(Object), { session, returnDocument: "after" });
   expect(Organization.findOneAndUpdate).toHaveBeenCalledWith({ _id: organizationId, status: "active", name: "Team" }, { $set: expect.objectContaining({ status: "deleting", githubInstallationId: null, hostedAiEnabled: false, purgeAfter: result.purgeAfter }) }, expect.objectContaining({ session }));
-  expect(Automation.updateMany).toHaveBeenCalledWith({ organization: organizationId }, { $set: expect.objectContaining({ frequency: "off", push: false, pullRequest: false, pendingRefs: [] }) }, { session });
+  expect(Automation.updateMany).toHaveBeenCalledWith({ organization: organizationId }, { $set: expect.objectContaining({ frequency: "off", push: false, pullRequest: false, pendingRefs: [], leaseUntil: null, leaseToken: null }) }, { session });
   expect(Scan.updateMany).toHaveBeenCalledWith({ organization: organizationId, status: { $in: ["queued", "running"] } }, { $set: expect.objectContaining({ status: "failed", cancelledAt: now, activeKey: null, leaseToken: null }) }, { session });
   expect(Audit.create).toHaveBeenCalledWith([expect.objectContaining({ organization: organizationId, action: "organization.deletion_requested" })], { session });
 });

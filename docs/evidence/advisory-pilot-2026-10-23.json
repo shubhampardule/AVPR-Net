@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "datasetKind": "advisory-pilot",
+  "annotationStatus": "project-authored, not independently reviewed",
+  "manifestSha256": "198bb09d5a5a5ce5139c1bff91158cf5804459d1ef7b1d2cfa700e28d5682937",
+  "rulesSha256": "ed06b57c454f05b82b108853fb197921fb05c9130cd441f0447299a091a94ea5",
+  "generatedAt": "2026-10-23T04:11:47.324Z",
+  "sources": [
+    {
+      "id": "suricata-unsafe-yaml",
+      "repository": "OISF/suricata-update",
+      "advisory": "https://github.com/advisories/GHSA-7c4h-w765-6pwg",
+      "before": "8b47847bde22a4e29513ecf168c83bc7074600d8",
+      "after": "76270e73128ca1299b4e33e7e2a74ac3d963a97a",
+      "files": [
+        {
+          "path": "suricata/update/config.py",
+          "beforeSha256": "54a9a4dce3cc101f898e7019f35daa20d5b9fa9d2c7ca2486671271fc09ae2d3",
+          "afterSha256": "d5a64df52b119d55acd2bd3cc4e3de08a486797a973023cb4caa9d232b404758",
+          "targetLinesBefore": [
+            136,
+            142
+          ],
+          "targetLinesAfter": [
+            136,
+            142
+          ]
+        },
+        {
+          "path": "suricata/update/sources.py",
+          "beforeSha256": "f5f47e1e1129544f818f28ebaf9aa216530d77980b590820b9ec5de10612bb48",
+          "afterSha256": "47577e993a5a4989408bb1c69ac7e4ced4f6d84ff3deb6624e079f52fd7e87de",
+          "targetLinesBefore": [
+            99,
+            131
+          ],
+          "targetLinesAfter": [
+            99,
+            131
+          ]
+        }
+      ],
+      "rules": {
+        "semgrep": "securepatch.python.insecure-yaml",
+        "bandit": "B506"
+      }
+    },
+    {
+      "id": "argos-shell-injection",
+      "repository": "argos-ci/argos-javascript",
+      "advisory": "https://github.com/advisories/GHSA-4x45-gxvp-6283",
+      "before": "1787fe78cba46f408493e02114150f2d73f47fa4",
+      "after": "8355f3af3be3f4fe361d58a688d21535cf672717",
+      "files": [
+        {
+          "path": "packages/core/src/ci-environment/git.ts",
+          "beforeSha256": "09a763829bec91457a5b7f7945f1697111f4a6c31005fecd4ddcd8286b2c91c6",
+          "afterSha256": "c235fad71a553c0c1ae279af510f951e24398d9aefcbf8e6f1bd3de56a1af7a7",
+          "targetLinesBefore": [
+            67,
+            88,
+            154,
+            162
+          ],
+          "targetLinesAfter": [
+            67,
+            88,
+            164,
+            172
+          ]
+        }
+      ],
+      "rules": {
+        "semgrep": "securepatch.js.shell-exec"
+      }
+    }
+  ],
+  "versions": {
+    "semgrep": "1.181.0",
+    "bandit": "bandit 1.9.4\n  python version = 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]"
+  },
+  "revisions": {
+    "before": {
+      "coverage": {
+        "semgrep": {
+          "scannedFiles": 3
+        },
+        "bandit": {
+          "scannedFiles": 2
+        }
+      },
+      "targets": [
+        {
+          "case": "suricata-unsafe-yaml",
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "targetSites": 4,
+          "sitesWithAlert": 4,
+          "otherAlerts": 0
+        },
+        {
+          "case": "suricata-unsafe-yaml",
+          "scanner": "bandit",
+          "rule": "B506",
+          "targetSites": 4,
+          "sitesWithAlert": 4,
+          "otherAlerts": 0
+        },
+        {
+          "case": "argos-shell-injection",
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "targetSites": 4,
+          "sitesWithAlert": 4,
+          "otherAlerts": 4
+        }
+      ],
+      "observations": [
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 10,
+          "end": 10
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 23,
+          "end": 23
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 34,
+          "end": 34
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 53,
+          "end": 53
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 67,
+          "end": 67
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 88,
+          "end": 90
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 154,
+          "end": 154
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 162,
+          "end": 162
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "file": "OISF/suricata-update/suricata/update/config.py",
+          "line": 136,
+          "end": 136
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "file": "OISF/suricata-update/suricata/update/config.py",
+          "line": 142,
+          "end": 142
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "file": "OISF/suricata-update/suricata/update/sources.py",
+          "line": 99,
+          "end": 99
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "file": "OISF/suricata-update/suricata/update/sources.py",
+          "line": 131,
+          "end": 131
+        },
+        {
+          "scanner": "bandit",
+          "rule": "B506",
+          "file": "OISF/suricata-update/suricata/update/config.py",
+          "line": 136,
+          "end": 136
+        },
+        {
+          "scanner": "bandit",
+          "rule": "B506",
+          "file": "OISF/suricata-update/suricata/update/config.py",
+          "line": 142,
+          "end": 142
+        },
+        {
+          "scanner": "bandit",
+          "rule": "B506",
+          "file": "OISF/suricata-update/suricata/update/sources.py",
+          "line": 99,
+          "end": 99
+        },
+        {
+          "scanner": "bandit",
+          "rule": "B506",
+          "file": "OISF/suricata-update/suricata/update/sources.py",
+          "line": 131,
+          "end": 131
+        }
+      ]
+    },
+    "after": {
+      "coverage": {
+        "semgrep": {
+          "scannedFiles": 3
+        },
+        "bandit": {
+          "scannedFiles": 2
+        }
+      },
+      "targets": [
+        {
+          "case": "suricata-unsafe-yaml",
+          "scanner": "semgrep",
+          "rule": "securepatch.python.insecure-yaml",
+          "targetSites": 4,
+          "sitesWithAlert": 0,
+          "otherAlerts": 0
+        },
+        {
+          "case": "suricata-unsafe-yaml",
+          "scanner": "bandit",
+          "rule": "B506",
+          "targetSites": 4,
+          "sitesWithAlert": 0,
+          "otherAlerts": 0
+        },
+        {
+          "case": "argos-shell-injection",
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "targetSites": 4,
+          "sitesWithAlert": 0,
+          "otherAlerts": 4
+        }
+      ],
+      "observations": [
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 10,
+          "end": 10
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 23,
+          "end": 23
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 34,
+          "end": 34
+        },
+        {
+          "scanner": "semgrep",
+          "rule": "securepatch.js.shell-exec",
+          "file": "argos-ci/argos-javascript/packages/core/src/ci-environment/git.ts",
+          "line": 53,
+          "end": 53
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Two selected public fixes; not a representative or independently reviewed benchmark.",
+    "Alerts are static review signals, not exploit confirmation. No repository code, tests, or install hooks were executed.",
+    "Other alerts are unadjudicated; no precision, recall, clean-repository, or correlation-quality claim is made.",
+    "Target labels were authored from published fixes; neither blinded nor independent. Only selected files were scanned."
+  ]
+}

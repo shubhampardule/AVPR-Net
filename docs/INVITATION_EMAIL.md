@@ -1,26 +1,71 @@
-# Optional invitation email
+# Optional invitation email delivery
 
-Status: implemented locally and tested with mocked provider responses. No real email was sent during development. Verified sender configuration, live receipt, bounce/delivery callbacks, and production acceptance remain open under R08.
+Status: transport and signed delivery callbacks implemented locally. Verified sender
+configuration, actual inbox receipt, and live provider callbacks remain unverified.
+Manual invitation links remain the default; nothing sends automatically.
 
-Manual invitation links remain the default. To enable the optional Resend adapter, configure backend-only `INVITATION_EMAIL_ENABLED=true`, `RESEND_API_KEY`, and `INVITATION_EMAIL_FROM` using a sender on a verified domain. `FRONTEND_URL` must be the public HTTPS application origin. Never put these credentials in `VITE_` variables. The adapter uses Resend's fixed HTTPS endpoint and adds no dependency.
+## Configuration
 
-An owner/admin explicitly selects **Email this invitation** when creating or refreshing a link. Only owners can invite an admin. Merely configuring a provider or opening Settings does not send mail. Existing link creation, verified-recipient matching, expiry, revocation, and acceptance remain in place. A refresh rotates the token and invalidates the older link.
+Set backend-only `INVITATION_EMAIL_ENABLED=true`, `RESEND_API_KEY`, and
+`INVITATION_EMAIL_FROM` after configuring a verified Resend sending domain. A member
+must explicitly select email delivery for each invitation. Keep all credentials out
+of `VITE_` variables. A timeout reports an unknown outcome instead of automatically
+resending; the current manual link remains available.
 
-The provider receives the invited address, configured sender, role, invitation URL, and expiry. The plaintext link is required in the email but is not stored in MongoDB, audit events, or application logs. Only its hash is stored. Plain-text email avoids interpolated HTML. Each token hash has a provider idempotency key. Refreshes use a conditional pending-state update and one-minute email cooldown so concurrent requests cannot revive an accepted invitation or bypass the cooldown.
+`FRONTEND_URL` must be the public HTTPS application origin. Only owners/admins can
+request a send, and only owners can invite an admin. The provider receives the
+address, sender, role, invitation URL, and expiry. The plaintext link is necessary
+in the email but is not persisted to MongoDB, audit events, or application logs.
+The fixed HTTPS endpoint refuses redirects and has a ten-second deadline. A token
+digest is also its provider idempotency key. Refresh uses a conditional pending-state
+update and a one-minute email cooldown; it rotates the token and invalidates the old
+link. There is no background outbox or automatic retry. A status-recording failure
+is flagged on the creation response, while the manual link remains available.
 
-## Status meanings
+Configure a Resend webhook endpoint at
+`https://<deployment-domain>/api/v1/webhooks/resend`, with these events:
+`email.sent`, `email.delivery_delayed`, `email.delivered`, `email.failed`,
+`email.bounced`, `email.complained`, and `email.suppressed`. Store its signing secret
+as backend-only `RESEND_WEBHOOK_SECRET`. The endpoint fails closed when this secret
+is absent. These are setup instructions; no provider endpoint or key was created.
 
-| State | Meaning / recovery |
-| --- | --- |
-| manual | No email requested. Copy the link and share it securely. |
-| accepted | Provider accepted the request. This does **not** confirm inbox delivery. |
-| failed | Provider rejected the request, configuration changed, or the URL was unsafe. The link remains usable for manual sharing. |
-| unknown | Timeout, invalid response, or unfinished send. It may have been accepted. Do not automatically resend; share the link or refresh deliberately after the cooldown. |
+The endpoint verifies the unmodified request body and Svix headers with the pinned
+Standard Webhooks library, including its five-minute timestamp tolerance. Payloads
+are capped at 128 KiB. Raw provider bodies, addresses, invitation links and signing
+secrets are not logged or stored by the callback handler.
 
-The HTTP request has a ten-second deadline, refuses redirects, and never returns raw provider errors. There is no automatic send retry or background outbox. Recreating an invitation is an explicit token rotation, not a promise of retrying the same email. `emailStatus` in the invitation list records the last attempt for the current link; an update failure is also flagged in the creation response. Delivery/bounce webhooks are not implemented, so no UI may label a message delivered.
+References: [Resend signature verification](https://resend.com/docs/webhooks/verify-webhooks-requests),
+[event meanings](https://resend.com/docs/webhooks/event-types),
+[delivery payload](https://resend.com/docs/webhooks/emails/delivered), and
+[tags in callbacks](https://resend.com/changelog/tags-for-batch-and-scheduled-emails).
 
-## Live acceptance still required
+## Correlation and state
 
-Use a disposable invited address controlled by the tester, then check provider acceptance, inbox receipt, exact-email sign-in, expiration, revocation, and refreshing invalidation. Check provider rejection and domain misconfiguration with manual-link recovery. Do not send test invitations to unrelated people. A real send requires an explicit action in the application.
+Each explicit send includes an opaque attempt digest in a Resend tag. Only the
+current pending invitation with that digest can receive updates. Refreshing a link,
+switching to manual sharing, acceptance, or revocation prevents an older attempt
+from changing current delivery state. The digest is private model metadata and is
+omitted from invitation APIs and organization exports; raw provider message IDs are
+not retained.
 
-References: [Resend idempotency](https://resend.com/changelog/idempotency-keys) and [official API schema](https://github.com/resend/resend-openapi/blob/main/resend.yaml).
+Outcomes advance conservatively: unknown/manual → provider accepted → delayed →
+recipient-server accepted → failed → bounced → complained. Duplicate and lower-ranked
+callbacks cannot change the record. In particular, a late success cannot erase a
+bounce or complaint. This is a safety-oriented status policy, not a reconstruction
+of every provider event. The provider acknowledgement also cannot overwrite a
+callback that arrived before the send response was recorded.
+
+“Delivered” means the recipient's mail server accepted the message; it does not
+prove inbox placement, reading, or invitation acceptance. Settings uses that precise
+label, shows delay/failure guidance, and advises against resending after a complaint.
+The application does not auto-resend, subscribe recipients, track opens/clicks, or
+send scan notifications by email.
+
+## Verification
+
+Unit tests reject missing secrets, parsed/tampered bodies, expired/future signatures,
+and unrelated events. Signed synthetic HTTP callbacks against disposable Atlas
+fixtures verify adverse-state preservation, stale-attempt isolation, and protection
+of accepted invitation records. No real recipient is contacted by those tests.
+Production readiness still requires a verified sender, actual receipt, provider
+dashboard subscriptions, live signed callbacks, and an operational support policy.

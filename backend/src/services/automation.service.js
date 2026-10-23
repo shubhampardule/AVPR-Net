@@ -2,7 +2,6 @@ const crypto = require("node:crypto");
 const Automation = require("../models/RepositoryAutomation");
 const Organization = require("../models/Organization");
 const UsageBucket = require("../models/UsageBucket");
-const ScanService = require("./scan.service");
 const { bad, repository } = require("../utils/input");
 function nextRun(frequency, now = new Date()) {
   if (frequency === "off") return null;
@@ -20,32 +19,56 @@ async function settings(organization, owner, repo, body) {
   const filter = { organization, owner, repo };
   if (!body) return await Automation.findOne(filter).lean() || { push: false, pullRequest: false, frequency: "off" };
   if (Object.keys(body).some(k => !["push", "pullRequest", "frequency"].includes(k)) || typeof body.push !== "boolean" || typeof body.pullRequest !== "boolean" || !["off", "weekly", "monthly"].includes(body.frequency)) throw bad("Invalid automation settings");
-  if ((body.push || body.pullRequest) && !process.env.GITHUB_WEBHOOK_SECRET) throw bad("Configure the GitHub App webhook secret and URL before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
+  if (body.push || body.pullRequest) {
+    const readiness = await require("./github-webhook-readiness.service").getWebhookReadiness();
+    if ((body.push && !readiness.push) || (body.pullRequest && !readiness.pullRequest)) {
+      throw bad("Verify the GitHub App webhook URL, secret and selected event subscriptions before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
+    }
+  }
   const org = await Organization.findById(organization);
   if (!org?.githubInstallationId) throw bad("Connect GitHub first");
   await require("./github.service").resolveCommit(org.githubInstallationId, owner, repo);
-  return Automation.findOneAndUpdate(filter, { $set: { ...body, installationId: org.githubInstallationId, nextRunAt: nextRun(body.frequency), lastError: null } }, { upsert: true, returnDocument: "after", runValidators: true });
+  return Automation.findOneAndUpdate(filter, { $set: { ...body, installationId: org.githubInstallationId,
+    nextRunAt: nextRun(body.frequency), lastError: null, leaseUntil: null, leaseToken: null,
+    ...(!body.push && !body.pullRequest ? { pendingRefs: [] } : {}),
+  } }, { upsert: true, returnDocument: "after", runValidators: true });
 }
-async function runDueSchedules() {
-  const pending = await Automation.find({ "pendingRefs.0": { $exists: true } }).limit(5);
-  for (const config of pending) {
-    const ref = config.pendingRefs[0];
-    try {
-      const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo, ref });
-      await Automation.updateOne({ _id: config._id }, { $pull: { pendingRefs: ref }, $set: { lastError: null, lastScanId: String(job.scanId) } });
-    } catch { /* Keep the pending commit for the next worker pass. */ }
-  }
-  for (let count = 0; count < 5; count++) {
-    const now = new Date();
-    const config = await Automation.findOneAndUpdate({ frequency: { $ne: "off" }, nextRunAt: { $lte: now, $ne: null },
-      $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }] }, { $set: { leaseUntil: new Date(Date.now() + 60000) } }, { returnDocument: "after" });
-    if (!config) break;
-    try {
-      const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo });
-      config.lastScanId = String(job.scanId); config.lastError = null;
-      config.nextRunAt = nextRun(config.frequency);
-    } catch { config.lastError = "Scheduled scan could not be queued. Check GitHub access, quota and active scans."; config.nextRunAt = new Date(Date.now() + 15 * 60 * 1000); }
-    config.leaseUntil = null; await config.save();
+// Initialize provider/queue clients only when a real scan is submitted. Isolated
+// acceptance checks supply their own enqueue boundary without opening those clients.
+async function runDueSchedules({ enqueueScan = request => require("./scan.service").enqueueScan(request) } = {}) {
+  for (const kind of ["event", "schedule"]) {
+    const attempted = [];
+    for (let count = 0; count < 5; count++) {
+      const now = new Date(), token = crypto.randomUUID();
+      const config = await Automation.findOneAndUpdate({
+        ...(attempted.length ? { _id: { $nin: [...attempted] } } : {}),
+        ...(kind === "event" ? { "pendingRefs.0": { $exists: true },
+          $and: [{ $or: [{ push: true }, { pullRequest: true }] }] }
+          : { frequency: { $ne: "off" }, nextRunAt: { $lte: now, $ne: null } }),
+        $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }],
+      }, { $set: { leaseUntil: new Date(now.getTime() + 60000), leaseToken: token } },
+      { returnDocument: "after", sort: kind === "event" ? { updatedAt: 1, _id: 1 } : { nextRunAt: 1, _id: 1 } });
+      if (!config) break;
+      attempted.push(config._id);
+      const ref = kind === "event" ? config.pendingRefs[0] : null;
+      const fields = { leaseUntil: null, leaseToken: null };
+      let succeeded = false;
+      try {
+        const job = await enqueueScan({ organizationId: config.organization, owner: config.owner,
+          repo: config.repo, ...(ref ? { ref } : {}) });
+        fields.lastScanId = String(job.scanId); fields.lastError = null;
+        if (kind === "schedule") fields.nextRunAt = nextRun(config.frequency);
+        succeeded = true;
+      } catch {
+        fields.lastError = `${kind === "event" ? "Event" : "Scheduled"} scan could not be queued. Check GitHub access, quota and active scans.`;
+        if (kind === "schedule") fields.nextRunAt = new Date(Date.now() + 15 * 60 * 1000);
+      }
+      // Only the current claimant may finalize. Settings changes or a reclaimed
+      // lease invalidate this token, so a stale worker cannot overwrite them.
+      await Automation.updateOne({ _id: config._id, leaseToken: token }, {
+        $set: fields, ...(ref && succeeded ? { $pull: { pendingRefs: ref } } : {}),
+      });
+    }
   }
 }
 function verifySignature(body, signature, secret) {
@@ -69,9 +92,11 @@ async function receive(body, event, delivery) {
   try {
     const configs = await Automation.find({ owner, repo, installationId: String(payload.installation?.id), [event === "push" ? "push" : "pullRequest"]: true }).limit(50);
     for (const config of configs) {
-      const stored = await Automation.findOneAndUpdate({ _id: config._id, $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }] },
+      const stored = await Automation.findOneAndUpdate({ _id: config._id, installationId: String(payload.installation?.id),
+        [event === "push" ? "push" : "pullRequest"]: true,
+        $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }] },
         { $addToSet: { pendingRefs: ref }, $set: { lastError: null } });
-      if (!stored) throw bad("Repository event queue is full (20 commits)", 429, "EVENT_QUEUE_FULL");
+      if (!stored) throw bad("Repository event queue is full (20 commits) or event settings changed; retry delivery", 429, "EVENT_QUEUE_FULL");
     }
     return { accepted: configs.length };
   } catch (error) { await UsageBucket.deleteOne({ _id: `delivery:${delivery}` }); throw error; }

@@ -77,8 +77,9 @@ const updateMemberRole = async (req, res, next) => {
         }
 
         const previousRole = membership.role;
-        membership.role = role;
-        await membership.save();
+        const updated = await OrganizationMember.findOneAndUpdate({ _id: membership._id, organization: organizationId,
+            user: userId, status: "active", role: previousRole }, { $set: { role } }, { returnDocument: "after", runValidators: true });
+        if (!updated) throw bad("The membership changed. Refresh the team before changing its role", 409, "MEMBERSHIP_CHANGED");
         await recordAuditEvent(req, {
             action: "member.role_changed",
             target: `member/${membership.user}`,
@@ -90,8 +91,8 @@ const updateMemberRole = async (req, res, next) => {
             {
                 member: {
                     userId: membership.user,
-                    role: membership.role,
-                    status: membership.status,
+                    role: updated.role,
+                    status: updated.status,
                 },
             },
             "Member role updated successfully"
@@ -131,8 +132,10 @@ const removeMember = async (req, res, next) => {
             });
         }
 
-        membership.status = "suspended";
-        await membership.save();
+        const removed = await OrganizationMember.findOneAndUpdate({ _id: membership._id, organization: organizationId,
+            user: userId, status: "active", role: membership.role }, { $set: { status: "suspended" } },
+        { returnDocument: "after", runValidators: true });
+        if (!removed) throw bad("The membership changed. Refresh the team before removing it", 409, "MEMBERSHIP_CHANGED");
         await recordAuditEvent(req, {
             action: "member.removed",
             target: `member/${membership.user}`,

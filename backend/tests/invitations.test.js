@@ -137,15 +137,21 @@ test("a valid invitation restores suspended membership only after acceptance", a
 });
 
 test("revocation invalidates a pending invitation", async () => {
-  const invitation = { status: "pending", tokenHash: "hash", save: jest.fn().mockResolvedValue() };
-  OrganizationInvitation.findOne.mockResolvedValue(invitation);
+  const invitation = { _id: "507f1f77bcf86cd799439012", status: "revoked" };
+  OrganizationInvitation.findOneAndUpdate.mockResolvedValue(invitation);
   const res = response();
   await revokeInvitation({ params: { organizationId, invitationId: "507f1f77bcf86cd799439012" } }, res, jest.fn());
-  expect(invitation.status).toBe("revoked");
-  expect(invitation.tokenHash).toBeUndefined();
-  expect(invitation.revokedAt).toBeInstanceOf(Date);
-  expect(invitation.save).toHaveBeenCalled();
+  expect(OrganizationInvitation.findOneAndUpdate).toHaveBeenCalledWith({ _id: invitation._id, organization: organizationId, status: "pending" },
+    { $set: { status: "revoked", revokedAt: expect.any(Date) }, $unset: { tokenHash: "" } }, { returnDocument: "after" });
   expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "invitation.revoked" }));
+});
+
+test("revocation cannot overwrite an invitation accepted concurrently", async () => {
+  OrganizationInvitation.findOneAndUpdate.mockResolvedValue(null);
+  const res = response();
+  await revokeInvitation({ params: { organizationId, invitationId: "507f1f77bcf86cd799439012" } }, res, jest.fn());
+  expect(res.status).toHaveBeenCalledWith(404);
+  expect(recordAuditEvent).not.toHaveBeenCalled();
 });
 
 

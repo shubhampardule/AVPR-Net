@@ -114,3 +114,39 @@ test("shows the GitHub rate-limit delay and recovers when repository access is r
   expect(await screen.findByRole("button", { name: /AVPR shubhampardule\/AVPR mainPrivate/i })).toBeTruthy();
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
 });
+
+function disconnectedApi(authorization, installations = []) {
+  vi.stubGlobal("fetch", vi.fn(async url => {
+    if (String(url).endsWith("/status")) return response({connected:false});
+    if (String(url).endsWith("/installations")) return {ok:true,json:async()=>({data:installations,authorization})};
+    return response({slug:"avpr-net"});
+  }));
+}
+test("verified GitHub users connect an installation without another sign-in button", async () => {
+  disconnectedApi({verified:true,username:"developer"},[{id:42,account:"developer"}]);
+  render(<Harness />);
+  expect(await screen.findByRole("heading",{name:"Connect repositories to this workspace"})).toBeTruthy();
+  expect(screen.getByText(/GitHub account @developer verified/)).toBeTruthy();
+  expect(screen.queryByRole("link",{name:"Sign in with GitHub"})).toBeNull();
+  expect(screen.getByRole("button",{name:"Connect installation"})).toBeTruthy();
+});
+test("verified accounts without installations are guided to install the app", async () => {
+  disconnectedApi({verified:true,username:"developer"});
+  render(<Harness />);
+  expect(await screen.findByText(/Install AVPR-Net on the account that owns your repositories/)).toBeTruthy();
+  expect(screen.getByRole("link",{name:"Install GitHub App"})).toBeTruthy();
+  expect(screen.queryByRole("link",{name:"Sign in with GitHub"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Connect installation"})).toBeNull();
+});
+test("expired or absent grants for a linked account offer verification instead of sign-in", async () => {
+  disconnectedApi({verified:false,username:"developer"});
+  render(<Harness />);
+  expect(await screen.findByRole("heading",{name:"Refresh GitHub access"})).toBeTruthy();
+  expect(screen.getByRole("link",{name:"Verify GitHub access"})).toBeTruthy();
+  expect(screen.queryByRole("link",{name:"Sign in with GitHub"})).toBeNull();
+});
+test("accounts without a verified GitHub connection still receive the sign-in action", async () => {
+  disconnectedApi({verified:false,username:null});
+  render(<Harness />);
+  expect(await screen.findByRole("link",{name:"Sign in with GitHub"})).toBeTruthy();
+});

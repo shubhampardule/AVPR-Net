@@ -1,5 +1,5 @@
 jest.mock("../src/models/Organization", () => ({ exists: jest.fn().mockResolvedValue(true) }));
-jest.mock("mongoose", () => ({ connection: { readyState: 1 } }));
+jest.mock("mongoose", () => ({ connection: { readyState: 1, transaction: jest.fn(callback => callback({ fixture: true })) } }));
 jest.mock("../src/config/env", () => ({}));
 jest.mock("../src/config/redis", () => ({ redisConnection: null }));
 jest.mock("../src/queues/scanQueue", () => ({ SCAN_QUEUE_NAME: "test", SCAN_QUEUE_REGION: "bom1" }));
@@ -10,6 +10,9 @@ jest.mock("../src/services/notification.service", () => ({ notifyScanResult: jes
 jest.mock("../src/scanners/orchestrator", () => jest.fn());
 jest.mock("../src/scanners/semgrep.adapter", () => jest.fn());
 jest.mock("../src/scanners/bandit.adapter", () => jest.fn());
+jest.mock("../src/services/scan-expiry.service", () => ({ expireOverdueScans: jest.fn().mockResolvedValue(0) }));
+jest.mock("../src/services/organization-deletion.service", () => ({ purgeDueOrganizations: jest.fn().mockResolvedValue({}) }));
+jest.mock("../src/services/automation.service", () => ({ runDueSchedules: jest.fn().mockResolvedValue() }));
 const Scan = require("../src/models/Scan");
 const Finding = require("../src/models/Finding");
 const { notifyScanResult } = require("../src/services/notification.service");
@@ -17,7 +20,7 @@ const Orchestrator = require("../src/scanners/orchestrator");
 const SemgrepAdapter = require("../src/scanners/semgrep.adapter");
 const BanditAdapter = require("../src/scanners/bandit.adapter");
 const { createEphemeralWorkspace } = require("../src/services/workspace.service");
-const { processScanJob, reportScannerReadiness } = require("../src/workers/scanWorker");
+const { processScanJob, reportScannerReadiness, runMaintenance } = require("../src/workers/scanWorker");
 let record, cleanup, runAll;
 const job = { id: "job", data: { scanId: "scan", organizationId: "org", installationId: "1", owner: "owner", repo: "repo" } };
 beforeEach(() => {
@@ -61,11 +64,21 @@ test("successful empty analysis pins the archive and finalizes only a still-acti
   await expect(processScanJob(job)).resolves.toMatchObject({ success: true, summary: { total: 0 } });
   expect(createEphemeralWorkspace).toHaveBeenCalledWith("1", "owner", "repo", record.commitSha);
   const token = Scan.findOneAndUpdate.mock.calls[0][1].$set.leaseToken;
-  expect(Scan.findOneAndUpdate.mock.calls[1][0]).toEqual({ _id: "scan", status: "running", cancelledAt: null, leaseToken: token });
+  expect(Scan.findOneAndUpdate.mock.calls[1][0]).toMatchObject({ _id: "scan", status: "running", cancelledAt: null, leaseToken: token,
+    $or: [{ deadlineAt: null }, { deadlineAt: { $gt: expect.any(Date) } }] });
   expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.leaseToken).toBeNull();
   expect(Scan.findOneAndUpdate.mock.calls[1][1].$set.scannerPolicyHash).toMatch(/^[a-f0-9]{64}$/);
   expect(cleanup).toHaveBeenCalledTimes(1);
   expect(notifyScanResult).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", scannersUsed: ["semgrep"] }));
+});
+
+test("shared worker maintenance expires overdue scans before dispatching automation", async () => {
+  await runMaintenance();
+  const expiry = require("../src/services/scan-expiry.service").expireOverdueScans;
+  const dispatch = require("../src/services/automation.service").runDueSchedules;
+  expect(expiry).toHaveBeenCalledTimes(1);
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(expiry.mock.invocationCallOrder[0]).toBeLessThan(dispatch.mock.invocationCallOrder[0]);
 });
 test("notification failures cannot change a completed scan or leak provider error text", async () => {
   notifyScanResult.mockRejectedValueOnce(new Error("private notification database detail"));
@@ -115,6 +128,33 @@ test("cancellation wins a race with successful scanner completion", async () => 
   expect(Scan.findOneAndUpdate.mock.calls[2][0]).toMatchObject({ status: "running", cancelledAt: null, leaseToken: token });
   expect(cleanup).toHaveBeenCalledTimes(1);
   expect(notifyScanResult).not.toHaveBeenCalled();
+});
+
+test("cancellation prevents nonempty scanner findings from being persisted", async () => {
+  runAll.mockResolvedValue({ scannersRun: ["semgrep"], scannerErrors: [], coverage: [], results: [{ scanner: "semgrep", findings: [{
+    path: "src/query.js", start: { line: 12, col: 1 }, end: { line: 12 }, check_id: "securepatch.js.sql-concatenation",
+    extra: { severity: "ERROR", message: "Bind SQL parameters", lines: "db.query(sql + input)", metadata: { cwe: ["CWE-89"] } },
+  }] }] });
+  Finding.aggregate.mockResolvedValue([]);
+  Scan.findOneAndUpdate.mockResolvedValueOnce(record).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+  await expect(processScanJob(job)).rejects.toThrow("cancelled");
+  expect(Finding.bulkWrite).not.toHaveBeenCalled();
+  expect(notifyScanResult).not.toHaveBeenCalled();
+  expect(cleanup).toHaveBeenCalledTimes(1);
+});
+
+test("a finding persistence failure cannot report completion or send success notifications", async () => {
+  runAll.mockResolvedValue({ scannersRun: ["semgrep"], scannerErrors: [], coverage: [], results: [{ scanner: "semgrep", findings: [{
+    path: "src/query.js", start: { line: 12, col: 1 }, end: { line: 12 }, check_id: "securepatch.js.sql-concatenation",
+    extra: { severity: "ERROR", message: "Bind SQL parameters", lines: "db.query(sql + input)", metadata: { cwe: ["CWE-89"] } },
+  }] }] });
+  Finding.aggregate.mockResolvedValue([]);
+  Finding.bulkWrite.mockRejectedValueOnce(new Error("fixture write failure"));
+  await expect(processScanJob(job)).rejects.toThrow("fixture write failure");
+  expect(Finding.bulkWrite.mock.calls[0][1]).toMatchObject({ session: { fixture: true } });
+  expect(Scan.findOneAndUpdate.mock.calls[1][2]).toMatchObject({ session: { fixture: true } });
+  expect(notifyScanResult).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  expect(cleanup).toHaveBeenCalledTimes(1);
 });
 test("a stale worker cannot finalize or fail a scan after its lease is reclaimed", async () => {
   let currentToken;

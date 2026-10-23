@@ -134,7 +134,8 @@ function installWorkspaceApi(page, overrides = {}) {
       if (method === "PUT") {
         if (!failOnce("automationSave")) state.automation.settings = JSON.parse(request.postData());
       }
-      if (status < 400) data = { settings: state.automation.settings, webhookReady: state.automation.webhookReady };
+      if (status < 400) data = { settings: state.automation.settings, webhookReady: state.automation.webhookReady,
+        ...(state.automation.eventReadiness ? { eventReadiness: state.automation.eventReadiness } : {}) };
     } else if (pathname.endsWith("/organizations/org-a/members") && method === "GET") {
       if (!failOnce("members")) data = { members: state.members };
     } else if (pathname.endsWith("/organizations/org-a/ownership-transfer") && method === "POST") {
@@ -243,7 +244,8 @@ function installWorkspaceApi(page, overrides = {}) {
     if (scanDelay) await new Promise(resolve => setTimeout(resolve, scanDelay));
     await route.fulfill({ status, contentType: "application/json",
       headers: state.auditWriteFailed && method !== "GET" ? { "X-SecurePatch-Audit-Recorded": "false" } : undefined,
-      body: JSON.stringify(status >= 400 ? { success: false, ...data } : { success: true, data }) });
+      body: JSON.stringify(status >= 400 ? { success: false, ...data } : { success: true, data,
+        ...(pathname.endsWith("/github/installations") ? {authorization:{verified:true,username:"team"}} : {}) }) });
   });
   return state;
 }
@@ -406,8 +408,8 @@ test.describe("workspace controls, with mocked APIs", () => {
   test("GitHub install selection, connect errors, refresh, repository cards, and modal controls", async ({ page }) => {
     const state = installWorkspaceApi(page, { connected: false, failNext: { connect: "Installation could not be connected" } });
     await page.goto("/github");
-    await expect(page.getByRole("heading", { name: "Connect your GitHub account" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Sign in with GitHub" })).toHaveAttribute("href", "/api/v1/auth/github");
+    await expect(page.getByRole("heading", { name: "Connect repositories to this workspace" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in with GitHub" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute("href", "https://github.com/apps/avpr-net/installations/new");
     await page.getByLabel("GitHub installation").selectOption("11");
     await page.getByRole("button", { name: "Connect installation" }).click();
@@ -905,6 +907,42 @@ test.describe("workspace controls, with mocked APIs", () => {
 
 });
 
+
+test("automation enables only the event subscribed on the GitHub App", async ({ page }) => {
+  const state = installWorkspaceApi(page, { automation: { settings: { push: false, pullRequest: false, frequency: "off" },
+    webhookReady: true, eventReadiness: { push: false, pullRequest: true } } });
+  await page.goto("/github/team/project");
+  await page.getByText("Repository automation").click();
+  await expect(page.getByRole("checkbox", { name: "Scan default-branch pushes" })).toBeDisabled();
+  await page.getByRole("checkbox", { name: "Scan opened/updated pull requests" }).check();
+  await page.getByRole("button", { name: "Save automation" }).click();
+  expect(state.automation.settings.pullRequest).toBe(true);
+  expect(state.automation.settings.push).toBe(false);
+});
+
+test("an existing event trigger can be disabled after webhook configuration becomes unavailable", async ({ page }) => {
+  const state = installWorkspaceApi(page, { automation: { settings: { push: true, pullRequest: false, frequency: "weekly" },
+    webhookReady: false, eventReadiness: { push: false, pullRequest: false } } });
+  await page.goto("/github/team/project");
+  await page.getByText("Repository automation").click();
+  await page.getByRole("checkbox", { name: "Scan default-branch pushes" }).uncheck();
+  await page.getByRole("button", { name: "Save automation" }).click();
+  expect(state.automation.settings.push).toBe(false);
+  expect(state.automation.settings.frequency).toBe("weekly");
+});
+
+test("invitation delivery labels distinguish server acceptance from delay and failure", async ({ page }) => {
+  const state = installWorkspaceApi(page);
+  state.invitations = ["delivered", "delayed", "bounced", "complained", "failed"].map((emailStatus, index) => ({
+    id: `delivery-${index}`, email: `delivery-${index}@example.test`, role: "developer", status: "pending",
+    expiresAt: "2026-10-27T00:00:00.000Z", emailStatus,
+  }));
+  await page.goto("/settings");
+  for (const label of ["Email accepted by recipient server", "Email delivery delayed", "Email bounced — check the address",
+    "Email reported as spam — do not resend", "Email failed — share the link securely"]) {
+    await expect(page.getByText(label, { exact: false })).toBeVisible();
+  }
+});
 
 for (const emailStatus of ["accepted", "failed", "unknown"]) {
   test(`optional invitation email ${emailStatus} preserves manual sharing`, async ({ page }) => {

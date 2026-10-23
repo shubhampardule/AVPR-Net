@@ -9,10 +9,12 @@ beforeEach(() => { jest.restoreAllMocks(); recordAuditEvent.mockClear(); recordA
 test("revocation saves a schema-valid non-active status", async () => {
   const document = member();
   jest.spyOn(Membership, "findOne").mockResolvedValue(document);
-  jest.spyOn(document, "save").mockImplementation(() => document.validate());
+  const update = jest.spyOn(Membership, "findOneAndUpdate").mockResolvedValue({ ...document.toObject(), status: "suspended" });
   const next = jest.fn(), res = response();
   await removeMember({ params: { organizationId: document.organization, userId: document.user } }, res, next);
-  expect(next).not.toHaveBeenCalled(); expect(document.status).toBe("suspended");
+  expect(next).not.toHaveBeenCalled();
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: "active", role: "developer" }),
+    { $set: { status: "suspended" } }, expect.objectContaining({ runValidators: true }));
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
   expect(recordAuditEvent).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ action: "member.removed" }));
 });
@@ -25,13 +27,25 @@ test("owner membership is protected from removal", async () => {
 });
 test("role changes are recorded with old and new roles", async () => {
   const document = member();
-  jest.spyOn(document, "save").mockImplementation(() => document.validate());
+  jest.spyOn(Membership, "findOneAndUpdate").mockResolvedValue({ ...document.toObject(), role: "admin" });
   jest.spyOn(Membership, "findOne").mockResolvedValue(document);
   const req = { params: { organizationId: document.organization, userId: document.user }, body: { role: "admin" }, user: { _id: "owner-1" } };
   await updateMemberRole(req, response(), jest.fn());
-  expect(document.role).toBe("admin");
+  expect(Membership.findOneAndUpdate).toHaveBeenCalledWith(expect.objectContaining({ role: "developer", status: "active" }),
+    { $set: { role: "admin" } }, expect.objectContaining({ runValidators: true }));
   expect(recordAuditEvent).toHaveBeenCalledWith(req, expect.objectContaining({ action: "member.role_changed",
     details: { memberId: String(document.user), fromRole: "developer", toRole: "admin" } }));
+});
+
+test.each(["remove", "role"])("a stale %s action cannot change a member promoted to owner", async action => {
+  const document = member();
+  jest.spyOn(Membership, "findOne").mockResolvedValue(document);
+  jest.spyOn(Membership, "findOneAndUpdate").mockResolvedValue(null);
+  const req = { params: { organizationId: document.organization, userId: document.user }, body: { role: "admin" }, user: { _id: "owner" } };
+  const next = jest.fn();
+  await (action === "remove" ? removeMember : updateMemberRole)(req, response(), next);
+  expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409, code: "MEMBERSHIP_CHANGED" }));
+  expect(recordAuditEvent).not.toHaveBeenCalled();
 });
 
 test("a non-owner can leave while an active owner remains and the exit is audited", async () => {

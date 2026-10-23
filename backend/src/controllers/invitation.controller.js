@@ -90,6 +90,8 @@ async function createInvitation(req, res, next) {
       revokedAt: null,
       status: "pending",
       emailStatus: sendEmail ? "unknown" : "manual",
+      emailAttemptHash: sendEmail ? crypto.createHash("sha256").update(token).digest("hex") : null,
+      emailStatusAt: null,
       ...(sendEmail ? { emailAttemptedAt: new Date() } : {}),
     };
     let invitation;
@@ -116,7 +118,7 @@ async function createInvitation(req, res, next) {
       emailDelivery = await invitationEmail.send({ email, url, role, expiresAt, tokenHash: fields.tokenHash });
       // A newer invitation may already have replaced this token. Never overwrite its status.
       try {
-        await OrganizationInvitation.updateOne({ _id: invitation._id, tokenHash: fields.tokenHash, status: "pending" },
+        await OrganizationInvitation.updateOne({ _id: invitation._id, tokenHash: fields.tokenHash, status: "pending", emailStatus: "unknown" },
           { $set: { emailStatus: emailDelivery.status === "not_configured" ? "failed" : emailDelivery.status } });
       } catch {
         emailDelivery = { ...emailDelivery, statusRecorded: false };
@@ -175,16 +177,13 @@ async function revokeInvitation(req, res, next) {
     if (!mongoose.isValidObjectId(req.params.invitationId)) {
       return fail(res, 404, "INVITATION_NOT_FOUND", "Pending invitation not found");
     }
-    const invitation = await OrganizationInvitation.findOne({
+    const invitation = await OrganizationInvitation.findOneAndUpdate({
       _id: req.params.invitationId,
       organization: req.params.organizationId,
       status: "pending",
-    });
+    }, { $set: { status: "revoked", revokedAt: new Date() }, $unset: { tokenHash: "" } },
+    { returnDocument: "after" });
     if (!invitation) return fail(res, 404, "INVITATION_NOT_FOUND", "Pending invitation not found");
-    invitation.status = "revoked";
-    invitation.tokenHash = undefined;
-    invitation.revokedAt = new Date();
-    await invitation.save();
     await recordAuditEvent(req, {
       action: "invitation.revoked",
       target: `invitation/${invitation._id}`,

@@ -9,6 +9,7 @@ const dashboardRoutes = require("./dashboard.routes");
 
 const router = express.Router();
 router.use(require("./automation.routes"));
+router.use(require("./invitation-email-webhook.routes"));
 
 router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);

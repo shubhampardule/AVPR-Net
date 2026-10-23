@@ -47,6 +47,7 @@ app.use(
 );
 
 app.use("/api/v1/webhooks/github", express.raw({ type: "application/json", limit: "256kb" }));
+app.use("/api/v1/webhooks/resend", express.raw({ type: "application/json", limit: "128kb" }));
 app.use(express.json({ limit: "24kb", strict: true }));
 app.get("/api/v1/health/live", (req, res) => res.json({ success: true, data: {
   status: "ok", revision: process.env.VERCEL_GIT_COMMIT_SHA || null,

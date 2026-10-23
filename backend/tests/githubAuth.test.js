@@ -7,7 +7,7 @@ jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().
 const User = require("../src/models/User");
 const Organization = require("../src/models/Organization");
 const { recordAuditEvent } = require("../src/services/audit.service");
-const { startGitHubLogin, finishGitHubLogin, authorizedInstallations } = require("../src/controllers/githubAuth.controller");
+const { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization } = require("../src/controllers/githubAuth.controller");
 const { connectGitHubInstallation } = (() => {
   jest.mock("../src/config/github", () => require("./__mocks__/github"));
   return require("../src/controllers/github.controller");
@@ -129,6 +129,25 @@ test("expired or another user's installation grants are unusable", () => {
   expect(authorizedInstallations(req)).toEqual([]);
   req.session.githubAccess.checkedAt = Date.now();
   req.session.githubAccess.userId = "user-2";
+  expect(authorizedInstallations(req)).toEqual([]);
+});
+
+test("fresh GitHub authorization is verified even when the account has no installations", () => {
+  const req = { user: { id: "user-1", githubUsername: "developer" }, session: { githubAccess: {
+    userId: "user-1", checkedAt: Date.now(), installations: [],
+  } } };
+  expect(githubAuthorization(req)).toEqual({verified:true,username:"developer"});
+  expect(authorizedInstallations(req)).toEqual([]);
+});
+test.each(["missing", "expired", "different-user", "future"])("%s authorization cannot be inferred from a linked GitHub username", kind => {
+  const req = { user: { id: "user-1", githubUsername: "developer" }, session: { githubAccess: {
+    userId: "user-1", checkedAt: Date.now(), installations:[{id:10}],
+  } } };
+  if (kind === "missing") delete req.session.githubAccess;
+  if (kind === "expired") req.session.githubAccess.checkedAt -= 61 * 60000;
+  if (kind === "different-user") req.session.githubAccess.userId = "user-2";
+  if (kind === "future") req.session.githubAccess.checkedAt += 60000;
+  expect(githubAuthorization(req)).toEqual({verified:false,username:"developer"});
   expect(authorizedInstallations(req)).toEqual([]);
 });
 

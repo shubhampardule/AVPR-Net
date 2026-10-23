@@ -14,8 +14,10 @@ const organizationInvitationSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
   acceptedAt: { type: Date, default: null },
   revokedAt: { type: Date, default: null },
-  emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown"], default: "manual" },
+  emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown", "delayed", "delivered", "bounced", "complained"], default: "manual" },
   emailAttemptedAt: { type: Date, default: null },
+  emailAttemptHash: { type: String, select: false, default: null },
+  emailStatusAt: { type: Date, default: null },
 }, { timestamps: true });
 
 organizationInvitationSchema.index(
@@ -24,6 +26,7 @@ organizationInvitationSchema.index(
 );
 organizationInvitationSchema.index({ tokenHash: 1 }, { unique: true, sparse: true });
 organizationInvitationSchema.index({ organization: 1, status: 1, expiresAt: 1 });
+organizationInvitationSchema.index({ emailAttemptHash: 1 });
 
 module.exports = mongoose.models.OrganizationInvitation ||
   mongoose.model("OrganizationInvitation", organizationInvitationSchema);

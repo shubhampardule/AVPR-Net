@@ -34,9 +34,8 @@ class ScanService {
     const commit = await resolveCommit(effectiveInstallationId, owner, repo, ref);
     await Scan.init();
     await require("./budget.service").consume(`scans:${organizationId}`, 20, 60 * 60 * 1000);
-    await Scan.updateMany({ organization: organizationId, owner, repo, status: { $in: ["queued", "running"] },
-      deadlineAt: { $lt: new Date() } }, { $set: { status: "failed", activeKey: null, leaseUntil: null,
-        leaseToken: null, errorMessage: "Scan deadline expired", completedAt: new Date() } });
+    await require("./scan-expiry.service").expireOverdueScans({ organization: organizationId,
+      activeKey: `${organizationId}:${owner.toLowerCase()}/${repo.toLowerCase()}` });
     // A unique partial index prevents concurrent enqueues for this repository.
     const scan = await Scan.create({
       organization: organizationId,

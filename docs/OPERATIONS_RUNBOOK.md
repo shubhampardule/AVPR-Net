@@ -21,7 +21,15 @@ An operator can run this from their existing monitoring system every minute. Ale
 
 Signal counters use fixed categories and per-minute buckets, expire after one hour, and contain no source or account identifiers. The window includes the first partial minute, so it may cover up to sixteen minute buckets. Counter writes are best effort and bounded; failure cannot change the original API result. Counts are not a durable audit trail. Middleware counters cover errors reaching that middleware, not all errors handled internally by individual features. Database outages cannot be persisted into those counters; the CLI detects its own database failure instead.
 
-## Recovery drill checklist (not yet executed live)
+## Recovery drill checklist (partially exercised with disposable fixtures)
+
+On 23 October, real MongoDB plus child-process drills covered worker termination,
+replacement after fixture lease advancement, duplicate completion delivery, and HTTP
+cancellation of a running worker. Synthetic download/scanner boundaries were used;
+the cleanup callback was observed, not filesystem orphan reaping. The combined
+32-check acceptance run also covered team/access transactions. See
+[the acceptance record](ACCEPTANCE_2026-10-23.md). Actual queue redelivery, daemon
+failover, backups, rollback, revocation, and deletion-worker restart remain pending.
 
 Use a separately named staging database, disposable repositories and test accounts. Record the environment, source/release revision, operator, expected behavior, observations and recovery time. Do not erase, uninstall, or restore over production as a test.
 

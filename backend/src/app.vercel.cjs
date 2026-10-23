@@ -1616,6 +1616,7 @@ var require_Scan = __commonJS({
       }
     );
     scanSchema.index({ organization: 1, owner: 1, repo: 1, createdAt: -1 });
+    scanSchema.index({ status: 1, deadlineAt: 1, _id: 1 });
     scanSchema.index({ activeKey: 1 }, { unique: true, partialFilterExpression: { activeKey: { $type: "string" } } });
     module2.exports = mongoose.models.Scan || mongoose.model("Scan", scanSchema);
   }
@@ -2406,8 +2407,10 @@ var require_OrganizationInvitation = __commonJS({
       expiresAt: { type: Date, required: true },
       acceptedAt: { type: Date, default: null },
       revokedAt: { type: Date, default: null },
-      emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown"], default: "manual" },
-      emailAttemptedAt: { type: Date, default: null }
+      emailStatus: { type: String, enum: ["manual", "accepted", "failed", "unknown", "delayed", "delivered", "bounced", "complained"], default: "manual" },
+      emailAttemptedAt: { type: Date, default: null },
+      emailAttemptHash: { type: String, select: false, default: null },
+      emailStatusAt: { type: Date, default: null }
     }, { timestamps: true });
     organizationInvitationSchema.index(
       { organization: 1, email: 1 },
@@ -2415,6 +2418,7 @@ var require_OrganizationInvitation = __commonJS({
     );
     organizationInvitationSchema.index({ tokenHash: 1 }, { unique: true, sparse: true });
     organizationInvitationSchema.index({ organization: 1, status: 1, expiresAt: 1 });
+    organizationInvitationSchema.index({ emailAttemptHash: 1 });
     module2.exports = mongoose.models.OrganizationInvitation || mongoose.model("OrganizationInvitation", organizationInvitationSchema);
   }
 });
@@ -2676,9 +2680,14 @@ var require_githubAuth_controller = __commonJS({
     }
     function authorizedInstallations(req) {
       const access = req.session?.githubAccess;
-      return access?.userId === req.user?.id && Date.now() - access.checkedAt < 60 * 60 * 1e3 ? access.installations : [];
+      return githubAuthorization(req).verified && Array.isArray(access.installations) ? access.installations : [];
     }
-    module2.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations };
+    function githubAuthorization(req) {
+      const access = req.session?.githubAccess;
+      const age = Date.now() - access?.checkedAt;
+      return { verified: Boolean(req.user?.id && access?.userId === req.user.id && Number.isFinite(age) && age >= 0 && age < 60 * 60 * 1e3), username: req.user?.githubUsername || null };
+    }
+    module2.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization };
   }
 });
 
@@ -2746,6 +2755,7 @@ var require_RepositoryAutomation = __commonJS({
       frequency: { type: String, enum: ["off", "weekly", "monthly"], default: "off" },
       nextRunAt: { type: Date, default: null },
       leaseUntil: { type: Date, default: null },
+      leaseToken: { type: String, default: null },
       lastError: { type: String, default: null },
       lastScanId: { type: String, default: null },
       pendingRefs: { type: [String], default: [] }
@@ -3327,7 +3337,7 @@ var require_organization_deletion_service = __commonJS({
         );
         await Automation.updateMany(
           { organization: organizationId },
-          { $set: { frequency: "off", push: false, pullRequest: false, pendingRefs: [], nextRunAt: null, leaseUntil: null } },
+          { $set: { frequency: "off", push: false, pullRequest: false, pendingRefs: [], nextRunAt: null, leaseUntil: null, leaseToken: null } },
           { session: session2 }
         );
         await Scan.updateMany(
@@ -3513,8 +3523,14 @@ var require_member_controller = __commonJS({
           });
         }
         const previousRole = membership.role;
-        membership.role = role;
-        await membership.save();
+        const updated = await OrganizationMember.findOneAndUpdate({
+          _id: membership._id,
+          organization: organizationId,
+          user: userId,
+          status: "active",
+          role: previousRole
+        }, { $set: { role } }, { returnDocument: "after", runValidators: true });
+        if (!updated) throw bad("The membership changed. Refresh the team before changing its role", 409, "MEMBERSHIP_CHANGED");
         await recordAuditEvent(req, {
           action: "member.role_changed",
           target: `member/${membership.user}`,
@@ -3525,8 +3541,8 @@ var require_member_controller = __commonJS({
           {
             member: {
               userId: membership.user,
-              role: membership.role,
-              status: membership.status
+              role: updated.role,
+              status: updated.status
             }
           },
           "Member role updated successfully"
@@ -3561,8 +3577,18 @@ var require_member_controller = __commonJS({
             }
           });
         }
-        membership.status = "suspended";
-        await membership.save();
+        const removed = await OrganizationMember.findOneAndUpdate(
+          {
+            _id: membership._id,
+            organization: organizationId,
+            user: userId,
+            status: "active",
+            role: membership.role
+          },
+          { $set: { status: "suspended" } },
+          { returnDocument: "after", runValidators: true }
+        );
+        if (!removed) throw bad("The membership changed. Refresh the team before removing it", 409, "MEMBERSHIP_CHANGED");
         await recordAuditEvent(req, {
           action: "member.removed",
           target: `member/${membership.user}`,
@@ -3697,6 +3723,7 @@ var require_invitation_email_service = __commonJS({
           body: JSON.stringify({
             from: process.env.INVITATION_EMAIL_FROM.trim(),
             to: [email],
+            tags: [{ name: "invitation_attempt", value: tokenHash }],
             subject: "Your AVPR-Net workspace invitation",
             text: `You have been invited to a AVPR-Net workspace as ${role}.
 
@@ -3808,6 +3835,8 @@ var require_invitation_controller = __commonJS({
           revokedAt: null,
           status: "pending",
           emailStatus: sendEmail ? "unknown" : "manual",
+          emailAttemptHash: sendEmail ? crypto.createHash("sha256").update(token).digest("hex") : null,
+          emailStatusAt: null,
           ...sendEmail ? { emailAttemptedAt: /* @__PURE__ */ new Date() } : {}
         };
         let invitation;
@@ -3835,7 +3864,7 @@ var require_invitation_controller = __commonJS({
           emailDelivery = await invitationEmail.send({ email, url, role, expiresAt, tokenHash: fields.tokenHash });
           try {
             await OrganizationInvitation.updateOne(
-              { _id: invitation._id, tokenHash: fields.tokenHash, status: "pending" },
+              { _id: invitation._id, tokenHash: fields.tokenHash, status: "pending", emailStatus: "unknown" },
               { $set: { emailStatus: emailDelivery.status === "not_configured" ? "failed" : emailDelivery.status } }
             );
           } catch {
@@ -3890,16 +3919,16 @@ var require_invitation_controller = __commonJS({
         if (!mongoose.isValidObjectId(req.params.invitationId)) {
           return fail(res, 404, "INVITATION_NOT_FOUND", "Pending invitation not found");
         }
-        const invitation = await OrganizationInvitation.findOne({
-          _id: req.params.invitationId,
-          organization: req.params.organizationId,
-          status: "pending"
-        });
+        const invitation = await OrganizationInvitation.findOneAndUpdate(
+          {
+            _id: req.params.invitationId,
+            organization: req.params.organizationId,
+            status: "pending"
+          },
+          { $set: { status: "revoked", revokedAt: /* @__PURE__ */ new Date() }, $unset: { tokenHash: "" } },
+          { returnDocument: "after" }
+        );
         if (!invitation) return fail(res, 404, "INVITATION_NOT_FOUND", "Pending invitation not found");
-        invitation.status = "revoked";
-        invitation.tokenHash = void 0;
-        invitation.revokedAt = /* @__PURE__ */ new Date();
-        await invitation.save();
         await recordAuditEvent(req, {
           action: "invitation.revoked",
           target: `invitation/${invitation._id}`,
@@ -4228,7 +4257,7 @@ var require_github_routes = __commonJS({
     var Organization = require_Organization();
     var { optionalCommitSha } = require_input();
     var router = express2.Router();
-    var { authorizedInstallations, finishGitHubLogin } = require_githubAuth_controller();
+    var { authorizedInstallations, finishGitHubLogin, githubAuthorization } = require_githubAuth_controller();
     router.get("/callback", finishGitHubLogin);
     router.get("/test", requireAuth, async (req, res, next) => {
       try {
@@ -4251,6 +4280,7 @@ var require_github_routes = __commonJS({
         return res.status(200).json({
           success: true,
           data: authorizedInstallations(req),
+          authorization: githubAuthorization(req),
           message: "GitHub App installations fetched successfully"
         });
       } catch (error) {
@@ -5610,6 +5640,116 @@ var require_remediation_guidance_service = __commonJS({
   }
 });
 
+// src/services/scan-completion.service.js
+var require_scan_completion_service = __commonJS({
+  "src/services/scan-completion.service.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var Scan = require_Scan();
+    var Finding = require_Finding();
+    async function persistScanCompletion({ scanId, leaseToken, fields, findings }) {
+      if (findings.length) await Finding.init();
+      await mongoose.connection.transaction(async (session2) => {
+        const owned = await Scan.findOneAndUpdate(
+          {
+            _id: scanId,
+            status: "running",
+            cancelledAt: null,
+            leaseToken,
+            $or: [{ deadlineAt: null }, { deadlineAt: { $gt: /* @__PURE__ */ new Date() } }]
+          },
+          { $set: fields },
+          { session: session2 }
+        );
+        if (!owned) throw new Error("Scan was cancelled, expired, or its lease was replaced before completion");
+        if (findings.length) {
+          await Finding.bulkWrite(findings.map((finding) => ({ updateOne: {
+            filter: { scan: scanId, fingerprint: finding.fingerprint },
+            update: { $setOnInsert: finding },
+            upsert: true
+          } })), { ordered: false, session: session2 });
+        }
+      });
+    }
+    module2.exports = { persistScanCompletion };
+  }
+});
+
+// src/services/scan-expiry.service.js
+var require_scan_expiry_service = __commonJS({
+  "src/services/scan-expiry.service.js"(exports2, module2) {
+    var Scan = require_Scan();
+    var EXPIRY_BATCH_SIZE = 500;
+    async function expireOverdueScans({ organization, activeKey } = {}, now = /* @__PURE__ */ new Date()) {
+      const filter = {
+        status: { $in: ["queued", "running"] },
+        deadlineAt: { $lte: now },
+        ...organization ? { organization } : {},
+        ...activeKey ? { activeKey } : {}
+      };
+      const ids = await Scan.find(filter).select("_id").sort({ deadlineAt: 1, _id: 1 }).limit(EXPIRY_BATCH_SIZE).lean();
+      if (!ids.length) return 0;
+      const result = await Scan.updateMany(
+        { ...filter, _id: { $in: ids.map((scan) => scan._id) } },
+        { $set: {
+          status: "failed",
+          activeKey: null,
+          leaseUntil: null,
+          leaseToken: null,
+          errorMessage: "Scan deadline expired",
+          completedAt: now
+        } }
+      );
+      return result.modifiedCount;
+    }
+    module2.exports = { expireOverdueScans, EXPIRY_BATCH_SIZE };
+  }
+});
+
+// src/services/github-webhook-readiness.service.js
+var require_github_webhook_readiness_service = __commonJS({
+  "src/services/github-webhook-readiness.service.js"(exports2, module2) {
+    var { createHash } = require("node:crypto");
+    var cached;
+    async function getWebhookReadiness({ force = false } = {}) {
+      const secret = process.env.GITHUB_WEBHOOK_SECRET?.trim();
+      const unavailable = (issue) => ({ push: false, pullRequest: false, issue });
+      if (!secret) return unavailable("WEBHOOK_SECRET_MISSING");
+      let expected;
+      try {
+        expected = new URL(process.env.GITHUB_WEBHOOK_URL || "/api/v1/webhooks/github", process.env.FRONTEND_URL);
+        if (expected.protocol !== "https:" || expected.username || expected.password || expected.search || expected.hash || expected.pathname !== "/api/v1/webhooks/github") throw new Error("Invalid public endpoint");
+      } catch {
+        return unavailable("WEBHOOK_PUBLIC_URL_MISSING");
+      }
+      const key = createHash("sha256").update(secret).update("\0").update(expected.href).digest("hex");
+      if (!force && cached?.key === key && cached.until > Date.now()) return cached.result;
+      let result;
+      try {
+        const { githubApp } = require_github();
+        const [app2, hook] = await Promise.all([
+          githubApp.octokit.request("GET /app", { request: { timeout: 8e3 } }),
+          githubApp.octokit.request("GET /app/hook/config", { request: { timeout: 8e3 } })
+        ]);
+        if (hook.data?.url !== expected.href || hook.data?.content_type !== "json" || String(hook.data?.insecure_ssl) !== "0" || !hook.data?.secret) {
+          result = unavailable("WEBHOOK_REMOTE_CONFIGURATION_MISMATCH");
+        } else {
+          const events = new Set(Array.isArray(app2.data?.events) ? app2.data.events : []);
+          result = {
+            push: events.has("push"),
+            pullRequest: events.has("pull_request"),
+            issue: events.has("push") && events.has("pull_request") ? null : "WEBHOOK_SUBSCRIPTION_MISSING"
+          };
+        }
+      } catch {
+        result = unavailable("WEBHOOK_CONFIGURATION_UNVERIFIED");
+      }
+      cached = { key, until: Date.now() + 15e3, result: Object.freeze(result) };
+      return cached.result;
+    }
+    module2.exports = { getWebhookReadiness };
+  }
+});
+
 // src/services/automation.service.js
 var require_automation_service = __commonJS({
   "src/services/automation.service.js"(exports2, module2) {
@@ -5617,7 +5757,6 @@ var require_automation_service = __commonJS({
     var Automation = require_RepositoryAutomation();
     var Organization = require_Organization();
     var UsageBucket = require_UsageBucket();
-    var ScanService = require_scan_service();
     var { bad, repository } = require_input();
     function nextRun(frequency, now = /* @__PURE__ */ new Date()) {
       if (frequency === "off") return null;
@@ -5639,41 +5778,67 @@ var require_automation_service = __commonJS({
       const filter = { organization, owner, repo };
       if (!body) return await Automation.findOne(filter).lean() || { push: false, pullRequest: false, frequency: "off" };
       if (Object.keys(body).some((k) => !["push", "pullRequest", "frequency"].includes(k)) || typeof body.push !== "boolean" || typeof body.pullRequest !== "boolean" || !["off", "weekly", "monthly"].includes(body.frequency)) throw bad("Invalid automation settings");
-      if ((body.push || body.pullRequest) && !process.env.GITHUB_WEBHOOK_SECRET) throw bad("Configure the GitHub App webhook secret and URL before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
+      if (body.push || body.pullRequest) {
+        const readiness = await require_github_webhook_readiness_service().getWebhookReadiness();
+        if (body.push && !readiness.push || body.pullRequest && !readiness.pullRequest) {
+          throw bad("Verify the GitHub App webhook URL, secret and selected event subscriptions before enabling events", 503, "WEBHOOK_NOT_CONFIGURED");
+        }
+      }
       const org = await Organization.findById(organization);
       if (!org?.githubInstallationId) throw bad("Connect GitHub first");
       await require_github_service().resolveCommit(org.githubInstallationId, owner, repo);
-      return Automation.findOneAndUpdate(filter, { $set: { ...body, installationId: org.githubInstallationId, nextRunAt: nextRun(body.frequency), lastError: null } }, { upsert: true, returnDocument: "after", runValidators: true });
+      return Automation.findOneAndUpdate(filter, { $set: {
+        ...body,
+        installationId: org.githubInstallationId,
+        nextRunAt: nextRun(body.frequency),
+        lastError: null,
+        leaseUntil: null,
+        leaseToken: null,
+        ...!body.push && !body.pullRequest ? { pendingRefs: [] } : {}
+      } }, { upsert: true, returnDocument: "after", runValidators: true });
     }
-    async function runDueSchedules() {
-      const pending = await Automation.find({ "pendingRefs.0": { $exists: true } }).limit(5);
-      for (const config of pending) {
-        const ref = config.pendingRefs[0];
-        try {
-          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo, ref });
-          await Automation.updateOne({ _id: config._id }, { $pull: { pendingRefs: ref }, $set: { lastError: null, lastScanId: String(job.scanId) } });
-        } catch {
+    async function runDueSchedules({ enqueueScan = (request) => require_scan_service().enqueueScan(request) } = {}) {
+      for (const kind of ["event", "schedule"]) {
+        const attempted = [];
+        for (let count = 0; count < 5; count++) {
+          const now = /* @__PURE__ */ new Date(), token = crypto.randomUUID();
+          const config = await Automation.findOneAndUpdate(
+            {
+              ...attempted.length ? { _id: { $nin: [...attempted] } } : {},
+              ...kind === "event" ? {
+                "pendingRefs.0": { $exists: true },
+                $and: [{ $or: [{ push: true }, { pullRequest: true }] }]
+              } : { frequency: { $ne: "off" }, nextRunAt: { $lte: now, $ne: null } },
+              $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }]
+            },
+            { $set: { leaseUntil: new Date(now.getTime() + 6e4), leaseToken: token } },
+            { returnDocument: "after", sort: kind === "event" ? { updatedAt: 1, _id: 1 } : { nextRunAt: 1, _id: 1 } }
+          );
+          if (!config) break;
+          attempted.push(config._id);
+          const ref = kind === "event" ? config.pendingRefs[0] : null;
+          const fields = { leaseUntil: null, leaseToken: null };
+          let succeeded = false;
+          try {
+            const job = await enqueueScan({
+              organizationId: config.organization,
+              owner: config.owner,
+              repo: config.repo,
+              ...ref ? { ref } : {}
+            });
+            fields.lastScanId = String(job.scanId);
+            fields.lastError = null;
+            if (kind === "schedule") fields.nextRunAt = nextRun(config.frequency);
+            succeeded = true;
+          } catch {
+            fields.lastError = `${kind === "event" ? "Event" : "Scheduled"} scan could not be queued. Check GitHub access, quota and active scans.`;
+            if (kind === "schedule") fields.nextRunAt = new Date(Date.now() + 15 * 60 * 1e3);
+          }
+          await Automation.updateOne({ _id: config._id, leaseToken: token }, {
+            $set: fields,
+            ...ref && succeeded ? { $pull: { pendingRefs: ref } } : {}
+          });
         }
-      }
-      for (let count = 0; count < 5; count++) {
-        const now = /* @__PURE__ */ new Date();
-        const config = await Automation.findOneAndUpdate({
-          frequency: { $ne: "off" },
-          nextRunAt: { $lte: now, $ne: null },
-          $or: [{ leaseUntil: null }, { leaseUntil: { $lt: now } }]
-        }, { $set: { leaseUntil: new Date(Date.now() + 6e4) } }, { returnDocument: "after" });
-        if (!config) break;
-        try {
-          const job = await ScanService.enqueueScan({ organizationId: config.organization, owner: config.owner, repo: config.repo });
-          config.lastScanId = String(job.scanId);
-          config.lastError = null;
-          config.nextRunAt = nextRun(config.frequency);
-        } catch {
-          config.lastError = "Scheduled scan could not be queued. Check GitHub access, quota and active scans.";
-          config.nextRunAt = new Date(Date.now() + 15 * 60 * 1e3);
-        }
-        config.leaseUntil = null;
-        await config.save();
       }
     }
     function verifySignature(body, signature, secret) {
@@ -5706,10 +5871,15 @@ var require_automation_service = __commonJS({
         const configs = await Automation.find({ owner, repo, installationId: String(payload.installation?.id), [event === "push" ? "push" : "pullRequest"]: true }).limit(50);
         for (const config of configs) {
           const stored = await Automation.findOneAndUpdate(
-            { _id: config._id, $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }] },
+            {
+              _id: config._id,
+              installationId: String(payload.installation?.id),
+              [event === "push" ? "push" : "pullRequest"]: true,
+              $or: [{ "pendingRefs.19": { $exists: false } }, { pendingRefs: ref }]
+            },
             { $addToSet: { pendingRefs: ref }, $set: { lastError: null } }
           );
-          if (!stored) throw bad("Repository event queue is full (20 commits)", 429, "EVENT_QUEUE_FULL");
+          if (!stored) throw bad("Repository event queue is full (20 commits) or event settings changed; retry delivery", 429, "EVENT_QUEUE_FULL");
         }
         return { accepted: configs.length };
       } catch (error) {
@@ -5775,7 +5945,10 @@ var require_scanWorker = __commonJS({
         console.info("[ScanWorker] Connected to MongoDB database.");
       }
     };
-    var processScanJobInternal = async (job, controller) => {
+    var processScanJobInternal = async (job, controller, {
+      createWorkspace = createEphemeralWorkspace,
+      createOrchestrator = (options) => new ScannerOrchestrator(null, options)
+    } = {}) => {
       const { scanId, organizationId, installationId, owner, repo } = job.data;
       console.info(`[ScanWorker] Processing job ${job.id} for scan ${scanId} (${owner}/${repo})...`);
       await ensureDatabase();
@@ -5819,9 +5992,9 @@ var require_scanWorker = __commonJS({
         if (!scan.commitSha) {
           scan.commitSha = (await require_github_service().resolveCommit(installationId, owner, repo)).sha;
         }
-        workspaceHandle = await createEphemeralWorkspace(installationId, owner, repo, scan.commitSha);
+        workspaceHandle = await createWorkspace(installationId, owner, repo, scan.commitSha);
         const { workspacePath } = workspaceHandle;
-        const orchestrator = new ScannerOrchestrator(null, { includeDependencies: scan.includeDependencies });
+        const orchestrator = createOrchestrator({ includeDependencies: scan.includeDependencies });
         const { results, scannersRun, scannerErrors, coverage } = await orchestrator.runAll(workspacePath);
         controller.signal.throwIfAborted();
         scan.scannersUsed = scannersRun;
@@ -5910,17 +6083,6 @@ var require_scanWorker = __commonJS({
             }
           }
         }
-        if (findingsToInsert.length > 0) {
-          await Finding.init();
-          await Finding.bulkWrite(findingsToInsert.map((finding) => ({
-            updateOne: {
-              filter: { scan: scan._id, fingerprint: finding.fingerprint },
-              update: { $setOnInsert: finding },
-              upsert: true
-            }
-          })), { ordered: false });
-        }
-        console.info(`[ScanWorker] Persisted ${findingsToInsert.length} findings to MongoDB.`);
         const summary = {
           total: findingsToInsert.length,
           critical: findingsToInsert.filter((f) => f.riskCategory === "critical").length,
@@ -5933,9 +6095,11 @@ var require_scanWorker = __commonJS({
         scan.leaseUntil = null;
         scan.completedAt = /* @__PURE__ */ new Date();
         scan.summary = summary;
-        const finalized = await Scan.findOneAndUpdate(
-          { _id: scanId, status: "running", cancelledAt: null, leaseToken },
-          { $set: {
+        await require_scan_completion_service().persistScanCompletion({
+          scanId,
+          leaseToken,
+          findings: findingsToInsert,
+          fields: {
             status: scan.status,
             completedAt: scan.completedAt,
             summary,
@@ -5949,9 +6113,9 @@ var require_scanWorker = __commonJS({
             activeKey: null,
             leaseUntil: null,
             leaseToken: null
-          } }
-        );
-        if (!finalized) throw new Error("Scan was cancelled before completion");
+          }
+        });
+        console.info(`[ScanWorker] Persisted ${findingsToInsert.length} findings to MongoDB.`);
         await bestEffortScanNotification(scan);
         console.info(`[ScanWorker] Scan ${scanId} completed successfully. ${summary.total} findings persisted.`);
         return { success: true, summary };
@@ -5984,9 +6148,9 @@ var require_scanWorker = __commonJS({
         }
       }
     };
-    var processScanJob = (job) => {
+    var processScanJob = (job, runtime) => {
       const controller = new AbortController();
-      return require_scan_context().run({ signal: controller.signal }, () => processScanJobInternal(job, controller));
+      return require_scan_context().run({ signal: controller.signal }, () => processScanJobInternal(job, controller, runtime));
     };
     var createBullMqWorker = () => {
       if (!redisConnection) throw new Error("REDIS_URL is required to run the local BullMQ scan worker");
@@ -6014,6 +6178,8 @@ var require_scanWorker = __commonJS({
       return worker;
     };
     async function runMaintenance() {
+      await ensureDatabase();
+      await require_scan_expiry_service().expireOverdueScans();
       try {
         await require_organization_deletion_service().purgeDueOrganizations();
       } catch (error) {
@@ -6040,21 +6206,10 @@ var require_scanWorker = __commonJS({
         try {
           await ensureDatabase();
           await heartbeatWorker();
-          await Scan.updateMany(
-            { status: { $in: ["queued", "running"] }, deadlineAt: { $lt: /* @__PURE__ */ new Date() } },
-            { $set: {
-              status: "failed",
-              activeKey: null,
-              leaseUntil: null,
-              leaseToken: null,
-              errorMessage: "Scan deadline expired",
-              completedAt: /* @__PURE__ */ new Date()
-            } }
-          );
           if (Date.now() - lastScheduleCheck > 6e4) {
             await runMaintenance();
             lastScheduleCheck = Date.now();
-          }
+          } else await require_scan_expiry_service().expireOverdueScans();
           const token = await getVercelOidcToken();
           const queue = new PollingQueueClient({
             region: SCAN_QUEUE_REGION,
@@ -6104,7 +6259,8 @@ var require_scanWorker = __commonJS({
       createBullMqWorker,
       processScanJob,
       startVercelQueueWorker,
-      reportScannerReadiness
+      reportScannerReadiness,
+      runMaintenance
     };
   }
 });
@@ -6209,20 +6365,10 @@ var require_scan_service = __commonJS({
         const commit = await resolveCommit(effectiveInstallationId, owner, repo, ref);
         await Scan.init();
         await require_budget_service().consume(`scans:${organizationId}`, 20, 60 * 60 * 1e3);
-        await Scan.updateMany({
+        await require_scan_expiry_service().expireOverdueScans({
           organization: organizationId,
-          owner,
-          repo,
-          status: { $in: ["queued", "running"] },
-          deadlineAt: { $lt: /* @__PURE__ */ new Date() }
-        }, { $set: {
-          status: "failed",
-          activeKey: null,
-          leaseUntil: null,
-          leaseToken: null,
-          errorMessage: "Scan deadline expired",
-          completedAt: /* @__PURE__ */ new Date()
-        } });
+          activeKey: `${organizationId}:${owner.toLowerCase()}/${repo.toLowerCase()}`
+        });
         const scan = await Scan.create({
           organization: organizationId,
           installationId: effectiveInstallationId,
@@ -7089,11 +7235,87 @@ var require_automation_routes = __commonJS({
       res.status(202).json({ success: true, data: await service.receive(req.body, req.get("X-GitHub-Event"), req.get("X-GitHub-Delivery")) });
     }));
     var route = "/organizations/:organizationId/repositories/:owner/:repo/automation";
+    async function automationData(settings) {
+      const readiness = await require_github_webhook_readiness_service().getWebhookReadiness();
+      return {
+        settings,
+        webhookReady: readiness.push || readiness.pullRequest,
+        eventReadiness: { push: readiness.push, pullRequest: readiness.pullRequest },
+        webhookIssue: readiness.issue
+      };
+    }
     router.get(route, requireAuth, requireOrganizationMember, handler(async (req, res) => {
-      res.json({ success: true, data: { settings: await service.settings(req.params.organizationId, req.params.owner, req.params.repo), webhookReady: Boolean(process.env.GITHUB_WEBHOOK_SECRET) } });
+      res.json({ success: true, data: await automationData(await service.settings(req.params.organizationId, req.params.owner, req.params.repo)) });
     }));
     router.put(route, requireAuth, requireOrganizationMember, requireRole("owner", "admin"), handler(async (req, res) => {
-      res.json({ success: true, data: { settings: await service.settings(req.params.organizationId, req.params.owner, req.params.repo, req.body), webhookReady: Boolean(process.env.GITHUB_WEBHOOK_SECRET) } });
+      res.json({ success: true, data: await automationData(await service.settings(req.params.organizationId, req.params.owner, req.params.repo, req.body)) });
+    }));
+    module2.exports = router;
+  }
+});
+
+// src/services/invitation-email-webhook.service.js
+var require_invitation_email_webhook_service = __commonJS({
+  "src/services/invitation-email-webhook.service.js"(exports2, module2) {
+    var { Webhook } = require("standardwebhooks");
+    var Invitation = require_OrganizationInvitation();
+    var { bad } = require_input();
+    var RANK = { manual: 0, unknown: 0, accepted: 1, delayed: 2, delivered: 3, failed: 4, bounced: 5, complained: 6 };
+    var EVENTS = {
+      "email.sent": "accepted",
+      "email.delivery_delayed": "delayed",
+      "email.delivered": "delivered",
+      "email.failed": "failed",
+      "email.bounced": "bounced",
+      "email.complained": "complained",
+      "email.suppressed": "failed"
+    };
+    async function receive(body, headers) {
+      const secret = process.env.RESEND_WEBHOOK_SECRET?.trim();
+      if (!secret) throw bad("Invitation delivery callbacks are not configured", 503, "EMAIL_WEBHOOK_UNAVAILABLE");
+      let event;
+      try {
+        if (!Buffer.isBuffer(body) || body.length > 128 * 1024) throw new Error("Raw payload required");
+        event = new Webhook(secret).verify(body, {
+          "webhook-id": headers["svix-id"],
+          "webhook-timestamp": headers["svix-timestamp"],
+          "webhook-signature": headers["svix-signature"]
+        });
+      } catch {
+        throw bad("Invalid delivery webhook signature", 401, "EMAIL_WEBHOOK_SIGNATURE");
+      }
+      const status = Object.hasOwn(EVENTS, event?.type) ? EVENTS[event.type] : null;
+      if (!status) return;
+      const attempt = event.data?.tags?.invitation_attempt;
+      const occurred = new Date(event.created_at);
+      if (typeof attempt !== "string" || !/^[a-f0-9]{64}$/.test(attempt) || !Number.isFinite(occurred.getTime()) || occurred.getTime() > Date.now() + 3e5) return;
+      const lowerStates = Object.keys(RANK).filter((value) => RANK[value] < RANK[status]);
+      await Invitation.updateOne(
+        { emailAttemptHash: attempt, status: "pending", emailStatus: { $in: lowerStates } },
+        { $set: { emailStatus: status }, $max: { emailStatusAt: occurred } }
+      );
+    }
+    module2.exports = { receive };
+  }
+});
+
+// src/routes/invitation-email-webhook.routes.js
+var require_invitation_email_webhook_routes = __commonJS({
+  "src/routes/invitation-email-webhook.routes.js"(exports2, module2) {
+    var router = require("express").Router();
+    var handler = require_asyncHandler();
+    router.post("/webhooks/resend", handler(async (req, res) => {
+      try {
+        await require_invitation_email_webhook_service().receive(req.body, {
+          "svix-id": req.get("svix-id"),
+          "svix-timestamp": req.get("svix-timestamp"),
+          "svix-signature": req.get("svix-signature")
+        });
+      } catch (error) {
+        if (error.code === "EMAIL_WEBHOOK_SIGNATURE") void require_operations_service().recordSignal("webhook_reject");
+        throw error;
+      }
+      res.status(202).json({ success: true });
     }));
     module2.exports = router;
   }
@@ -7191,6 +7413,7 @@ var require_routes = __commonJS({
     var dashboardRoutes = require_dashboard_routes();
     var router = express2.Router();
     router.use(require_automation_routes());
+    router.use(require_invitation_email_webhook_routes());
     router.use("/health", healthRoutes);
     router.use("/auth", authRoutes);
     router.use("/organizations", organizationRoutes);
@@ -7459,6 +7682,7 @@ app.use(
   })
 );
 app.use("/api/v1/webhooks/github", express.raw({ type: "application/json", limit: "256kb" }));
+app.use("/api/v1/webhooks/resend", express.raw({ type: "application/json", limit: "128kb" }));
 app.use(express.json({ limit: "24kb", strict: true }));
 app.get("/api/v1/health/live", (req, res) => res.json({ success: true, data: {
   status: "ok",
