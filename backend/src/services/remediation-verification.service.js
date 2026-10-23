@@ -13,7 +13,9 @@ function checkRecord(validation) {
     { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
     { name: "syntax", status: syntaxStatus, method: validation.syntax?.method || null, detailCode: syntaxDetail },
     { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
-    { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" },
+    validation.securityRescan?.status==="passed"
+      ? {name:"security_rescan",status:"passed",method:"paired-pinned-snapshot",detailCode:"target_alert_absent_no_new_counts"}
+      : { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" },
   ];
 }
 
@@ -49,6 +51,8 @@ async function recordVerification({ scan, finding, actorId, patch, validation, a
     proposedSha256: DIGEST(validation.content),
     action,
     checks: checkRecord(validation),
+    ...(validation.securityRescan?.status==="passed"?{securityRescan:{jobId:validation.securityRescan.jobId,
+      rulesHash:validation.securityRescan.rulesHash,policyHash:validation.securityRescan.policyHash}}:{}),
     pullRequest: pullRequestRecord(pullRequest),
   });
 }

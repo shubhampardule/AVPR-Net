@@ -281,6 +281,7 @@ async function runMaintenance() {
   try { await require("../services/organization-deletion.service").purgeDueOrganizations(); }
   catch (error) { console.error(`[ScanWorker] Organization erasure pass failed (${error.name || "Error"}).`); }
   await require("../services/automation.service").runDueSchedules();
+  await require("../services/patch-rescan-jobs.service").runPending();
 }
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));

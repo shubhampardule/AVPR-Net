@@ -1,0 +1,87 @@
+{
+  "kind": "live_nvidia_static_remediation",
+  "synthetic": true,
+  "testsExecuted": false,
+  "cases": [
+    {
+      "id": "javascript-sql",
+      "status": "passed",
+      "outcome": "target_alert_absent",
+      "baselineReproduced": true,
+      "remainingTargetAlerts": 0,
+      "introducedAlerts": 0,
+      "newAlerts": [],
+      "beforeAlerts": 1,
+      "afterAlerts": 0,
+      "scope": "selected rule across the target file; rule/path alert-count comparison across the repository",
+      "tests": "not_executed",
+      "limitation": "Static alerts only. No proof of functional correctness or absence of vulnerabilities; moved or changed alerts with the same rule/path counts may not be distinguished.",
+      "sourceHash": "815a79602406075a58657ec0c490cc3a8eacc5621d502683936a059938868c71",
+      "proposedHash": "a67fe75575fb811cd354835f85b26a2498c1bf4c381c484a892f82d18c1d7daf",
+      "patchHash": "3fa053466162295d78a66b7e1dd7568dd078a3094e632fd2bda8fce3095208f7",
+      "commitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "coverage": [
+        {
+          "scanner": "semgrep",
+          "version": "1.181.0",
+          "scanned": 1,
+          "filesHash": "04ba9626d622452005a6c29d29775a683ffe0589e3930c14149f882269400df4"
+        },
+        {
+          "scanner": "bandit",
+          "version": "bandit 1.9.4\n  python version = 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+          "scanned": 0,
+          "filesHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "scanner": "secrets",
+          "version": "securepatch-patterns-v1",
+          "scanned": 1,
+          "filesHash": "04ba9626d622452005a6c29d29775a683ffe0589e3930c14149f882269400df4"
+        }
+      ],
+      "rulesHash": "ed06b57c454f05b82b108853fb197921fb05c9130cd441f0447299a091a94ea5",
+      "policyHash": "c01086518b1d6a7ad13b8a138fc55222cbb9de01a904ef33e4a555ff7e3739c0"
+    },
+    {
+      "id": "python-yaml",
+      "status": "passed",
+      "outcome": "target_alert_absent",
+      "baselineReproduced": true,
+      "remainingTargetAlerts": 0,
+      "introducedAlerts": 0,
+      "newAlerts": [],
+      "beforeAlerts": 2,
+      "afterAlerts": 0,
+      "scope": "selected rule across the target file; rule/path alert-count comparison across the repository",
+      "tests": "not_executed",
+      "limitation": "Static alerts only. No proof of functional correctness or absence of vulnerabilities; moved or changed alerts with the same rule/path counts may not be distinguished.",
+      "sourceHash": "7f3fcc5f8b9cf8b8cedb9b9ea2896be41d9806e522198699fd38087a80109368",
+      "proposedHash": "588ca8882322547a342158d508e056cdf0c840a4568e1610e15cbb7fffbd7051",
+      "patchHash": "12ed8aed49197d05e9665d3722f4439f4ff92d04365f488a4e66c6c64b2ff479",
+      "commitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "coverage": [
+        {
+          "scanner": "semgrep",
+          "version": "1.181.0",
+          "scanned": 1,
+          "filesHash": "8fc7e5d2610b317fe5ff7efbba6d844444a7e759479e06a1548be12cfc014c29"
+        },
+        {
+          "scanner": "bandit",
+          "version": "bandit 1.9.4\n  python version = 3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+          "scanned": 1,
+          "filesHash": "8fc7e5d2610b317fe5ff7efbba6d844444a7e759479e06a1548be12cfc014c29"
+        },
+        {
+          "scanner": "secrets",
+          "version": "securepatch-patterns-v1",
+          "scanned": 1,
+          "filesHash": "8fc7e5d2610b317fe5ff7efbba6d844444a7e759479e06a1548be12cfc014c29"
+        }
+      ],
+      "rulesHash": "ed06b57c454f05b82b108853fb197921fb05c9130cd441f0447299a091a94ea5",
+      "policyHash": "c01086518b1d6a7ad13b8a138fc55222cbb9de01a904ef33e4a555ff7e3739c0"
+    }
+  ]
+}

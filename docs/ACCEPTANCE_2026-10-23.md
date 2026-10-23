@@ -232,3 +232,33 @@ Validation: 489 backend tests, 23 frontend unit tests, three targeted repository
 connection/revocation browser journeys, and both production builds passed. The
 deployed GitHub OAuth flow also reached the signed-in dashboard in Edge before
 this local interface change; deployment of this update has not been performed.
+
+## Release and proposed-fix verification follow-up
+
+Release ad00a11 subsequently combined the four unpublished commits and was pushed
+on explicit instruction. Vercel served that exact revision with MongoDB connected;
+health and the GitHub OAuth redirect checks passed. Both GitHub CI jobs completed
+successfully. The following patch-rescan work is later local work, not that release.
+
+The paired rescan path runs baseline and patched static checks against the exact
+authorized snapshot, verifies source/patch/policy hashes and stable coverage, and
+rejects suppression additions, remaining target alerts, new rule/path alert counts,
+cancelled/replaced workers and mismatched results. Draft PRs require matching,
+unexpired static proof. Project tests are still explicitly unavailable.
+
+Actual NVIDIA-generated SQL/JavaScript and YAML/Python proposals passed both
+synthetic paired scans with real Semgrep 1.181.0, Bandit 1.9.4 and credential checks.
+No repository code or suggested tests were executed. Four added real MongoDB
+checks bring disposable lifecycle acceptance to **39 checks**, with successful
+cleanup. The full browser run passes **89 journeys**; the later automatic-rescan
+and feedback follow-up passes three targeted journeys, including the new fresh-
+consent case. Frontend unit checks pass **29 tests** and backend checks pass
+**528 tests across 68 suites**. Both production builds pass. The retained evidence
+also includes a repeated NVIDIA SQL proposal that the scanner correctly rejected;
+the subsequent guided proposals passed. See
+[verification flow and evidence](PATCH_VERIFICATION.md).
+
+A dependency-free Node test profile for fresh GitHub-hosted VMs and its CI isolation
+contract are prepared but not yet hosted-validated or connected to customer jobs.
+Local Docker's engine is unavailable; unit checks of the command policy do not
+substitute for that hosted contract. Customer test execution remains disabled.

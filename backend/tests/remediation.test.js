@@ -4,6 +4,13 @@ const { getFileContent } = require("../src/services/github.service");
 const { source } = require("../src/services/remediation.service");
 
 beforeEach(() => jest.resetAllMocks());
+test("model requests contain canonical rule guidance without exposing host prefixes",async()=>{
+ getFileContent.mockResolvedValue({content:"export const value = 1;\n"});
+ const context=await source({_id:"scan-1",commitSha:"a".repeat(40),installationId:"42",owner:"org",repo:"repo"},
+  {_id:"finding-1",filePath:"code.js",scanner:"semgrep",ruleId:"mnt.private-machine.securepatch.js.sql-concatenation",title:"SQL"});
+ expect(context.request).toContain("parameterized query API");expect(context.request).not.toContain("private-machine");
+ expect(context.request).toContain("do not add scanner suppressions");
+});
 
 test("remediation context loads only the finding file at its immutable scan commit", async () => {
   getFileContent.mockResolvedValue({ content: "export const value = 1;\n" });

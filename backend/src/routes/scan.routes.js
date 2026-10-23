@@ -83,6 +83,25 @@ router.get("/:scanId/findings/:findingId/verifications", requireAuth, requireSca
     scanId: scan._id, findingId: req.params.findingId, limit: 20 });
   res.json({ success: true, data: { verifications } });
 }));
+router.post("/:scanId/findings/:findingId/rescans",requireAuth,requireScanMember,handler(async(req,res)=>{
+  const {scan,finding}=await findingContext(req);
+  const job=await require("../services/patch-rescan-jobs.service").enqueue({scan,finding,patch:req.body?.patch,actorId:req.user._id});
+  res.status(202).json({success:true,data:{job}});
+}));
+router.get("/:scanId/findings/:findingId/rescans/:jobId",requireAuth,requireScanMember,handler(async(req,res)=>{
+  objectId(req.params.jobId);
+  const {scan}=await findingContext(req);
+  const job=await require("../services/patch-rescan-jobs.service").get({jobId:req.params.jobId,scanId:scan._id,
+    findingId:req.params.findingId,organizationId:scan.organization});
+  res.json({success:true,data:{job}});
+}));
+router.post("/:scanId/findings/:findingId/rescans/:jobId/cancel",requireAuth,requireScanMember,handler(async(req,res)=>{
+  objectId(req.params.jobId);
+  const {scan}=await findingContext(req);
+  const job=await require("../services/patch-rescan-jobs.service").cancel({jobId:req.params.jobId,scanId:scan._id,
+    findingId:req.params.findingId,organizationId:scan.organization});
+  res.json({success:true,data:{job}});
+}));
 router.get("/organizations/:organizationId/findings", requireAuth, requireOrganizationMember, handler(async (req, res) => {
   objectId(req.params.organizationId);
   const { integer } = require("../utils/input");

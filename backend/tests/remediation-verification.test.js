@@ -13,6 +13,14 @@ const validation = {
 };
 
 beforeEach(() => jest.clearAllMocks());
+test("a passing rescan retains its exact job and policy hashes in the permanent PR record",async()=>{
+ RemediationVerification.create.mockImplementation(async value=>value);
+ const securityRescan={status:"passed",jobId:"507f1f77bcf86cd799439011",rulesHash:"a".repeat(64),policyHash:"b".repeat(64)};
+ const record=await verification.recordVerification({scan,finding,actorId:"actor-1",patch:"diff",validation:{...validation,securityRescan},action:"draft_pr"});
+ expect(record.securityRescan).toEqual({jobId:securityRescan.jobId,rulesHash:securityRescan.rulesHash,policyHash:securityRescan.policyHash});
+ expect(record.checks.find(check=>check.name==="security_rescan")).toMatchObject({status:"passed",method:"paired-pinned-snapshot"});
+ expect(record.checks.find(check=>check.name==="allowed_tests").status).toBe("unavailable");
+});
 
 test("stores hashes and explicit outcomes without retaining proposed source or diagnostic text", async () => {
   RemediationVerification.create.mockImplementation(async value => value);

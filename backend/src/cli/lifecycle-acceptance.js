@@ -39,7 +39,7 @@ async function main() {
     console.log(JSON.stringify({ status: "started", database: databaseName }));
     phase = "schema_setup";
     const modelNames = ["User", "Organization", "OrganizationMember", "OrganizationInvitation", "RepositoryAutomation",
-      "Notification", "AssistantCache", "Finding", "RemediationVerification", "Scan", "AuditEvent", "UsageBucket"];
+      "Notification", "AssistantCache", "Finding", "PatchRescanJob", "RemediationVerification", "Scan", "AuditEvent", "UsageBucket"];
     const models = Object.fromEntries(modelNames.map(name => [name, require(`../models/${name}`)]));
     for (const Model of Object.values(models)) { await Model.createCollection(); await Model.createIndexes(); }
     await mongoose.connection.db.createCollection("sessions");
@@ -105,6 +105,8 @@ async function main() {
     checks.push(...await require("./worker-process-acceptance").runWorkerProcessChecks({ organization: other._id, actor: otherOwner }));
     phase = "email_delivery_callback_checks";
     checks.push(...await require("./email-delivery-acceptance").runEmailDeliveryChecks({ organization: other._id, actor: otherOwner }));
+    phase = "patch_rescan_checks";
+    checks.push(...await require("./patch-rescan-acceptance").runPatchRescanChecks({organization:other._id,actor:otherOwner}));
     phase = "organization_deletion_checks";
 
     await Invitation.create({ organization: target._id, email: "pending@example.test", role: "developer", invitedBy: owner._id,

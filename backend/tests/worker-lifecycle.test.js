@@ -13,6 +13,7 @@ jest.mock("../src/scanners/bandit.adapter", () => jest.fn());
 jest.mock("../src/services/scan-expiry.service", () => ({ expireOverdueScans: jest.fn().mockResolvedValue(0) }));
 jest.mock("../src/services/organization-deletion.service", () => ({ purgeDueOrganizations: jest.fn().mockResolvedValue({}) }));
 jest.mock("../src/services/automation.service", () => ({ runDueSchedules: jest.fn().mockResolvedValue() }));
+jest.mock("../src/services/patch-rescan-jobs.service",()=>({runPending:jest.fn().mockResolvedValue()}));
 const Scan = require("../src/models/Scan");
 const Finding = require("../src/models/Finding");
 const { notifyScanResult } = require("../src/services/notification.service");

@@ -1762,6 +1762,1168 @@ var require_github_service = __commonJS({
   }
 });
 
+// src/utils/scanner-rule.js
+var require_scanner_rule = __commonJS({
+  "src/utils/scanner-rule.js"(exports2, module2) {
+    function canonicalRule(value) {
+      return String(value || "").match(/(?:^|\.)(securepatch\.(?:js|python)\.[a-z-]+)$/)?.[1] || String(value || "");
+    }
+    module2.exports = { canonicalRule };
+  }
+});
+
+// src/services/remediation-guidance.service.js
+var require_remediation_guidance_service = __commonJS({
+  "src/services/remediation-guidance.service.js"(exports2, module2) {
+    var GUIDANCE_VERSION = "securepatch-guidance-v1";
+    var entries = {
+      "semgrep:securepatch.js.dynamic-eval": ["Avoid dynamic code evaluation", "The rule matched JavaScript or TypeScript that turns a string into executable code.", ["Use a data parser such as JSON.parse when the input is data.", "If callers need different behavior, select from a fixed map of reviewed functions instead of evaluating caller-provided source.", "Add a regression test for untrusted input and the expected rejected or parsed result."]],
+      "semgrep:securepatch.js.shell-exec": ["Pass process arguments separately", "Shell command construction can let untrusted values change which command runs.", ["Prefer execFile or spawn with an executable and an argument array.", "Validate each argument against the expected format and allowlist executable choices.", "Keep shell mode disabled and add a test for metacharacters in user-controlled values."]],
+      "semgrep:securepatch.js.raw-html": ["Render untrusted content as text", "Raw HTML can turn attacker-controlled markup into script or unsafe links.", ["Prefer ordinary text rendering when HTML is not required.", "If rich HTML is required, sanitize it with a maintained allowlist sanitizer immediately before rendering.", "Test scripts, event-handler attributes, unsafe URL schemes, and malformed markup."]],
+      "semgrep:securepatch.js.weak-hash": ["Choose a hash for the security purpose", "MD5 and SHA-1 are unsuitable when collision resistance is required.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use a password-hashing function such as Argon2id, scrypt, or bcrypt rather than a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "semgrep:securepatch.js.sql-concatenation": ["Bind SQL parameters", "Building a query by concatenating values can let input alter the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Keep table or column names out of user input; map any selectable identifiers to fixed allowed names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
+      "semgrep:securepatch.js.disabled-tls": ["Keep certificate verification enabled", "Disabling TLS verification removes the check that the server is the intended peer.", ["Restore the client's normal certificate verification behavior.", "Fix the certificate chain or configure the correct trusted CA instead of bypassing validation.", "Add a connection test that rejects an untrusted or mismatched certificate."]],
+      "semgrep:securepatch.js.jwt-unverified": ["Verify JWT signatures and claims", "Decoding a token only reads its contents; it does not prove who issued it.", ["Use a JWT verification API with an explicit allowlist of algorithms and the expected key.", "Validate issuer, audience, expiration, and any required not-before claim.", "Test invalid signatures, wrong audiences, expired tokens, and disallowed algorithms."]],
+      "semgrep:securepatch.python.pickle": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
+      "semgrep:securepatch.python.dynamic-eval": ["Parse data instead of evaluating source", "Evaluating a string as Python can execute arbitrary operations.", ["Use JSON parsing or ast.literal_eval when the input is a supported literal format.", "For commands, use a fixed dispatch table of approved operations and validated arguments.", "Test that expressions, imports, and unexpected names are rejected."]],
+      "semgrep:securepatch.python.shell": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess.run with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "semgrep:securepatch.python.sql-formatting": ["Bind SQL parameters", "Formatting values into SQL text can let input change the query structure.", ["Use the database driver's parameter binding API with the correct placeholder syntax.", "Allowlist any dynamic identifiers such as table names instead of binding them as values.", "Test quotes and SQL metacharacters and verify they remain data."]],
+      "semgrep:securepatch.python.insecure-yaml": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
+      "bandit:B301": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
+      "bandit:B602": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "bandit:B605": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
+      "bandit:B506": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
+      "bandit:B608": ["Bind SQL parameters", "Building a query with formatted values can let input change the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Allowlist dynamic identifiers; value placeholders usually cannot represent table or column names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
+      "bandit:B303": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "bandit:B324": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
+      "secrets:github-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it at GitHub before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review token activity and limit the replacement token's permissions."]],
+      "secrets:nvidia-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it with the issuing provider before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review usage and restrict the replacement credential to the required scope."]],
+      "secrets:aws-access-id": ["Review the AWS credential exposure", "An AWS access-key identifier matched a local pattern; this does not include or prove the presence of a usable secret key.", ["Check the corresponding IAM access key privately and deactivate it if it should not be public.", "Rotate any associated secret key and review CloudTrail activity for unexpected use.", "Move active credentials to an approved identity or secret-management flow; prefer short-lived roles where possible."]],
+      "secrets:private-key": ["Treat the private key as compromised", "A private-key header matched a local pattern; the key contents were not stored by this scanner.", ["Identify the key owner and revoke or rotate the key or certificate.", "Check recent use and dependent services for unexpected access.", "Store the replacement in an approved secret manager and remove the exposed key from repository history where practical."]],
+      "dependency:*": ["Upgrade the affected dependency", "The locked package version matched an advisory; reachability and exploitability are not established by this match.", ["Open the linked advisory and confirm the affected version range and fixed release.", "Upgrade to a fixed compatible release and update the lockfile.", "Run the project's relevant tests and rescan the updated lockfile."]]
+    };
+    function forFinding(finding) {
+      const scanner = String(finding?.scanner || "").toLowerCase();
+      const ruleId = scanner === "semgrep" ? require_scanner_rule().canonicalRule(finding?.ruleId) : String(finding?.ruleId || "");
+      const entry = entries[`${scanner}:${ruleId}`] || (scanner === "dependency" ? entries["dependency:*"] : null);
+      if (!entry) return null;
+      const [title, summary, steps] = entry;
+      return { source: "deterministic", version: GUIDANCE_VERSION, title, summary, steps: [...steps] };
+    }
+    module2.exports = { GUIDANCE_VERSION, forFinding };
+  }
+});
+
+// src/models/PatchRescanJob.js
+var require_PatchRescanJob = __commonJS({
+  "src/models/PatchRescanJob.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var schema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
+      scan: { type: mongoose.Schema.Types.ObjectId, ref: "Scan", required: true },
+      finding: { type: mongoose.Schema.Types.ObjectId, ref: "Finding", required: true },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      key: { type: String, required: true, unique: true },
+      patch: { type: String, maxlength: 18e3, select: false },
+      patchHash: { type: String, required: true },
+      sourceHash: { type: String, required: true },
+      proposedHash: { type: String, required: true },
+      policyHash: { type: String, required: true },
+      commitSha: { type: String, required: true },
+      targetPath: { type: String, required: true, maxlength: 500 },
+      status: { type: String, enum: ["queued", "running", "completed", "failed", "cancelled"], default: "queued", index: true },
+      leaseToken: { type: String, default: null, select: false },
+      leaseUntil: { type: Date, default: null },
+      deadlineAt: { type: Date, required: true },
+      completedAt: { type: Date, default: null },
+      result: { type: mongoose.Schema.Types.Mixed, default: null },
+      errorCode: { type: String, default: null },
+      expiresAt: { type: Date, required: true, expires: 0 }
+    }, { timestamps: true, strict: "throw" });
+    schema.index({ status: 1, deadlineAt: 1, leaseUntil: 1 });
+    module2.exports = mongoose.models.PatchRescanJob || mongoose.model("PatchRescanJob", schema);
+  }
+});
+
+// src/services/normalizer.service.js
+var require_normalizer_service = __commonJS({
+  "src/services/normalizer.service.js"(exports2, module2) {
+    var path = require("path");
+    var NormalizerService = class {
+      /**
+       * Normalizes findings from a specific scanner
+       * @param {string} scanner - "semgrep" | "bandit"
+       * @param {Array<any>} rawResults
+       * @param {string} workspacePath - base path to relativize file paths
+       * @returns {Array<Object>}
+       */
+      static normalize(scanner, rawResults, workspacePath) {
+        if (!Array.isArray(rawResults)) return [];
+        if (scanner === "semgrep") {
+          return this.normalizeSemgrep(rawResults, workspacePath);
+        } else if (scanner === "bandit") {
+          return this.normalizeBandit(rawResults, workspacePath);
+        }
+        if (["secrets", "dependency"].includes(scanner)) return rawResults;
+        return [];
+      }
+      static cleanFilePath(fullPath, workspacePath) {
+        if (!path.isAbsolute(fullPath) && !path.win32.isAbsolute(fullPath)) {
+          return String(fullPath).replace(/\\/g, "/").replace(/^\.\//, "");
+        }
+        let rel = path.relative(workspacePath, fullPath).replace(/\\/g, "/");
+        if (rel.startsWith("./")) rel = rel.substring(2);
+        return rel;
+      }
+      static isPythonTestFile(filePath) {
+        const normalizedPath = String(filePath || "").replace(/\\/g, "/").toLowerCase();
+        const segments = normalizedPath.split("/").filter(Boolean);
+        const fileName = segments.at(-1) || "";
+        const testDirectory = segments.slice(0, -1).some(
+          (segment) => ["test", "tests", "__tests__", "spec", "specs"].includes(segment)
+        );
+        const testFileName = /^(?:test|spec)\.py$/.test(fileName) || /^(?:test|spec)_.*\.py$/.test(fileName) || /.*_(?:test|spec)\.py$/.test(fileName) || fileName === "conftest.py";
+        return fileName.endsWith(".py") && (testDirectory || testFileName);
+      }
+      static normalizeSemgrep(results, workspacePath) {
+        return results.map((item) => {
+          const filePath = this.cleanFilePath(item.path, workspacePath);
+          const startLine = item.start?.line || 1;
+          const endLine = item.end?.line || startLine;
+          const column = item.start?.col || 1;
+          let cwe = "CWE-Unknown";
+          if (item.extra?.metadata?.cwe) {
+            const rawCwe = item.extra.metadata.cwe;
+            if (Array.isArray(rawCwe) && rawCwe.length > 0) {
+              cwe = String(rawCwe[0]);
+            } else if (typeof rawCwe === "string") {
+              cwe = rawCwe;
+            }
+          }
+          const rawSev = (item.extra?.severity || "").toLowerCase();
+          let severity = "medium";
+          if (rawSev === "error") severity = "high";
+          else if (rawSev === "warning") severity = "medium";
+          else if (rawSev === "info") severity = "low";
+          if (item.extra?.metadata?.impact === "HIGH" && severity === "high") {
+            severity = "critical";
+          }
+          const ruleId = item.check_id || "semgrep-finding";
+          const title = item.extra?.message?.split("\n")[0] || ruleId;
+          const description = item.extra?.message || "";
+          const evidenceSnippet = (item.extra?.lines || "").slice(0, 1e3);
+          const remediation = item.extra?.metadata?.fix || "";
+          return {
+            scanner: "semgrep",
+            filePath,
+            startLine,
+            endLine,
+            column,
+            cwe,
+            ruleId,
+            severity,
+            title,
+            description,
+            evidenceSnippet,
+            remediation
+          };
+        });
+      }
+      static normalizeBandit(results, workspacePath) {
+        return results.filter(
+          (item) => !(item.test_id === "B101" && this.isPythonTestFile(item.filename))
+        ).map((item) => {
+          const filePath = this.cleanFilePath(item.filename, workspacePath);
+          const startLine = item.line_number || 1;
+          const endLine = item.line_range ? item.line_range[item.line_range.length - 1] : startLine;
+          const column = item.col_offset || null;
+          let cwe = "CWE-Unknown";
+          if (item.issue_cwe?.id) {
+            cwe = `CWE-${item.issue_cwe.id}`;
+          }
+          const rawSev = (item.issue_severity || "").toLowerCase();
+          let severity = "medium";
+          if (rawSev === "high") severity = "high";
+          else if (rawSev === "medium") severity = "medium";
+          else if (rawSev === "low") severity = "low";
+          if (rawSev === "high" && (item.issue_confidence || "").toLowerCase() === "high") {
+            severity = "critical";
+          }
+          const ruleId = item.test_id || item.test_name || "bandit-finding";
+          const title = item.issue_text || ruleId;
+          const description = `${item.issue_text || ""} (Test ID: ${ruleId})`;
+          const evidenceSnippet = (item.code || "").slice(0, 1e3);
+          const remediation = item.more_info || "";
+          return {
+            scanner: "bandit",
+            filePath,
+            startLine,
+            endLine,
+            column,
+            cwe,
+            ruleId,
+            severity,
+            title,
+            description,
+            evidenceSnippet,
+            remediation
+          };
+        });
+      }
+    };
+    module2.exports = NormalizerService;
+  }
+});
+
+// src/scanners/base.adapter.js
+var require_base_adapter = __commonJS({
+  "src/scanners/base.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = class _BaseScannerAdapter {
+      constructor(name) {
+        if (new.target === _BaseScannerAdapter) {
+          throw new TypeError("Cannot construct BaseScannerAdapter instances directly");
+        }
+        this.name = name;
+      }
+      /**
+       * Check if scanner binary/tool is available on host system
+       * @returns {Promise<boolean>}
+       */
+      async isAvailable() {
+        throw new Error("Method 'isAvailable()' must be implemented.");
+      }
+      /**
+       * Execute scanner against ephemeral workspace directory
+       * @param {string} workspacePath - Absolute path to extracted repository code
+       * @returns {Promise<Array<Object>>} Array of raw scanner finding objects
+       */
+      async scan(workspacePath) {
+        throw new Error("Method 'scan()' must be implemented.");
+      }
+    };
+    module2.exports = BaseScannerAdapter;
+  }
+});
+
+// src/services/scan-context.js
+var require_scan_context = __commonJS({
+  "src/services/scan-context.js"(exports2, module2) {
+    module2.exports = new (require("node:async_hooks")).AsyncLocalStorage();
+  }
+});
+
+// src/scanners/process.js
+var require_process = __commonJS({
+  "src/scanners/process.js"(exports2, module2) {
+    var { execFile } = require("node:child_process");
+    var os = require("node:os");
+    var path = require("node:path");
+    var wslWorkspaces = /* @__PURE__ */ new Map();
+    function scannerEnv() {
+      const scannerBinDir = process.env.SECUREPATCH_SCANNER_BIN_DIR;
+      const inheritedPath = process.env.PATH || process.env.Path;
+      const searchPath = [scannerBinDir, inheritedPath].filter(Boolean).join(path.delimiter);
+      return Object.fromEntries(Object.entries({
+        PATH: searchPath,
+        SystemRoot: process.env.SystemRoot,
+        TEMP: os.tmpdir(),
+        TMP: os.tmpdir(),
+        LANG: "C.UTF-8",
+        SEMGREP_SEND_METRICS: "off",
+        SEMGREP_ENABLE_VERSION_CHECK: "0",
+        SEMGREP_SETTINGS_FILE: path.join(os.tmpdir(), "securepatch-semgrep-settings.yml"),
+        SEMGREP_LOG_FILE: path.join(os.tmpdir(), "securepatch-semgrep.log"),
+        SEMGREP_VERSION_CACHE_PATH: path.join(os.tmpdir(), "securepatch-semgrep-version")
+      }).filter(([, value]) => value));
+    }
+    function wslUtility(args, timeout = 3e4) {
+      return new Promise((resolve, reject) => {
+        execFile("wsl.exe", ["--distribution", process.env.SECUREPATCH_SCANNER_WSL_DISTRO, "--exec", ...args], {
+          env: scannerEnv(),
+          timeout,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024
+        }, (error, stdout, stderr) => {
+          if (error) return reject(new Error(`WSL scanner workspace setup failed (${error.code || stderr.trim() || "command failed"})`));
+          resolve(stdout.trim());
+        });
+      });
+    }
+    function toWslPath(value) {
+      if (typeof value !== "string" || !/^[a-z]:[\\/]/i.test(value)) return Promise.resolve(value);
+      return wslUtility(["wslpath", "-a", value], 5e3);
+    }
+    async function prepareWslWorkspace(hostPath) {
+      const key = path.resolve(hostPath);
+      if (wslWorkspaces.has(key)) return wslWorkspaces.get(key);
+      const workspacePromise = (async () => {
+        let destination;
+        try {
+          const source = await toWslPath(hostPath);
+          destination = await wslUtility(["mktemp", "-d", "/tmp/securepatch-scan-XXXXXX"]);
+          if (!/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) throw new Error("WSL returned an invalid temporary workspace path");
+          await wslUtility(["cp", "-a", "--", `${source.replace(/\/$/, "")}/.`, destination], 6e4);
+          return destination;
+        } catch (error) {
+          if (destination && /^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
+            await wslUtility(["rm", "-rf", "--", destination]).catch(() => {
+            });
+          }
+          throw error;
+        }
+      })();
+      wslWorkspaces.set(key, workspacePromise);
+      try {
+        return await workspacePromise;
+      } catch (error) {
+        wslWorkspaces.delete(key);
+        throw error;
+      }
+    }
+    async function cleanupWslWorkspace(hostPath) {
+      if (!hostPath) return;
+      const key = path.resolve(hostPath);
+      const workspace = wslWorkspaces.get(key);
+      wslWorkspaces.delete(key);
+      if (!workspace) return;
+      const destination = await workspace;
+      if (/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
+        await wslUtility(["rm", "-rf", "--", destination], 1e4);
+      }
+    }
+    function runInWsl(binary, args, { cwd, timeout }) {
+      const distro = process.env.SECUREPATCH_SCANNER_WSL_DISTRO;
+      const scannerDir = process.env.SECUREPATCH_SCANNER_WSL_BIN_DIR;
+      const executable = scannerDir ? path.posix.join(scannerDir, binary) : binary;
+      const translate = (value) => typeof value === "string" && /^[a-z]:[\\/]/i.test(value) ? toWslPath(value) : Promise.resolve(value);
+      const translatedCwd = cwd ? prepareWslWorkspace(cwd) : Promise.resolve(void 0);
+      return Promise.all([translatedCwd, ...args.map(translate)]).then(([workspacePath, ...translatedArgs]) => new Promise((resolve, reject) => {
+        execFile("wsl.exe", ["--distribution", distro, ...workspacePath ? ["--cd", workspacePath] : [], "--exec", "timeout", "--signal=KILL", `${Math.ceil(timeout / 1e3)}s`, executable, ...translatedArgs], {
+          cwd,
+          env: scannerEnv(),
+          timeout,
+          killSignal: "SIGKILL",
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true,
+          signal: require_scan_context().getStore()?.signal
+        }, (error, stdout, stderr) => {
+          const exitCode = error ? error.code : 0;
+          if (error && ![0, 1].includes(exitCode)) {
+            return reject(Object.assign(
+              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
+              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
+            ));
+          }
+          resolve({ stdout, stderr, exitCode });
+        });
+      }));
+    }
+    function run(binary, args, { cwd, timeout = 12e4 } = {}) {
+      if (process.env.SECUREPATCH_SCANNER_WSL_DISTRO) return runInWsl(binary, args, { cwd, timeout });
+      return new Promise((resolve, reject) => {
+        let child;
+        child = execFile(binary, args, {
+          cwd,
+          env: scannerEnv(),
+          timeout,
+          killSignal: "SIGKILL",
+          detached: process.platform !== "win32",
+          signal: require_scan_context().getStore()?.signal,
+          maxBuffer: 20 * 1024 * 1024,
+          windowsHide: true
+        }, (error, stdout, stderr) => {
+          const exitCode = error ? error.code : 0;
+          if (error && ![0, 1].includes(exitCode)) {
+            if (process.platform !== "win32" && child?.pid) {
+              try {
+                process.kill(-child.pid, "SIGKILL");
+              } catch {
+              }
+            } else if (process.platform === "win32" && child?.pid) {
+              execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {
+              });
+            }
+            return reject(Object.assign(
+              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
+              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
+            ));
+          }
+          resolve({ stdout, stderr, exitCode });
+        });
+      });
+    }
+    async function scanJSON(binary, args, cwd) {
+      const { stdout } = await run(binary, args, { cwd });
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        throw new Error(`${binary} returned malformed JSON`);
+      }
+      if (!parsed || !Array.isArray(parsed.results) || parsed.errors !== void 0 && (!Array.isArray(parsed.errors) || parsed.errors.length)) {
+        throw new Error(`${binary} reported analysis errors or an invalid result`);
+      }
+      return parsed;
+    }
+    module2.exports = { run, scanJSON, scannerEnv, cleanupWslWorkspace };
+    module2.exports.coverage = (paths, root, skipped = null) => ({
+      scanned: paths.length,
+      skipped,
+      filesHash: require("node:crypto").createHash("sha256").update(JSON.stringify(paths.map(
+        (p) => path.isAbsolute(p) || path.win32.isAbsolute(p) ? path.relative(root, p).replace(/\\/g, "/") : String(p).replace(/\\/g, "/").replace(/^\.\//, "")
+      ).sort())).digest("hex")
+    });
+  }
+});
+
+// src/scanners/semgrep.adapter.js
+var require_semgrep_adapter = __commonJS({
+  "src/scanners/semgrep.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = require_base_adapter();
+    var { run, scanJSON } = require_process();
+    var Adapter = class extends BaseScannerAdapter {
+      constructor() {
+        super("semgrep");
+      }
+      async isAvailable() {
+        try {
+          this.version = (await run("semgrep", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      async scan(workspacePath) {
+        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
+        const parsed = await scanJSON("semgrep", ["scan", "--config", require("node:path").join(__dirname, "rules.yml"), "--json", "--quiet", "--metrics", "off", "--disable-version-check", scanTarget], workspacePath);
+        this.coverage = require_process().coverage(parsed.paths?.scanned || [], workspacePath, parsed.paths?.skipped?.length ?? null);
+        return parsed.results;
+      }
+    };
+    module2.exports = Adapter;
+  }
+});
+
+// src/scanners/bandit.adapter.js
+var require_bandit_adapter = __commonJS({
+  "src/scanners/bandit.adapter.js"(exports2, module2) {
+    var BaseScannerAdapter = require_base_adapter();
+    var { run, scanJSON } = require_process();
+    var Adapter = class extends BaseScannerAdapter {
+      constructor() {
+        super("bandit");
+      }
+      async isAvailable() {
+        try {
+          this.version = (await run("bandit", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      async scan(workspacePath) {
+        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
+        const parsed = await scanJSON("bandit", ["-r", scanTarget, "-f", "json", "-q"], workspacePath);
+        this.coverage = require_process().coverage(Object.keys(parsed.metrics || {}).filter((key) => key !== "_totals"), workspacePath);
+        return parsed.results;
+      }
+    };
+    module2.exports = Adapter;
+  }
+});
+
+// src/scanners/repository-data.adapter.js
+var require_repository_data_adapter = __commonJS({
+  "src/scanners/repository-data.adapter.js"(exports2, module2) {
+    var fs = require("node:fs/promises");
+    var path = require("node:path");
+    var Base = require_base_adapter();
+    var patterns = [
+      ["github-token", /\bgh[pousr]_[A-Za-z0-9_]{25,}\b/g],
+      ["nvidia-token", /\bnvapi-[A-Za-z0-9_-]{25,}\b/g],
+      ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
+      ["aws-access-id", /\bAKIA[A-Z0-9]{16}\b/g]
+    ];
+    async function files(root) {
+      const out = [];
+      async function walk(dir) {
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          require_scan_context().getStore()?.signal?.throwIfAborted();
+          if (["node_modules", ".git", "vendor", "dist", "build", ".venv"].includes(entry.name) || entry.isSymbolicLink()) continue;
+          const file = path.join(dir, entry.name);
+          if (entry.isDirectory()) await walk(file);
+          else if (entry.isFile() && (await fs.stat(file)).size <= 1024 * 1024) out.push(file);
+          if (out.length > 2e4) throw new Error("Repository data scan file limit exceeded");
+        }
+      }
+      await walk(root);
+      return out;
+    }
+    function finding(scanner, filePath, line, ruleId, title, cwe, severity, description) {
+      return {
+        scanner,
+        filePath,
+        startLine: line,
+        endLine: line,
+        ruleId,
+        title,
+        cwe,
+        severity,
+        description,
+        evidenceSnippet: "Sensitive values are not retained.",
+        remediation: ""
+      };
+    }
+    var SecretsAdapter = class extends Base {
+      constructor() {
+        super("secrets");
+        this.version = "securepatch-patterns-v1";
+      }
+      async isAvailable() {
+        return true;
+      }
+      async scan(root) {
+        const entries = await files(root);
+        const results = [];
+        for (const file of entries) {
+          const text = await fs.readFile(file, "utf8");
+          if (text.includes("\0")) continue;
+          for (const [id, regex] of patterns) {
+            regex.lastIndex = 0;
+            for (const match of text.matchAll(regex)) {
+              if (results.length >= 5e3) throw new Error("Credential pattern finding limit exceeded");
+              const line = text.slice(0, match.index).split("\n").length;
+              results.push(finding(
+                "secrets",
+                path.relative(root, file).replace(/\\/g, "/"),
+                line,
+                id,
+                "Possible credential material; validate and rotate if real",
+                "CWE-798",
+                "high",
+                `Pattern ${id} matched. This is unverified and may be a synthetic example. The matched value was not stored.`
+              ));
+            }
+          }
+        }
+        this.coverage = require_process().coverage(entries, root);
+        return results;
+      }
+    };
+    var DependencyAdapter = class extends Base {
+      constructor() {
+        super("dependency");
+        this.version = "osv-npm-lock-v1";
+      }
+      async isAvailable() {
+        return true;
+      }
+      async scan(root) {
+        const locks = (await files(root)).filter((p) => path.basename(p) === "package-lock.json");
+        const results = [];
+        let queried = 0;
+        for (const file of locks) {
+          let lock;
+          try {
+            lock = JSON.parse(await fs.readFile(file, "utf8"));
+          } catch {
+            throw new Error("Invalid npm lockfile");
+          }
+          if (![2, 3].includes(lock.lockfileVersion) || !lock.packages) throw new Error("Dependency checks require npm lockfile version 2 or 3");
+          const packages = [...new Map(Object.entries(lock.packages).filter(([key, p]) => key.includes("node_modules/") && typeof p.version === "string").map(([key, p]) => {
+            const name = p.name || key.split("node_modules/").pop();
+            return [`${name}@${p.version}`, { name, version: p.version }];
+          })).values()];
+          if (queried + packages.length > 2e3) throw new Error("Dependency checks are capped at 2000 packages per scan");
+          for (let start = 0; start < packages.length; start += 100) {
+            const batch = packages.slice(start, start + 100);
+            const response = await fetch("https://api.osv.dev/v1/querybatch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: AbortSignal.any([AbortSignal.timeout(15e3), ...require_scan_context().getStore()?.signal ? [require_scan_context().getStore().signal] : []]),
+              body: JSON.stringify({ queries: batch.map((p) => ({ package: { ecosystem: "npm", name: p.name }, version: p.version })) })
+            });
+            if (!response.ok) throw new Error("Dependency advisory service unavailable");
+            const data = await response.json();
+            if (!Array.isArray(data.results) || data.results.length !== batch.length) throw new Error("Invalid advisory response");
+            data.results.forEach((result, index) => {
+              for (const vuln of result.vulns || []) {
+                if (!/^[A-Za-z0-9_.-]{1,150}$/.test(vuln.id || "")) continue;
+                results.push(finding(
+                  "dependency",
+                  path.relative(root, file).replace(/\\/g, "/"),
+                  1,
+                  `${vuln.id}:${batch[index].name}@${batch[index].version}`,
+                  `${batch[index].name}@${batch[index].version}: ${vuln.id}`,
+                  "CWE-1395",
+                  "medium",
+                  `Advisory match for locked npm package ${batch[index].name}@${batch[index].version}. Severity is unassessed (medium baseline); verify runtime reachability and upstream guidance. See https://osv.dev/vulnerability/${vuln.id}`
+                ));
+              }
+            });
+          }
+          queried += packages.length;
+        }
+        this.coverage = { ...require_process().coverage(locks, root), packages: queried };
+        return results;
+      }
+    };
+    module2.exports = { SecretsAdapter, DependencyAdapter };
+  }
+});
+
+// src/scanners/orchestrator.js
+var require_orchestrator = __commonJS({
+  "src/scanners/orchestrator.js"(exports2, module2) {
+    var SemgrepAdapter = require_semgrep_adapter();
+    var BanditAdapter = require_bandit_adapter();
+    var ScannerOrchestrator = class {
+      constructor(adapters = null, { includeDependencies = false } = {}) {
+        this.adapters = adapters || [
+          new SemgrepAdapter(),
+          new BanditAdapter(),
+          new (require_repository_data_adapter()).SecretsAdapter(),
+          ...includeDependencies ? [new (require_repository_data_adapter()).DependencyAdapter()] : []
+        ];
+      }
+      /**
+       * Runs available adapters against the workspace
+       * @param {string} workspacePath
+       * @returns {Promise<Array<{ scanner: string, findings: Array<any> }>>}
+       */
+      async runAll(workspacePath) {
+        const results = [];
+        const scannersRun = [];
+        const scannerErrors = [];
+        const coverage = [];
+        let anyAvailable = false;
+        for (const adapter of this.adapters) {
+          const isAvail = await adapter.isAvailable();
+          if (isAvail) {
+            anyAvailable = true;
+            try {
+              const rawFindings = await adapter.scan(workspacePath);
+              results.push({
+                scanner: adapter.name,
+                findings: rawFindings
+              });
+              scannersRun.push(adapter.name);
+              coverage.push({ scanner: adapter.name, version: adapter.version || "unknown", ...adapter.coverage });
+            } catch (scanErr) {
+              scannerErrors.push({
+                scanner: adapter.name,
+                message: scanErr.message,
+                exitCode: scanErr.exitCode ?? null,
+                stderr: scanErr.stderr || ""
+              });
+              console.error(`[Scanner Error] ${adapter.name} failed during scan:`, scanErr.message);
+            }
+          } else {
+            console.info(`[Scanner Notice] ${adapter.name} is not installed or available on this system.`);
+            scannerErrors.push({
+              scanner: adapter.name,
+              message: "Scanner executable was not available on PATH."
+            });
+          }
+        }
+        if (!anyAvailable) {
+          const err = new Error("No supported security scanners (Semgrep, Bandit) were found installed on the system PATH.");
+          err.code = "SCANNER_UNAVAILABLE";
+          throw err;
+        }
+        if (!scannersRun.length) {
+          throw Object.assign(
+            new Error("Every available scanner failed; no valid analysis was produced."),
+            { code: "ALL_SCANNERS_FAILED", scannerErrors }
+          );
+        }
+        return {
+          results,
+          scannersRun,
+          scannerErrors,
+          coverage
+        };
+      }
+    };
+    module2.exports = ScannerOrchestrator;
+  }
+});
+
+// src/utils/github-rate-limit.js
+var require_github_rate_limit = __commonJS({
+  "src/utils/github-rate-limit.js"(exports2, module2) {
+    var DEFAULT_RETRY_SECONDS = 60;
+    function getHeader(headers, name) {
+      if (!headers) return null;
+      if (typeof headers.get === "function") return headers.get(name);
+      const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+      return key ? String(headers[key]) : null;
+    }
+    function positiveInteger(value) {
+      if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+    }
+    function rateLimitError({ status, headers, message = "" }) {
+      if (![403, 429].includes(Number(status))) return null;
+      const remaining = getHeader(headers, "x-ratelimit-remaining");
+      const retryAfter = positiveInteger(getHeader(headers, "retry-after"));
+      const isRateLimited = Number(status) === 429 || remaining === "0" || retryAfter !== null || /rate limit|abuse detection/i.test(message);
+      if (!isRateLimited) return null;
+      const resetAt = remaining === "0" ? positiveInteger(getHeader(headers, "x-ratelimit-reset")) : null;
+      const resetDelay = resetAt ? Math.max(1, Math.ceil(resetAt - Date.now() / 1e3)) : null;
+      const retryAfterSeconds = retryAfter || resetDelay || DEFAULT_RETRY_SECONDS;
+      return Object.assign(new Error(`GitHub is rate limiting requests. Wait ${retryAfterSeconds} seconds before trying again.`), {
+        statusCode: 429,
+        code: "GITHUB_RATE_LIMITED",
+        retryAfterSeconds
+      });
+    }
+    function fromOctokitError(error) {
+      const headers = error?.response?.headers;
+      const requestUrl = error?.request?.url || "";
+      const isGitHubResponse = getHeader(headers, "x-github-request-id") || /(?:^|\/)api\.github\.com(?:\/|$)/i.test(requestUrl);
+      if (!isGitHubResponse) return null;
+      return rateLimitError({
+        status: error.status || error.response?.status,
+        headers,
+        message: error.response?.data?.message || error.message || ""
+      });
+    }
+    module2.exports = { fromOctokitError, fromResponse: rateLimitError };
+  }
+});
+
+// src/services/workspace.service.js
+var require_workspace_service = __commonJS({
+  "src/services/workspace.service.js"(exports2, module2) {
+    var os = require("node:os");
+    var fs = require("node:fs");
+    var path = require("node:path");
+    var AdmZip = require("adm-zip");
+    var { getInstallationOctokit } = require_github();
+    var { repository, bad } = require_input();
+    var { fromResponse: githubRateLimit } = require_github_rate_limit();
+    var context = require_scan_context();
+    var MAX_ARCHIVE = 50 * 1024 * 1024;
+    var MAX_EXPANDED = 200 * 1024 * 1024;
+    async function archiveRateLimit(response) {
+      let message = "";
+      if (response.status === 403 && response.body) {
+        const reader = response.clone().body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let text = "", bytes = 0;
+          try {
+            while (bytes < 4096) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = value.subarray(0, 4096 - bytes);
+              bytes += chunk.byteLength;
+              text += decoder.decode(chunk, { stream: bytes < 4096 });
+              if (bytes === 4096) await reader.cancel();
+            }
+            text += decoder.decode();
+            try {
+              message = JSON.parse(text).message || text;
+            } catch {
+              message = text;
+            }
+          } catch {
+          }
+        }
+      }
+      return githubRateLimit({ status: response.status, headers: response.headers, message });
+    }
+    async function download(installationId, owner, repo, ref) {
+      const client = await getInstallationOctokit(installationId);
+      const { token } = await client.auth({ type: "installation" });
+      const signal = AbortSignal.any([AbortSignal.timeout(3e4), ...context.getStore()?.signal ? [context.getStore().signal] : []]);
+      let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" },
+        redirect: "manual",
+        signal
+      });
+      if ([301, 302, 307, 308].includes(response.status)) {
+        const url = new URL(response.headers.get("location"));
+        await response.body?.cancel();
+        if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+        response = await fetch(url, { redirect: "error", signal });
+      }
+      if (!response.ok || !response.body) {
+        const limited = await archiveRateLimit(response);
+        await response.body?.cancel().catch(() => {
+        });
+        if (limited) throw limited;
+        throw bad("GitHub archive download failed", 502);
+      }
+      if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) {
+        await response.body.cancel();
+        throw bad("Repository archive exceeds 50 MiB", 413);
+      }
+      const parts = [];
+      let bytes = 0;
+      for await (const part of response.body) {
+        bytes += part.byteLength;
+        if (bytes > MAX_ARCHIVE) {
+          throw bad("Repository archive exceeds 50 MiB", 413);
+        }
+        parts.push(Buffer.from(part));
+      }
+      return Buffer.concat(parts);
+    }
+    async function createEphemeralWorkspace(installationId, owner, repo, ref) {
+      repository(owner, repo);
+      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
+      const workspacePath = path.join(base, "workspace");
+      let scannerWorkspacePath = workspacePath;
+      const cleanup = async () => {
+        const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
+        try {
+          await require_process().cleanupWslWorkspace(scannerWorkspacePath);
+        } finally {
+          fs.rmSync(base, { recursive: true, force: true });
+        }
+      };
+      try {
+        const zip = new AdmZip(await download(installationId, owner, repo, ref));
+        const entries = zip.getEntries();
+        if (entries.length > 2e4) throw bad("Repository contains too many archive entries", 413);
+        let expanded = 0;
+        for (const entry of entries) {
+          const name = entry.entryName;
+          expanded += entry.header.size;
+          if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
+          if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || (entry.attr >>> 16 & 61440) === 40960) throw bad("Unsafe archive path or symbolic link");
+        }
+        fs.mkdirSync(workspacePath);
+        zip.extractAllTo(workspacePath, false);
+        const names = fs.readdirSync(workspacePath);
+        const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
+        scannerWorkspacePath = nested ? path.join(workspacePath, names[0]) : workspacePath;
+        return { workspacePath: scannerWorkspacePath, cleanup };
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
+    }
+    module2.exports = { createEphemeralWorkspace, download };
+  }
+});
+
+// src/services/patch-rescan.service.js
+var require_patch_rescan_service = __commonJS({
+  "src/services/patch-rescan.service.js"(exports2, module2) {
+    var fs = require("node:fs/promises");
+    var path = require("node:path");
+    var { createHash } = require("node:crypto");
+    var remediation = require_remediation_service();
+    var Normalizer = require_normalizer_service();
+    var Orchestrator = require_orchestrator();
+    var { validateCode } = require_code_validation();
+    var digest = (text) => createHash("sha256").update(text).digest("hex");
+    var { canonicalRule } = require_scanner_rule();
+    var fail = (code) => Object.assign(new Error(code), { code });
+    var sourceRoot = [path.join(__dirname, ".."), __dirname].find((root) => require("node:fs").existsSync(path.join(root, "scanners/rules.yml")));
+    function policyHash() {
+      const hash = createHash("sha256");
+      for (const file of [
+        "services/patch-rescan.service.js",
+        "services/normalizer.service.js",
+        "scanners/orchestrator.js",
+        "scanners/process.js",
+        "scanners/semgrep.adapter.js",
+        "scanners/bandit.adapter.js",
+        "scanners/repository-data.adapter.js",
+        "scanners/rules.yml",
+        "utils/scanner-rule.js"
+      ])
+        hash.update(file).update("\0").update(require("node:fs").readFileSync(path.join(sourceRoot, file), "utf8").replace(/\r\n/g, "\n")).update("\0");
+      return hash.digest("hex");
+    }
+    function summarize(before, after, finding) {
+      const target = (f) => f.scanner === finding.scanner && f.filePath === finding.filePath && canonicalRule(f.ruleId) === canonicalRule(finding.ruleId);
+      const reproduced = before.some((f) => target(f) && f.startLine <= finding.startLine && f.endLine >= finding.startLine);
+      const remaining = after.filter(target).length;
+      const key = (f) => JSON.stringify([f.scanner, f.filePath, canonicalRule(f.ruleId)]);
+      const counts = /* @__PURE__ */ new Map();
+      for (const f of before) counts.set(key(f), (counts.get(key(f)) || 0) + 1);
+      const introduced = [];
+      for (const f of after) {
+        const count = counts.get(key(f)) || 0;
+        if (count) counts.set(key(f), count - 1);
+        else introduced.push({ scanner: f.scanner, ruleId: canonicalRule(f.ruleId), filePath: f.filePath, line: f.startLine });
+      }
+      const outcome = !reproduced ? "baseline_not_reproduced" : remaining ? "target_alert_remains" : introduced.length ? "new_alerts_detected" : "target_alert_absent";
+      return {
+        status: outcome === "target_alert_absent" ? "passed" : "failed",
+        outcome,
+        baselineReproduced: reproduced,
+        remainingTargetAlerts: remaining,
+        introducedAlerts: introduced.length,
+        newAlerts: introduced.slice(0, 50),
+        beforeAlerts: before.length,
+        afterAlerts: after.length,
+        scope: "selected rule across the target file; rule/path alert-count comparison across the repository",
+        tests: "not_executed",
+        limitation: "Static alerts only. No proof of functional correctness or absence of vulnerabilities; moved or changed alerts with the same rule/path counts may not be distinguished."
+      };
+    }
+    function flatten(result, root) {
+      if (result.scannerErrors?.length || !["semgrep", "bandit", "secrets"].every((name) => result.scannersRun?.includes(name))) throw fail("RESCAN_COVERAGE_INCOMPLETE");
+      if (result.results.reduce((n, item) => n + item.findings.length, 0) > 1e4) throw fail("RESCAN_RESULT_LIMIT");
+      return result.results.flatMap((item) => Normalizer.normalize(item.scanner, item.findings, root));
+    }
+    function comparable(before, after) {
+      const signature = (result) => JSON.stringify(result.coverage.map((c) => [c.scanner, c.version, c.scanned, c.skipped ?? null, c.filesHash]).sort((a, b) => a[0].localeCompare(b[0])));
+      if (before.coverage.some((c) => !c.filesHash || !c.version || !Number.isSafeInteger(c.scanned) || (c.skipped ?? 0) > 0) || signature(before) !== signature(after)) throw fail("RESCAN_COVERAGE_CHANGED");
+    }
+    async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, signal }, {
+      createWorkspace = require_workspace_service().createEphemeralWorkspace,
+      createOrchestrator = () => new Orchestrator(),
+      parser = validateCode
+    } = {}) {
+      if (!["semgrep", "bandit", "secrets"].includes(finding.scanner) || !/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw fail("RESCAN_FINDING_UNSUPPORTED");
+      const workspace = await createWorkspace(scan.installationId, scan.owner, scan.repo, scan.commitSha);
+      let cleaned = false;
+      try {
+        signal.throwIfAborted();
+        const root = path.resolve(workspace.workspacePath);
+        const destination = path.resolve(root, finding.filePath);
+        const relative = path.relative(root, destination);
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw fail("RESCAN_SOURCE_MISMATCH");
+        let current = root;
+        for (const component of relative.split(path.sep)) {
+          current = path.join(current, component);
+          if ((await fs.lstat(current)).isSymbolicLink()) throw fail("RESCAN_SOURCE_MISMATCH");
+        }
+        if ((await fs.stat(destination)).size > 32e3) throw fail("RESCAN_SOURCE_MISMATCH");
+        const original = await fs.readFile(destination, "utf8");
+        if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
+        const content = remediation.applyExactDiff(original, patch, finding.filePath);
+        if (digest(content) !== proposedHash) throw fail("RESCAN_PATCH_MISMATCH");
+        const suppressions = (text) => (text.match(/\b(?:nosemgrep|nosec)\b/gi) || []).length;
+        if (suppressions(content) > suppressions(original)) throw fail("RESCAN_SUPPRESSION_ADDED");
+        const language = /\.py$/.test(finding.filePath) ? "python" : /\.tsx?$/.test(finding.filePath) ? "typescript" : "javascript";
+        const syntax = await parser(language, content);
+        if (syntax.status !== "passed") throw fail(syntax.status === "failed" ? "RESCAN_SYNTAX_FAILED" : "RESCAN_SYNTAX_UNAVAILABLE");
+        const beforeResult = await createOrchestrator().runAll(root);
+        const before = flatten(beforeResult, root);
+        signal.throwIfAborted();
+        await fs.writeFile(destination, content);
+        await require_process().cleanupWslWorkspace(root);
+        const afterResult = await createOrchestrator().runAll(root);
+        const after = flatten(afterResult, root);
+        comparable(beforeResult, afterResult);
+        signal.throwIfAborted();
+        const result = {
+          ...summarize(before, after, finding),
+          sourceHash,
+          proposedHash,
+          patchHash: digest(patch),
+          commitSha: scan.commitSha,
+          coverage: afterResult.coverage.map((c) => ({ scanner: c.scanner, version: c.version, scanned: c.scanned, filesHash: c.filesHash })),
+          rulesHash: digest(await fs.readFile(path.join(sourceRoot, "scanners/rules.yml"))),
+          policyHash: policyHash()
+        };
+        await workspace.cleanup();
+        cleaned = true;
+        return result;
+      } finally {
+        if (!cleaned) await workspace.cleanup();
+      }
+    }
+    module2.exports = { rescanPatch, summarize, comparable, canonicalRule, digest, policyHash };
+  }
+});
+
+// src/services/patch-rescan-jobs.service.js
+var require_patch_rescan_jobs_service = __commonJS({
+  "src/services/patch-rescan-jobs.service.js"(exports2, module2) {
+    var Job = require_PatchRescanJob();
+    var Scan = require_Scan();
+    var Finding = require_Finding();
+    var Organization = require_Organization();
+    var Member = require_OrganizationMember();
+    var { digest, rescanPatch, policyHash } = require_patch_rescan_service();
+    var { bad } = require_input();
+    var DEADLINE_MS = 10 * 60 * 1e3;
+    var publicJob = (job) => ({
+      id: String(job._id),
+      scanId: String(job.scan),
+      findingId: String(job.finding),
+      status: job.status,
+      patchHash: job.patchHash,
+      sourceHash: job.sourceHash,
+      proposedHash: job.proposedHash,
+      commitSha: job.commitSha,
+      targetPath: job.targetPath,
+      result: job.result,
+      errorCode: job.errorCode,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+      deadlineAt: job.deadlineAt
+    });
+    async function enqueue({ scan, finding, patch, actorId }) {
+      if (!["semgrep", "bandit", "secrets"].includes(finding.scanner) || !/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw bad("This finding does not support patch rescanning", 400, "RESCAN_FINDING_UNSUPPORTED");
+      await require_budget_service().consume(`patch-rescan-requests:${scan.organization}`, 60, 36e5);
+      const validation = await require_remediation_service().validate(scan, finding, patch);
+      if (validation.syntax.status !== "passed") throw bad("A passing syntax check is required before rescanning", 409, "RESCAN_SYNTAX_REQUIRED");
+      const patchHash = digest(patch), sourceHash = digest(validation.context.originalCode), proposedHash = digest(validation.content);
+      const policy = policyHash();
+      const key = digest(JSON.stringify([String(scan.organization), String(scan._id), String(finding._id), scan.commitSha, patchHash, policy]));
+      let job = await Job.findOne({ key });
+      if (job && ["queued", "running", "completed"].includes(job.status) && job.expiresAt > /* @__PURE__ */ new Date()) return publicJob(job);
+      await require_budget_service().consume(`patch-rescan:${scan.organization}`, 20, 36e5);
+      const now = /* @__PURE__ */ new Date();
+      const fields = {
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        requestedBy: actorId,
+        key,
+        patch,
+        patchHash,
+        sourceHash,
+        proposedHash,
+        commitSha: scan.commitSha,
+        targetPath: finding.filePath,
+        policyHash: policy,
+        status: "queued",
+        deadlineAt: new Date(now.getTime() + DEADLINE_MS),
+        expiresAt: new Date(now.getTime() + 864e5),
+        result: null,
+        errorCode: null,
+        leaseToken: null,
+        leaseUntil: null,
+        completedAt: null
+      };
+      if (job) job = await Job.findOneAndUpdate({ _id: job._id, $or: [{ status: { $in: ["failed", "cancelled"] } }, { expiresAt: { $lte: now } }] }, { $set: fields }, { returnDocument: "after" });
+      else try {
+        job = await Job.create(fields);
+      } catch (error) {
+        if (error.code !== 11e3) throw error;
+        job = await Job.findOne({ key });
+      }
+      if (!job) throw bad("Verification changed. Refresh and retry", 409, "RESCAN_JOB_CHANGED");
+      if (process.env.NODE_ENV === "development") setImmediate(() => processJob(String(job._id)).catch(() => {
+      }));
+      return publicJob(job);
+    }
+    async function get({ jobId, scanId, findingId, organizationId }) {
+      const job = await Job.findOne({ _id: jobId, scan: scanId, finding: findingId, organization: organizationId });
+      if (!job) throw bad("Patch rescan not found", 404);
+      return publicJob(job);
+    }
+    async function cancel({ jobId, scanId, findingId, organizationId }) {
+      await Job.updateOne(
+        { _id: jobId, scan: scanId, finding: findingId, organization: organizationId, status: { $in: ["queued", "running"] } },
+        { $set: { status: "cancelled", completedAt: /* @__PURE__ */ new Date(), leaseToken: null, leaseUntil: null }, $unset: { patch: "" } }
+      );
+      return get({ jobId, scanId, findingId, organizationId });
+    }
+    async function processJob(jobId, { engine = rescanPatch } = {}) {
+      let release;
+      try {
+        release = await require_budget_service().reserveSlots("patch-rescan-workers", 2);
+      } catch {
+        return { busy: true };
+      }
+      try {
+        return await processClaimedJob(jobId, engine);
+      } finally {
+        await release();
+      }
+    }
+    async function processClaimedJob(jobId, engine) {
+      const leaseToken = require("node:crypto").randomUUID(), now = /* @__PURE__ */ new Date();
+      const job = await Job.findOneAndUpdate(
+        { _id: jobId, deadlineAt: { $gt: now }, $or: [{ status: "queued" }, { status: "running", leaseUntil: { $lt: now } }] },
+        { $set: { status: "running", leaseToken, leaseUntil: new Date(Date.now() + 6e4) } },
+        { returnDocument: "after" }
+      ).select("+patch +leaseToken");
+      if (!job) return { skipped: true };
+      const controller = new AbortController();
+      const scope = { _id: job._id, status: "running", leaseToken, deadlineAt: { $gt: /* @__PURE__ */ new Date() } };
+      const active = async () => Boolean(await Organization.exists({ _id: job.organization, status: "active" }) && await Member.exists({ organization: job.organization, user: job.requestedBy, status: "active" }));
+      const timer = setTimeout(() => controller.abort(), Math.min(18e4, Math.max(1, job.deadlineAt - Date.now())));
+      const pulse = setInterval(async () => {
+        try {
+          if (!await active() || !await Job.findOneAndUpdate({ ...scope, deadlineAt: { $gt: /* @__PURE__ */ new Date() } }, { $set: { leaseUntil: new Date(Date.now() + 6e4) } })) controller.abort();
+        } catch {
+          controller.abort();
+        }
+      }, 1e4);
+      try {
+        if (!await active()) throw Object.assign(new Error("Inactive scope"), { code: "RESCAN_ACCESS_CHANGED" });
+        const scan = await Scan.findOne({ _id: job.scan, organization: job.organization, commitSha: job.commitSha }).lean();
+        const finding = await Finding.findOne({ _id: job.finding, scan: job.scan, organization: job.organization, filePath: job.targetPath }).lean();
+        if (!scan || !finding || digest(job.patch || "") !== job.patchHash) throw Object.assign(new Error("Changed input"), { code: "RESCAN_SOURCE_MISMATCH" });
+        if (job.policyHash !== policyHash()) throw Object.assign(new Error("Changed scanner policy"), { code: "RESCAN_POLICY_CHANGED" });
+        const result = await require_scan_context().run({ signal: controller.signal }, () => engine({
+          scan,
+          finding,
+          patch: job.patch,
+          sourceHash: job.sourceHash,
+          proposedHash: job.proposedHash,
+          signal: controller.signal
+        }));
+        controller.signal.throwIfAborted();
+        if (!["passed", "failed"].includes(result?.status) || result.patchHash !== job.patchHash || result.sourceHash !== job.sourceHash || result.proposedHash !== job.proposedHash || result.commitSha !== job.commitSha || result.policyHash !== job.policyHash)
+          throw Object.assign(new Error("Mismatched engine result"), { code: "RESCAN_RESULT_MISMATCH" });
+        if (!await active()) throw Object.assign(new Error("Inactive scope"), { code: "RESCAN_ACCESS_CHANGED" });
+        const completed = await Job.findOneAndUpdate({ ...scope, deadlineAt: { $gt: /* @__PURE__ */ new Date() } }, { $set: {
+          status: "completed",
+          result,
+          completedAt: /* @__PURE__ */ new Date(),
+          leaseToken: null,
+          leaseUntil: null
+        }, $unset: { patch: "" } });
+        return { completed: Boolean(completed) };
+      } catch (error) {
+        const code = /^RESCAN_[A-Z_]+$/.test(error.code || "") ? error.code : controller.signal.aborted ? "RESCAN_CANCELLED_OR_TIMED_OUT" : "RESCAN_UNAVAILABLE";
+        await Job.updateOne({ _id: job._id, status: "running", leaseToken }, { $set: { status: "failed", errorCode: code, completedAt: /* @__PURE__ */ new Date(), leaseToken: null, leaseUntil: null }, $unset: { patch: "" } });
+        return { failed: true };
+      } finally {
+        clearTimeout(timer);
+        clearInterval(pulse);
+      }
+    }
+    async function runPending() {
+      const expired = await Job.find({ status: { $in: ["queued", "running"] }, deadlineAt: { $lte: /* @__PURE__ */ new Date() } }).select("_id").limit(500).lean();
+      if (expired.length) await Job.updateMany(
+        { _id: { $in: expired.map((j) => j._id) }, status: { $in: ["queued", "running"] }, deadlineAt: { $lte: /* @__PURE__ */ new Date() } },
+        { $set: { status: "failed", errorCode: "RESCAN_DEADLINE_EXCEEDED", completedAt: /* @__PURE__ */ new Date(), leaseToken: null, leaseUntil: null }, $unset: { patch: "" } }
+      );
+      const next = await Job.findOne({ deadlineAt: { $gt: /* @__PURE__ */ new Date() }, $or: [{ status: "queued" }, { status: "running", leaseUntil: { $lt: /* @__PURE__ */ new Date() } }] }).sort({ createdAt: 1 }).select("_id").lean();
+      if (next) await processJob(String(next._id));
+    }
+    async function requirePassed({ jobId, scan, finding, patch, validation }) {
+      if (!require("mongoose").isValidObjectId(jobId)) throw bad("Run a passing security rescan for this exact patch before creating a draft PR", 409, "PATCH_RESCAN_REQUIRED");
+      const job = await Job.findOne({
+        _id: jobId,
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        targetPath: finding.filePath,
+        status: "completed",
+        expiresAt: { $gt: /* @__PURE__ */ new Date() },
+        commitSha: scan.commitSha,
+        patchHash: digest(patch),
+        sourceHash: digest(validation.context.originalCode),
+        proposedHash: digest(validation.content),
+        policyHash: policyHash(),
+        "result.status": "passed"
+      }).lean();
+      if (!job) throw bad("The patch rescan is missing, expired, or does not match this proposal. Rescan it again", 409, "PATCH_RESCAN_REQUIRED");
+      return { status: "passed", jobId: String(job._id), rulesHash: job.result.rulesHash, policyHash: job.policyHash };
+    }
+    module2.exports = { enqueue, get, cancel, processJob, runPending, publicJob, requirePassed };
+  }
+});
+
 // src/services/remediation.service.js
 var require_remediation_service = __commonJS({
   "src/services/remediation.service.js"(exports2, module2) {
@@ -1778,6 +2940,8 @@ var require_remediation_service = __commonJS({
       if (!language(finding.filePath) || finding.filePath.split("/").some((part) => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) throw bad("This source path is not supported for remediation");
       const file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha);
       if (file.content.length > 8e3) throw bad("File exceeds the 8000-character review limit; draft a smaller manual change", 413);
+      const ruleId = require_scanner_rule().canonicalRule(finding.ruleId);
+      const guidance = require_remediation_guidance_service().forFinding(finding);
       return {
         findingId: String(finding._id),
         scanId: String(scan._id),
@@ -1785,7 +2949,7 @@ var require_remediation_service = __commonJS({
         filePath: finding.filePath,
         language: language(finding.filePath),
         originalCode: file.content,
-        request: `Remediate the scanner finding ${finding.ruleId}: ${finding.title}. Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes and suggest regression tests.`.slice(0, 3e3)
+        request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance ? guidance.steps.join(" ") : ""} Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3e3)
       };
     }
     function applyExactDiff(original, patch, filePath) {
@@ -1819,9 +2983,16 @@ var require_remediation_service = __commonJS({
       if (syntax.status === "failed" && !allowSyntaxFailure) throw bad("Proposed source failed syntax validation");
       return { context, content, syntax };
     }
-    async function createPullRequest(scan, finding, { patch, acknowledged }) {
+    async function createPullRequest(scan, finding, { patch, acknowledged, rescanJobId }) {
       if (acknowledged !== true) throw bad("Review the diff and acknowledge unexecuted tests before creating a draft PR");
       const { context, content, syntax } = await validate(scan, finding, patch);
+      const securityRescan = await require_patch_rescan_jobs_service().requirePassed({
+        jobId: rescanJobId,
+        scan,
+        finding,
+        patch,
+        validation: { context, content, syntax }
+      });
       const current = await resolveCommit(scan.installationId, scan.owner, scan.repo);
       if (current.sha !== scan.commitSha) throw bad("The default branch changed. Rescan before creating the PR.", 409, "BASE_CHANGED");
       const client = await getInstallationOctokit(scan.installationId);
@@ -1859,6 +3030,7 @@ var require_remediation_service = __commonJS({
 
 Base commit: ${current.sha}
 Syntax: ${syntax.status}.
+Static before/after rescan passed for this exact patch (job ${securityRescan.jobId}). This is scanner evidence, not proof of correctness.
 Tests were not executed. The patch requires independent correctness and security review.
 
 Scanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not a probability).`
@@ -1871,7 +3043,7 @@ Scanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not 
           baseSha: current.sha,
           syntax,
           tests: "not_executed",
-          verificationMaterial: { context, content, syntax }
+          verificationMaterial: { context, content, syntax, securityRescan }
         };
       } catch (error) {
         await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { ...base, ref: `heads/${branch}` }).catch(() => {
@@ -2790,6 +3962,11 @@ var require_RemediationVerification = __commonJS({
       sourceSha256: { type: String, required: true, match: /^[a-f0-9]{64}$/, immutable: true },
       proposedSha256: { type: String, match: /^[a-f0-9]{64}$/, default: null, immutable: true },
       action: { type: String, enum: ["validation", "draft_pr"], required: true, immutable: true },
+      securityRescan: { type: new mongoose.Schema({
+        jobId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        rulesHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
+        policyHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ }
+      }, { _id: false, strict: "throw" }), default: null, immutable: true },
       checks: { type: [checkSchema], required: true, validate: (value) => value.length === CHECK_NAMES.length && CHECK_NAMES.every((name) => value.filter((check) => check.name === name).length === 1), immutable: true },
       pullRequest: {
         number: { type: Number, min: 1, default: null, immutable: true },
@@ -3278,6 +4455,7 @@ var init_2 = __esm({
       "../models/Organization.js": () => require_Organization(),
       "../models/OrganizationInvitation.js": () => require_OrganizationInvitation(),
       "../models/OrganizationMember.js": () => require_OrganizationMember(),
+      "../models/PatchRescanJob.js": () => require_PatchRescanJob(),
       "../models/RemediationVerification.js": () => require_RemediationVerification(),
       "../models/RepositoryAutomation.js": () => require_RepositoryAutomation(),
       "../models/Scan.js": () => require_Scan(),
@@ -3308,6 +4486,7 @@ var require_organization_deletion_service = __commonJS({
       "Notification",
       "AssistantCache",
       "Finding",
+      "PatchRescanJob",
       "RemediationVerification",
       "Scan",
       "AuditEvent",
@@ -4531,774 +5710,6 @@ var require_scan_timing = __commonJS({
   }
 });
 
-// src/utils/github-rate-limit.js
-var require_github_rate_limit = __commonJS({
-  "src/utils/github-rate-limit.js"(exports2, module2) {
-    var DEFAULT_RETRY_SECONDS = 60;
-    function getHeader(headers, name) {
-      if (!headers) return null;
-      if (typeof headers.get === "function") return headers.get(name);
-      const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
-      return key ? String(headers[key]) : null;
-    }
-    function positiveInteger(value) {
-      if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
-      const parsed = Number(value);
-      return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-    }
-    function rateLimitError({ status, headers, message = "" }) {
-      if (![403, 429].includes(Number(status))) return null;
-      const remaining = getHeader(headers, "x-ratelimit-remaining");
-      const retryAfter = positiveInteger(getHeader(headers, "retry-after"));
-      const isRateLimited = Number(status) === 429 || remaining === "0" || retryAfter !== null || /rate limit|abuse detection/i.test(message);
-      if (!isRateLimited) return null;
-      const resetAt = remaining === "0" ? positiveInteger(getHeader(headers, "x-ratelimit-reset")) : null;
-      const resetDelay = resetAt ? Math.max(1, Math.ceil(resetAt - Date.now() / 1e3)) : null;
-      const retryAfterSeconds = retryAfter || resetDelay || DEFAULT_RETRY_SECONDS;
-      return Object.assign(new Error(`GitHub is rate limiting requests. Wait ${retryAfterSeconds} seconds before trying again.`), {
-        statusCode: 429,
-        code: "GITHUB_RATE_LIMITED",
-        retryAfterSeconds
-      });
-    }
-    function fromOctokitError(error) {
-      const headers = error?.response?.headers;
-      const requestUrl = error?.request?.url || "";
-      const isGitHubResponse = getHeader(headers, "x-github-request-id") || /(?:^|\/)api\.github\.com(?:\/|$)/i.test(requestUrl);
-      if (!isGitHubResponse) return null;
-      return rateLimitError({
-        status: error.status || error.response?.status,
-        headers,
-        message: error.response?.data?.message || error.message || ""
-      });
-    }
-    module2.exports = { fromOctokitError, fromResponse: rateLimitError };
-  }
-});
-
-// src/services/scan-context.js
-var require_scan_context = __commonJS({
-  "src/services/scan-context.js"(exports2, module2) {
-    module2.exports = new (require("node:async_hooks")).AsyncLocalStorage();
-  }
-});
-
-// src/scanners/process.js
-var require_process = __commonJS({
-  "src/scanners/process.js"(exports2, module2) {
-    var { execFile } = require("node:child_process");
-    var os = require("node:os");
-    var path = require("node:path");
-    var wslWorkspaces = /* @__PURE__ */ new Map();
-    function scannerEnv() {
-      const scannerBinDir = process.env.SECUREPATCH_SCANNER_BIN_DIR;
-      const inheritedPath = process.env.PATH || process.env.Path;
-      const searchPath = [scannerBinDir, inheritedPath].filter(Boolean).join(path.delimiter);
-      return Object.fromEntries(Object.entries({
-        PATH: searchPath,
-        SystemRoot: process.env.SystemRoot,
-        TEMP: os.tmpdir(),
-        TMP: os.tmpdir(),
-        LANG: "C.UTF-8",
-        SEMGREP_SEND_METRICS: "off",
-        SEMGREP_ENABLE_VERSION_CHECK: "0",
-        SEMGREP_SETTINGS_FILE: path.join(os.tmpdir(), "securepatch-semgrep-settings.yml"),
-        SEMGREP_LOG_FILE: path.join(os.tmpdir(), "securepatch-semgrep.log"),
-        SEMGREP_VERSION_CACHE_PATH: path.join(os.tmpdir(), "securepatch-semgrep-version")
-      }).filter(([, value]) => value));
-    }
-    function wslUtility(args, timeout = 3e4) {
-      return new Promise((resolve, reject) => {
-        execFile("wsl.exe", ["--distribution", process.env.SECUREPATCH_SCANNER_WSL_DISTRO, "--exec", ...args], {
-          env: scannerEnv(),
-          timeout,
-          windowsHide: true,
-          maxBuffer: 1024 * 1024
-        }, (error, stdout, stderr) => {
-          if (error) return reject(new Error(`WSL scanner workspace setup failed (${error.code || stderr.trim() || "command failed"})`));
-          resolve(stdout.trim());
-        });
-      });
-    }
-    function toWslPath(value) {
-      if (typeof value !== "string" || !/^[a-z]:[\\/]/i.test(value)) return Promise.resolve(value);
-      return wslUtility(["wslpath", "-a", value], 5e3);
-    }
-    async function prepareWslWorkspace(hostPath) {
-      const key = path.resolve(hostPath);
-      if (wslWorkspaces.has(key)) return wslWorkspaces.get(key);
-      const workspacePromise = (async () => {
-        let destination;
-        try {
-          const source = await toWslPath(hostPath);
-          destination = await wslUtility(["mktemp", "-d", "/tmp/securepatch-scan-XXXXXX"]);
-          if (!/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) throw new Error("WSL returned an invalid temporary workspace path");
-          await wslUtility(["cp", "-a", "--", `${source.replace(/\/$/, "")}/.`, destination], 6e4);
-          return destination;
-        } catch (error) {
-          if (destination && /^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
-            await wslUtility(["rm", "-rf", "--", destination]).catch(() => {
-            });
-          }
-          throw error;
-        }
-      })();
-      wslWorkspaces.set(key, workspacePromise);
-      try {
-        return await workspacePromise;
-      } catch (error) {
-        wslWorkspaces.delete(key);
-        throw error;
-      }
-    }
-    async function cleanupWslWorkspace(hostPath) {
-      if (!hostPath) return;
-      const key = path.resolve(hostPath);
-      const workspace = wslWorkspaces.get(key);
-      wslWorkspaces.delete(key);
-      if (!workspace) return;
-      const destination = await workspace;
-      if (/^\/tmp\/securepatch-scan-[A-Za-z0-9]+$/.test(destination)) {
-        await wslUtility(["rm", "-rf", "--", destination], 1e4);
-      }
-    }
-    function runInWsl(binary, args, { cwd, timeout }) {
-      const distro = process.env.SECUREPATCH_SCANNER_WSL_DISTRO;
-      const scannerDir = process.env.SECUREPATCH_SCANNER_WSL_BIN_DIR;
-      const executable = scannerDir ? path.posix.join(scannerDir, binary) : binary;
-      const translate = (value) => typeof value === "string" && /^[a-z]:[\\/]/i.test(value) ? toWslPath(value) : Promise.resolve(value);
-      const translatedCwd = cwd ? prepareWslWorkspace(cwd) : Promise.resolve(void 0);
-      return Promise.all([translatedCwd, ...args.map(translate)]).then(([workspacePath, ...translatedArgs]) => new Promise((resolve, reject) => {
-        execFile("wsl.exe", ["--distribution", distro, ...workspacePath ? ["--cd", workspacePath] : [], "--exec", "timeout", "--signal=KILL", `${Math.ceil(timeout / 1e3)}s`, executable, ...translatedArgs], {
-          cwd,
-          env: scannerEnv(),
-          timeout,
-          killSignal: "SIGKILL",
-          maxBuffer: 20 * 1024 * 1024,
-          windowsHide: true,
-          signal: require_scan_context().getStore()?.signal
-        }, (error, stdout, stderr) => {
-          const exitCode = error ? error.code : 0;
-          if (error && ![0, 1].includes(exitCode)) {
-            return reject(Object.assign(
-              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
-              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
-            ));
-          }
-          resolve({ stdout, stderr, exitCode });
-        });
-      }));
-    }
-    function run(binary, args, { cwd, timeout = 12e4 } = {}) {
-      if (process.env.SECUREPATCH_SCANNER_WSL_DISTRO) return runInWsl(binary, args, { cwd, timeout });
-      return new Promise((resolve, reject) => {
-        let child;
-        child = execFile(binary, args, {
-          cwd,
-          env: scannerEnv(),
-          timeout,
-          killSignal: "SIGKILL",
-          detached: process.platform !== "win32",
-          signal: require_scan_context().getStore()?.signal,
-          maxBuffer: 20 * 1024 * 1024,
-          windowsHide: true
-        }, (error, stdout, stderr) => {
-          const exitCode = error ? error.code : 0;
-          if (error && ![0, 1].includes(exitCode)) {
-            if (process.platform !== "win32" && child?.pid) {
-              try {
-                process.kill(-child.pid, "SIGKILL");
-              } catch {
-              }
-            } else if (process.platform === "win32" && child?.pid) {
-              execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {
-              });
-            }
-            return reject(Object.assign(
-              new Error(`${binary} failed${error.killed ? " (deadline exceeded)" : ""}`),
-              { code: "SCANNER_FAILED", exitCode: Number.isInteger(exitCode) ? exitCode : null }
-            ));
-          }
-          resolve({ stdout, stderr, exitCode });
-        });
-      });
-    }
-    async function scanJSON(binary, args, cwd) {
-      const { stdout } = await run(binary, args, { cwd });
-      let parsed;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch {
-        throw new Error(`${binary} returned malformed JSON`);
-      }
-      if (!parsed || !Array.isArray(parsed.results) || parsed.errors !== void 0 && (!Array.isArray(parsed.errors) || parsed.errors.length)) {
-        throw new Error(`${binary} reported analysis errors or an invalid result`);
-      }
-      return parsed;
-    }
-    module2.exports = { run, scanJSON, scannerEnv, cleanupWslWorkspace };
-    module2.exports.coverage = (paths, root, skipped = null) => ({
-      scanned: paths.length,
-      skipped,
-      filesHash: require("node:crypto").createHash("sha256").update(JSON.stringify(paths.map(
-        (p) => path.isAbsolute(p) || path.win32.isAbsolute(p) ? path.relative(root, p).replace(/\\/g, "/") : String(p).replace(/\\/g, "/").replace(/^\.\//, "")
-      ).sort())).digest("hex")
-    });
-  }
-});
-
-// src/services/workspace.service.js
-var require_workspace_service = __commonJS({
-  "src/services/workspace.service.js"(exports2, module2) {
-    var os = require("node:os");
-    var fs = require("node:fs");
-    var path = require("node:path");
-    var AdmZip = require("adm-zip");
-    var { getInstallationOctokit } = require_github();
-    var { repository, bad } = require_input();
-    var { fromResponse: githubRateLimit } = require_github_rate_limit();
-    var context = require_scan_context();
-    var MAX_ARCHIVE = 50 * 1024 * 1024;
-    var MAX_EXPANDED = 200 * 1024 * 1024;
-    async function archiveRateLimit(response) {
-      let message = "";
-      if (response.status === 403 && response.body) {
-        const reader = response.clone().body?.getReader();
-        if (reader) {
-          const decoder = new TextDecoder();
-          let text = "", bytes = 0;
-          try {
-            while (bytes < 4096) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const chunk = value.subarray(0, 4096 - bytes);
-              bytes += chunk.byteLength;
-              text += decoder.decode(chunk, { stream: bytes < 4096 });
-              if (bytes === 4096) await reader.cancel();
-            }
-            text += decoder.decode();
-            try {
-              message = JSON.parse(text).message || text;
-            } catch {
-              message = text;
-            }
-          } catch {
-          }
-        }
-      }
-      return githubRateLimit({ status: response.status, headers: response.headers, message });
-    }
-    async function download(installationId, owner, repo, ref) {
-      const client = await getInstallationOctokit(installationId);
-      const { token } = await client.auth({ type: "installation" });
-      const signal = AbortSignal.any([AbortSignal.timeout(3e4), ...context.getStore()?.signal ? [context.getStore().signal] : []]);
-      let response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" },
-        redirect: "manual",
-        signal
-      });
-      if ([301, 302, 307, 308].includes(response.status)) {
-        const url = new URL(response.headers.get("location"));
-        await response.body?.cancel();
-        if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
-        response = await fetch(url, { redirect: "error", signal });
-      }
-      if (!response.ok || !response.body) {
-        const limited = await archiveRateLimit(response);
-        await response.body?.cancel().catch(() => {
-        });
-        if (limited) throw limited;
-        throw bad("GitHub archive download failed", 502);
-      }
-      if (Number(response.headers.get("content-length")) > MAX_ARCHIVE) {
-        await response.body.cancel();
-        throw bad("Repository archive exceeds 50 MiB", 413);
-      }
-      const parts = [];
-      let bytes = 0;
-      for await (const part of response.body) {
-        bytes += part.byteLength;
-        if (bytes > MAX_ARCHIVE) {
-          throw bad("Repository archive exceeds 50 MiB", 413);
-        }
-        parts.push(Buffer.from(part));
-      }
-      return Buffer.concat(parts);
-    }
-    async function createEphemeralWorkspace(installationId, owner, repo, ref) {
-      repository(owner, repo);
-      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
-      const base = fs.mkdtempSync(path.join(os.tmpdir(), "securepatch-"));
-      const workspacePath = path.join(base, "workspace");
-      let scannerWorkspacePath = workspacePath;
-      const cleanup = async () => {
-        const relative = path.relative(path.resolve(os.tmpdir()), path.resolve(base));
-        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Unsafe workspace cleanup path");
-        try {
-          await require_process().cleanupWslWorkspace(scannerWorkspacePath);
-        } finally {
-          fs.rmSync(base, { recursive: true, force: true });
-        }
-      };
-      try {
-        const zip = new AdmZip(await download(installationId, owner, repo, ref));
-        const entries = zip.getEntries();
-        if (entries.length > 2e4) throw bad("Repository contains too many archive entries", 413);
-        let expanded = 0;
-        for (const entry of entries) {
-          const name = entry.entryName;
-          expanded += entry.header.size;
-          if (expanded > MAX_EXPANDED || entry.header.size > 20 * 1024 * 1024) throw bad("Expanded archive limit exceeded", 413);
-          if (name.startsWith("/") || name.includes("\\") || name.split("/").includes("..") || /^[A-Za-z]:/.test(name) || (entry.attr >>> 16 & 61440) === 40960) throw bad("Unsafe archive path or symbolic link");
-        }
-        fs.mkdirSync(workspacePath);
-        zip.extractAllTo(workspacePath, false);
-        const names = fs.readdirSync(workspacePath);
-        const nested = names.length === 1 && fs.lstatSync(path.join(workspacePath, names[0])).isDirectory();
-        scannerWorkspacePath = nested ? path.join(workspacePath, names[0]) : workspacePath;
-        return { workspacePath: scannerWorkspacePath, cleanup };
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
-    }
-    module2.exports = { createEphemeralWorkspace, download };
-  }
-});
-
-// src/scanners/base.adapter.js
-var require_base_adapter = __commonJS({
-  "src/scanners/base.adapter.js"(exports2, module2) {
-    var BaseScannerAdapter = class _BaseScannerAdapter {
-      constructor(name) {
-        if (new.target === _BaseScannerAdapter) {
-          throw new TypeError("Cannot construct BaseScannerAdapter instances directly");
-        }
-        this.name = name;
-      }
-      /**
-       * Check if scanner binary/tool is available on host system
-       * @returns {Promise<boolean>}
-       */
-      async isAvailable() {
-        throw new Error("Method 'isAvailable()' must be implemented.");
-      }
-      /**
-       * Execute scanner against ephemeral workspace directory
-       * @param {string} workspacePath - Absolute path to extracted repository code
-       * @returns {Promise<Array<Object>>} Array of raw scanner finding objects
-       */
-      async scan(workspacePath) {
-        throw new Error("Method 'scan()' must be implemented.");
-      }
-    };
-    module2.exports = BaseScannerAdapter;
-  }
-});
-
-// src/scanners/semgrep.adapter.js
-var require_semgrep_adapter = __commonJS({
-  "src/scanners/semgrep.adapter.js"(exports2, module2) {
-    var BaseScannerAdapter = require_base_adapter();
-    var { run, scanJSON } = require_process();
-    var Adapter = class extends BaseScannerAdapter {
-      constructor() {
-        super("semgrep");
-      }
-      async isAvailable() {
-        try {
-          this.version = (await run("semgrep", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      async scan(workspacePath) {
-        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
-        const parsed = await scanJSON("semgrep", ["scan", "--config", require("node:path").join(__dirname, "rules.yml"), "--json", "--quiet", "--metrics", "off", "--disable-version-check", scanTarget], workspacePath);
-        this.coverage = require_process().coverage(parsed.paths?.scanned || [], workspacePath, parsed.paths?.skipped?.length ?? null);
-        return parsed.results;
-      }
-    };
-    module2.exports = Adapter;
-  }
-});
-
-// src/scanners/bandit.adapter.js
-var require_bandit_adapter = __commonJS({
-  "src/scanners/bandit.adapter.js"(exports2, module2) {
-    var BaseScannerAdapter = require_base_adapter();
-    var { run, scanJSON } = require_process();
-    var Adapter = class extends BaseScannerAdapter {
-      constructor() {
-        super("bandit");
-      }
-      async isAvailable() {
-        try {
-          this.version = (await run("bandit", ["--version"], { timeout: process.env.SECUREPATCH_SCANNER_WSL_DISTRO ? 3e4 : 5e3 })).stdout.trim();
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      async scan(workspacePath) {
-        const scanTarget = process.env.SECUREPATCH_SCANNER_WSL_DISTRO && process.platform === "win32" ? "." : workspacePath;
-        const parsed = await scanJSON("bandit", ["-r", scanTarget, "-f", "json", "-q"], workspacePath);
-        this.coverage = require_process().coverage(Object.keys(parsed.metrics || {}).filter((key) => key !== "_totals"), workspacePath);
-        return parsed.results;
-      }
-    };
-    module2.exports = Adapter;
-  }
-});
-
-// src/scanners/repository-data.adapter.js
-var require_repository_data_adapter = __commonJS({
-  "src/scanners/repository-data.adapter.js"(exports2, module2) {
-    var fs = require("node:fs/promises");
-    var path = require("node:path");
-    var Base = require_base_adapter();
-    var patterns = [
-      ["github-token", /\bgh[pousr]_[A-Za-z0-9_]{25,}\b/g],
-      ["nvidia-token", /\bnvapi-[A-Za-z0-9_-]{25,}\b/g],
-      ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g],
-      ["aws-access-id", /\bAKIA[A-Z0-9]{16}\b/g]
-    ];
-    async function files(root) {
-      const out = [];
-      async function walk(dir) {
-        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-          require_scan_context().getStore()?.signal?.throwIfAborted();
-          if (["node_modules", ".git", "vendor", "dist", "build", ".venv"].includes(entry.name) || entry.isSymbolicLink()) continue;
-          const file = path.join(dir, entry.name);
-          if (entry.isDirectory()) await walk(file);
-          else if (entry.isFile() && (await fs.stat(file)).size <= 1024 * 1024) out.push(file);
-          if (out.length > 2e4) throw new Error("Repository data scan file limit exceeded");
-        }
-      }
-      await walk(root);
-      return out;
-    }
-    function finding(scanner, filePath, line, ruleId, title, cwe, severity, description) {
-      return {
-        scanner,
-        filePath,
-        startLine: line,
-        endLine: line,
-        ruleId,
-        title,
-        cwe,
-        severity,
-        description,
-        evidenceSnippet: "Sensitive values are not retained.",
-        remediation: ""
-      };
-    }
-    var SecretsAdapter = class extends Base {
-      constructor() {
-        super("secrets");
-        this.version = "securepatch-patterns-v1";
-      }
-      async isAvailable() {
-        return true;
-      }
-      async scan(root) {
-        const entries = await files(root);
-        const results = [];
-        for (const file of entries) {
-          const text = await fs.readFile(file, "utf8");
-          if (text.includes("\0")) continue;
-          for (const [id, regex] of patterns) {
-            regex.lastIndex = 0;
-            for (const match of text.matchAll(regex)) {
-              if (results.length >= 5e3) throw new Error("Credential pattern finding limit exceeded");
-              const line = text.slice(0, match.index).split("\n").length;
-              results.push(finding(
-                "secrets",
-                path.relative(root, file).replace(/\\/g, "/"),
-                line,
-                id,
-                "Possible credential material; validate and rotate if real",
-                "CWE-798",
-                "high",
-                `Pattern ${id} matched. This is unverified and may be a synthetic example. The matched value was not stored.`
-              ));
-            }
-          }
-        }
-        this.coverage = require_process().coverage(entries, root);
-        return results;
-      }
-    };
-    var DependencyAdapter = class extends Base {
-      constructor() {
-        super("dependency");
-        this.version = "osv-npm-lock-v1";
-      }
-      async isAvailable() {
-        return true;
-      }
-      async scan(root) {
-        const locks = (await files(root)).filter((p) => path.basename(p) === "package-lock.json");
-        const results = [];
-        let queried = 0;
-        for (const file of locks) {
-          let lock;
-          try {
-            lock = JSON.parse(await fs.readFile(file, "utf8"));
-          } catch {
-            throw new Error("Invalid npm lockfile");
-          }
-          if (![2, 3].includes(lock.lockfileVersion) || !lock.packages) throw new Error("Dependency checks require npm lockfile version 2 or 3");
-          const packages = [...new Map(Object.entries(lock.packages).filter(([key, p]) => key.includes("node_modules/") && typeof p.version === "string").map(([key, p]) => {
-            const name = p.name || key.split("node_modules/").pop();
-            return [`${name}@${p.version}`, { name, version: p.version }];
-          })).values()];
-          if (queried + packages.length > 2e3) throw new Error("Dependency checks are capped at 2000 packages per scan");
-          for (let start = 0; start < packages.length; start += 100) {
-            const batch = packages.slice(start, start + 100);
-            const response = await fetch("https://api.osv.dev/v1/querybatch", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: AbortSignal.any([AbortSignal.timeout(15e3), ...require_scan_context().getStore()?.signal ? [require_scan_context().getStore().signal] : []]),
-              body: JSON.stringify({ queries: batch.map((p) => ({ package: { ecosystem: "npm", name: p.name }, version: p.version })) })
-            });
-            if (!response.ok) throw new Error("Dependency advisory service unavailable");
-            const data = await response.json();
-            if (!Array.isArray(data.results) || data.results.length !== batch.length) throw new Error("Invalid advisory response");
-            data.results.forEach((result, index) => {
-              for (const vuln of result.vulns || []) {
-                if (!/^[A-Za-z0-9_.-]{1,150}$/.test(vuln.id || "")) continue;
-                results.push(finding(
-                  "dependency",
-                  path.relative(root, file).replace(/\\/g, "/"),
-                  1,
-                  `${vuln.id}:${batch[index].name}@${batch[index].version}`,
-                  `${batch[index].name}@${batch[index].version}: ${vuln.id}`,
-                  "CWE-1395",
-                  "medium",
-                  `Advisory match for locked npm package ${batch[index].name}@${batch[index].version}. Severity is unassessed (medium baseline); verify runtime reachability and upstream guidance. See https://osv.dev/vulnerability/${vuln.id}`
-                ));
-              }
-            });
-          }
-          queried += packages.length;
-        }
-        this.coverage = { ...require_process().coverage(locks, root), packages: queried };
-        return results;
-      }
-    };
-    module2.exports = { SecretsAdapter, DependencyAdapter };
-  }
-});
-
-// src/scanners/orchestrator.js
-var require_orchestrator = __commonJS({
-  "src/scanners/orchestrator.js"(exports2, module2) {
-    var SemgrepAdapter = require_semgrep_adapter();
-    var BanditAdapter = require_bandit_adapter();
-    var ScannerOrchestrator = class {
-      constructor(adapters = null, { includeDependencies = false } = {}) {
-        this.adapters = adapters || [
-          new SemgrepAdapter(),
-          new BanditAdapter(),
-          new (require_repository_data_adapter()).SecretsAdapter(),
-          ...includeDependencies ? [new (require_repository_data_adapter()).DependencyAdapter()] : []
-        ];
-      }
-      /**
-       * Runs available adapters against the workspace
-       * @param {string} workspacePath
-       * @returns {Promise<Array<{ scanner: string, findings: Array<any> }>>}
-       */
-      async runAll(workspacePath) {
-        const results = [];
-        const scannersRun = [];
-        const scannerErrors = [];
-        const coverage = [];
-        let anyAvailable = false;
-        for (const adapter of this.adapters) {
-          const isAvail = await adapter.isAvailable();
-          if (isAvail) {
-            anyAvailable = true;
-            try {
-              const rawFindings = await adapter.scan(workspacePath);
-              results.push({
-                scanner: adapter.name,
-                findings: rawFindings
-              });
-              scannersRun.push(adapter.name);
-              coverage.push({ scanner: adapter.name, version: adapter.version || "unknown", ...adapter.coverage });
-            } catch (scanErr) {
-              scannerErrors.push({
-                scanner: adapter.name,
-                message: scanErr.message,
-                exitCode: scanErr.exitCode ?? null,
-                stderr: scanErr.stderr || ""
-              });
-              console.error(`[Scanner Error] ${adapter.name} failed during scan:`, scanErr.message);
-            }
-          } else {
-            console.info(`[Scanner Notice] ${adapter.name} is not installed or available on this system.`);
-            scannerErrors.push({
-              scanner: adapter.name,
-              message: "Scanner executable was not available on PATH."
-            });
-          }
-        }
-        if (!anyAvailable) {
-          const err = new Error("No supported security scanners (Semgrep, Bandit) were found installed on the system PATH.");
-          err.code = "SCANNER_UNAVAILABLE";
-          throw err;
-        }
-        if (!scannersRun.length) {
-          throw Object.assign(
-            new Error("Every available scanner failed; no valid analysis was produced."),
-            { code: "ALL_SCANNERS_FAILED", scannerErrors }
-          );
-        }
-        return {
-          results,
-          scannersRun,
-          scannerErrors,
-          coverage
-        };
-      }
-    };
-    module2.exports = ScannerOrchestrator;
-  }
-});
-
-// src/services/normalizer.service.js
-var require_normalizer_service = __commonJS({
-  "src/services/normalizer.service.js"(exports2, module2) {
-    var path = require("path");
-    var NormalizerService = class {
-      /**
-       * Normalizes findings from a specific scanner
-       * @param {string} scanner - "semgrep" | "bandit"
-       * @param {Array<any>} rawResults
-       * @param {string} workspacePath - base path to relativize file paths
-       * @returns {Array<Object>}
-       */
-      static normalize(scanner, rawResults, workspacePath) {
-        if (!Array.isArray(rawResults)) return [];
-        if (scanner === "semgrep") {
-          return this.normalizeSemgrep(rawResults, workspacePath);
-        } else if (scanner === "bandit") {
-          return this.normalizeBandit(rawResults, workspacePath);
-        }
-        if (["secrets", "dependency"].includes(scanner)) return rawResults;
-        return [];
-      }
-      static cleanFilePath(fullPath, workspacePath) {
-        if (!path.isAbsolute(fullPath) && !path.win32.isAbsolute(fullPath)) {
-          return String(fullPath).replace(/\\/g, "/").replace(/^\.\//, "");
-        }
-        let rel = path.relative(workspacePath, fullPath).replace(/\\/g, "/");
-        if (rel.startsWith("./")) rel = rel.substring(2);
-        return rel;
-      }
-      static isPythonTestFile(filePath) {
-        const normalizedPath = String(filePath || "").replace(/\\/g, "/").toLowerCase();
-        const segments = normalizedPath.split("/").filter(Boolean);
-        const fileName = segments.at(-1) || "";
-        const testDirectory = segments.slice(0, -1).some(
-          (segment) => ["test", "tests", "__tests__", "spec", "specs"].includes(segment)
-        );
-        const testFileName = /^(?:test|spec)\.py$/.test(fileName) || /^(?:test|spec)_.*\.py$/.test(fileName) || /.*_(?:test|spec)\.py$/.test(fileName) || fileName === "conftest.py";
-        return fileName.endsWith(".py") && (testDirectory || testFileName);
-      }
-      static normalizeSemgrep(results, workspacePath) {
-        return results.map((item) => {
-          const filePath = this.cleanFilePath(item.path, workspacePath);
-          const startLine = item.start?.line || 1;
-          const endLine = item.end?.line || startLine;
-          const column = item.start?.col || 1;
-          let cwe = "CWE-Unknown";
-          if (item.extra?.metadata?.cwe) {
-            const rawCwe = item.extra.metadata.cwe;
-            if (Array.isArray(rawCwe) && rawCwe.length > 0) {
-              cwe = String(rawCwe[0]);
-            } else if (typeof rawCwe === "string") {
-              cwe = rawCwe;
-            }
-          }
-          const rawSev = (item.extra?.severity || "").toLowerCase();
-          let severity = "medium";
-          if (rawSev === "error") severity = "high";
-          else if (rawSev === "warning") severity = "medium";
-          else if (rawSev === "info") severity = "low";
-          if (item.extra?.metadata?.impact === "HIGH" && severity === "high") {
-            severity = "critical";
-          }
-          const ruleId = item.check_id || "semgrep-finding";
-          const title = item.extra?.message?.split("\n")[0] || ruleId;
-          const description = item.extra?.message || "";
-          const evidenceSnippet = (item.extra?.lines || "").slice(0, 1e3);
-          const remediation = item.extra?.metadata?.fix || "";
-          return {
-            scanner: "semgrep",
-            filePath,
-            startLine,
-            endLine,
-            column,
-            cwe,
-            ruleId,
-            severity,
-            title,
-            description,
-            evidenceSnippet,
-            remediation
-          };
-        });
-      }
-      static normalizeBandit(results, workspacePath) {
-        return results.filter(
-          (item) => !(item.test_id === "B101" && this.isPythonTestFile(item.filename))
-        ).map((item) => {
-          const filePath = this.cleanFilePath(item.filename, workspacePath);
-          const startLine = item.line_number || 1;
-          const endLine = item.line_range ? item.line_range[item.line_range.length - 1] : startLine;
-          const column = item.col_offset || null;
-          let cwe = "CWE-Unknown";
-          if (item.issue_cwe?.id) {
-            cwe = `CWE-${item.issue_cwe.id}`;
-          }
-          const rawSev = (item.issue_severity || "").toLowerCase();
-          let severity = "medium";
-          if (rawSev === "high") severity = "high";
-          else if (rawSev === "medium") severity = "medium";
-          else if (rawSev === "low") severity = "low";
-          if (rawSev === "high" && (item.issue_confidence || "").toLowerCase() === "high") {
-            severity = "critical";
-          }
-          const ruleId = item.test_id || item.test_name || "bandit-finding";
-          const title = item.issue_text || ruleId;
-          const description = `${item.issue_text || ""} (Test ID: ${ruleId})`;
-          const evidenceSnippet = (item.code || "").slice(0, 1e3);
-          const remediation = item.more_info || "";
-          return {
-            scanner: "bandit",
-            filePath,
-            startLine,
-            endLine,
-            column,
-            cwe,
-            ruleId,
-            severity,
-            title,
-            description,
-            evidenceSnippet,
-            remediation
-          };
-        });
-      }
-    };
-    module2.exports = NormalizerService;
-  }
-});
-
 // src/services/deduplicator.service.js
 var require_deduplicator_service = __commonJS({
   "src/services/deduplicator.service.js"(exports2, module2) {
@@ -5595,48 +6006,6 @@ var require_notification_service = __commonJS({
       }
     }
     module2.exports = { eventForScan, notifyScanResult };
-  }
-});
-
-// src/services/remediation-guidance.service.js
-var require_remediation_guidance_service = __commonJS({
-  "src/services/remediation-guidance.service.js"(exports2, module2) {
-    var GUIDANCE_VERSION = "securepatch-guidance-v1";
-    var entries = {
-      "semgrep:securepatch.js.dynamic-eval": ["Avoid dynamic code evaluation", "The rule matched JavaScript or TypeScript that turns a string into executable code.", ["Use a data parser such as JSON.parse when the input is data.", "If callers need different behavior, select from a fixed map of reviewed functions instead of evaluating caller-provided source.", "Add a regression test for untrusted input and the expected rejected or parsed result."]],
-      "semgrep:securepatch.js.shell-exec": ["Pass process arguments separately", "Shell command construction can let untrusted values change which command runs.", ["Prefer execFile or spawn with an executable and an argument array.", "Validate each argument against the expected format and allowlist executable choices.", "Keep shell mode disabled and add a test for metacharacters in user-controlled values."]],
-      "semgrep:securepatch.js.raw-html": ["Render untrusted content as text", "Raw HTML can turn attacker-controlled markup into script or unsafe links.", ["Prefer ordinary text rendering when HTML is not required.", "If rich HTML is required, sanitize it with a maintained allowlist sanitizer immediately before rendering.", "Test scripts, event-handler attributes, unsafe URL schemes, and malformed markup."]],
-      "semgrep:securepatch.js.weak-hash": ["Choose a hash for the security purpose", "MD5 and SHA-1 are unsuitable when collision resistance is required.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use a password-hashing function such as Argon2id, scrypt, or bcrypt rather than a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
-      "semgrep:securepatch.js.sql-concatenation": ["Bind SQL parameters", "Building a query by concatenating values can let input alter the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Keep table or column names out of user input; map any selectable identifiers to fixed allowed names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
-      "semgrep:securepatch.js.disabled-tls": ["Keep certificate verification enabled", "Disabling TLS verification removes the check that the server is the intended peer.", ["Restore the client's normal certificate verification behavior.", "Fix the certificate chain or configure the correct trusted CA instead of bypassing validation.", "Add a connection test that rejects an untrusted or mismatched certificate."]],
-      "semgrep:securepatch.js.jwt-unverified": ["Verify JWT signatures and claims", "Decoding a token only reads its contents; it does not prove who issued it.", ["Use a JWT verification API with an explicit allowlist of algorithms and the expected key.", "Validate issuer, audience, expiration, and any required not-before claim.", "Test invalid signatures, wrong audiences, expired tokens, and disallowed algorithms."]],
-      "semgrep:securepatch.python.pickle": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
-      "semgrep:securepatch.python.dynamic-eval": ["Parse data instead of evaluating source", "Evaluating a string as Python can execute arbitrary operations.", ["Use JSON parsing or ast.literal_eval when the input is a supported literal format.", "For commands, use a fixed dispatch table of approved operations and validated arguments.", "Test that expressions, imports, and unexpected names are rejected."]],
-      "semgrep:securepatch.python.shell": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess.run with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
-      "semgrep:securepatch.python.sql-formatting": ["Bind SQL parameters", "Formatting values into SQL text can let input change the query structure.", ["Use the database driver's parameter binding API with the correct placeholder syntax.", "Allowlist any dynamic identifiers such as table names instead of binding them as values.", "Test quotes and SQL metacharacters and verify they remain data."]],
-      "semgrep:securepatch.python.insecure-yaml": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
-      "bandit:B301": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
-      "bandit:B602": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
-      "bandit:B605": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
-      "bandit:B506": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
-      "bandit:B608": ["Bind SQL parameters", "Building a query with formatted values can let input change the SQL statement.", ["Use the database driver's parameterized query API and bind values separately.", "Allowlist dynamic identifiers; value placeholders usually cannot represent table or column names.", "Test with quotes and SQL metacharacters and verify they remain data."]],
-      "bandit:B303": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
-      "bandit:B324": ["Choose a hash for the security purpose", "The matched hash may not provide the collision resistance the operation requires.", ["For integrity or identifiers, use a modern collision-resistant hash such as SHA-256.", "For message authentication, use HMAC with a secret key.", "For passwords, use Argon2id, scrypt, or bcrypt instead of a general-purpose hash.", "Document the purpose and add compatibility tests before changing stored digests."]],
-      "secrets:github-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it at GitHub before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review token activity and limit the replacement token's permissions."]],
-      "secrets:nvidia-token": ["Revoke and rotate the exposed credential", "A token-like value matched a local pattern; the value itself was not stored and may be an example.", ["Confirm privately whether the credential is real and active.", "If it is real, revoke it with the issuing provider before replacing it.", "Move the replacement to a secret manager and remove the exposed value from current files and repository history where practical.", "Review usage and restrict the replacement credential to the required scope."]],
-      "secrets:aws-access-id": ["Review the AWS credential exposure", "An AWS access-key identifier matched a local pattern; this does not include or prove the presence of a usable secret key.", ["Check the corresponding IAM access key privately and deactivate it if it should not be public.", "Rotate any associated secret key and review CloudTrail activity for unexpected use.", "Move active credentials to an approved identity or secret-management flow; prefer short-lived roles where possible."]],
-      "secrets:private-key": ["Treat the private key as compromised", "A private-key header matched a local pattern; the key contents were not stored by this scanner.", ["Identify the key owner and revoke or rotate the key or certificate.", "Check recent use and dependent services for unexpected access.", "Store the replacement in an approved secret manager and remove the exposed key from repository history where practical."]],
-      "dependency:*": ["Upgrade the affected dependency", "The locked package version matched an advisory; reachability and exploitability are not established by this match.", ["Open the linked advisory and confirm the affected version range and fixed release.", "Upgrade to a fixed compatible release and update the lockfile.", "Run the project's relevant tests and rescan the updated lockfile."]]
-    };
-    function forFinding(finding) {
-      const scanner = String(finding?.scanner || "").toLowerCase();
-      const ruleId = String(finding?.ruleId || "");
-      const entry = entries[`${scanner}:${ruleId}`] || (scanner === "dependency" ? entries["dependency:*"] : null);
-      if (!entry) return null;
-      const [title, summary, steps] = entry;
-      return { source: "deterministic", version: GUIDANCE_VERSION, title, summary, steps: [...steps] };
-    }
-    module2.exports = { GUIDANCE_VERSION, forFinding };
   }
 });
 
@@ -6186,6 +6555,7 @@ var require_scanWorker = __commonJS({
         console.error(`[ScanWorker] Organization erasure pass failed (${error.name || "Error"}).`);
       }
       await require_automation_service().runDueSchedules();
+      await require_patch_rescan_jobs_service().runPending();
     }
     var wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
     var startVercelQueueWorker = async () => {
@@ -6660,7 +7030,7 @@ var require_remediation_verification_service = __commonJS({
         { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
         { name: "syntax", status: syntaxStatus, method: validation.syntax?.method || null, detailCode: syntaxDetail },
         { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
-        { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" }
+        validation.securityRescan?.status === "passed" ? { name: "security_rescan", status: "passed", method: "paired-pinned-snapshot", detailCode: "target_alert_absent_no_new_counts" } : { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" }
       ];
     }
     function pullRequestRecord(pullRequest) {
@@ -6695,6 +7065,11 @@ var require_remediation_verification_service = __commonJS({
         proposedSha256: DIGEST(validation.content),
         action,
         checks: checkRecord(validation),
+        ...validation.securityRescan?.status === "passed" ? { securityRescan: {
+          jobId: validation.securityRescan.jobId,
+          rulesHash: validation.securityRescan.rulesHash,
+          policyHash: validation.securityRescan.policyHash
+        } } : {},
         pullRequest: pullRequestRecord(pullRequest)
       });
     }
@@ -6846,6 +7221,33 @@ var require_scan_routes = __commonJS({
         limit: 20
       });
       res.json({ success: true, data: { verifications } });
+    }));
+    router.post("/:scanId/findings/:findingId/rescans", requireAuth, requireScanMember, handler(async (req, res) => {
+      const { scan, finding } = await findingContext(req);
+      const job = await require_patch_rescan_jobs_service().enqueue({ scan, finding, patch: req.body?.patch, actorId: req.user._id });
+      res.status(202).json({ success: true, data: { job } });
+    }));
+    router.get("/:scanId/findings/:findingId/rescans/:jobId", requireAuth, requireScanMember, handler(async (req, res) => {
+      objectId(req.params.jobId);
+      const { scan } = await findingContext(req);
+      const job = await require_patch_rescan_jobs_service().get({
+        jobId: req.params.jobId,
+        scanId: scan._id,
+        findingId: req.params.findingId,
+        organizationId: scan.organization
+      });
+      res.json({ success: true, data: { job } });
+    }));
+    router.post("/:scanId/findings/:findingId/rescans/:jobId/cancel", requireAuth, requireScanMember, handler(async (req, res) => {
+      objectId(req.params.jobId);
+      const { scan } = await findingContext(req);
+      const job = await require_patch_rescan_jobs_service().cancel({
+        jobId: req.params.jobId,
+        scanId: scan._id,
+        findingId: req.params.findingId,
+        organizationId: scan.organization
+      });
+      res.json({ success: true, data: { job } });
     }));
     router.get("/organizations/:organizationId/findings", requireAuth, requireOrganizationMember, handler(async (req, res) => {
       objectId(req.params.organizationId);

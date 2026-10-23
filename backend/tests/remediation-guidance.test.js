@@ -6,6 +6,9 @@ const rules = [
   "securepatch.python.pickle", "securepatch.python.dynamic-eval", "securepatch.python.shell",
   "securepatch.python.sql-formatting", "securepatch.python.insecure-yaml",
 ];
+test("host-prefixed Semgrep rules still receive the fixed project guidance",()=>{
+ expect(forFinding({scanner:"semgrep",ruleId:"mnt.machine.backend.securepatch.js.sql-concatenation"}).title).toBe("Bind SQL parameters");
+});
 test.each(rules)("returns versioned fixed guidance for project-owned rule %s", ruleId => {
   const result = forFinding({ scanner: "semgrep", ruleId });
   expect(result).toMatchObject({ source: "deterministic", version: GUIDANCE_VERSION });

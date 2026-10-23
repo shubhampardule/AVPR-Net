@@ -7,6 +7,7 @@ jest.mock("../src/services/finding-workflow.service", () => ({}));
 jest.mock("../src/services/budget.service", () => ({ consume: jest.fn().mockResolvedValue(undefined) }));
 jest.mock("../src/services/remediation.service", () => ({ validate: jest.fn(), createPullRequest: jest.fn() }));
 jest.mock("../src/services/remediation-verification.service", () => ({ recordVerification: jest.fn(), recordFailedIntegrity: jest.fn(), listVerifications: jest.fn() }));
+jest.mock("../src/services/patch-rescan-jobs.service",()=>({enqueue:jest.fn(),get:jest.fn(),cancel:jest.fn()}));
 jest.mock("../src/services/audit.service", () => ({ recordAuditEvent: jest.fn().mockResolvedValue(null) }));
 jest.mock("../src/config/logger", () => ({ error: jest.fn() }));
 
@@ -19,6 +20,7 @@ const budget = require("../src/services/budget.service");
 const verification = require("../src/services/remediation-verification.service");
 const scanRoutes = require("../src/routes/scan.routes");
 const errorHandler = require("../src/middleware/errorHandler");
+const rescans=require("../src/services/patch-rescan-jobs.service");
 
 const scanId = "507f1f77bcf86cd799439011";
 const findingId = "507f1f77bcf86cd799439012";
@@ -33,6 +35,21 @@ beforeEach(() => {
   jest.clearAllMocks();
   Scan.findById.mockReturnValue({ lean: async () => scan });
   Finding.findOne.mockReturnValue({ lean: async () => finding });
+});
+test("rescan enqueue uses server-authorized finding context instead of client-supplied scope",async()=>{
+ rescans.enqueue.mockResolvedValue({id:scanId,status:"queued"});
+ const r=await request(app).post(`/scans/${scanId}/findings/${findingId}/rescans`).send({patch:"diff",organizationId:"attacker"});
+ expect(r.status).toBe(202);expect(rescans.enqueue).toHaveBeenCalledWith({scan,finding,patch:"diff",actorId:"actor-1"});
+});
+test.each(["get","cancel"])("rescan %s is scoped to organization, scan and finding",async action=>{
+ rescans[action].mockResolvedValue({id:scanId,status:"queued"});
+ const route=`/scans/${scanId}/findings/${findingId}/rescans/${scanId}${action==="cancel"?"/cancel":""}`;
+ const r=await (action==="get"?request(app).get(route):request(app).post(route).send({}));
+ expect(r.status).toBe(200);expect(rescans[action]).toHaveBeenCalledWith({jobId:scanId,scanId,findingId,organizationId:"org-1"});
+});
+test("malformed rescan identifiers are rejected before querying jobs",async()=>{
+ const r=await request(app).get(`/scans/${scanId}/findings/${findingId}/rescans/not-an-id`);
+ expect(r.status).toBe(400);expect(rescans.get).not.toHaveBeenCalled();
 });
 
 test("validation records the result and returns the append-only verification record", async () => {

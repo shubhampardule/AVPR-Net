@@ -29,7 +29,7 @@ const entries = {
 
 function forFinding(finding) {
   const scanner = String(finding?.scanner || "").toLowerCase();
-  const ruleId = String(finding?.ruleId || "");
+  const ruleId = scanner === "semgrep" ? require("../utils/scanner-rule").canonicalRule(finding?.ruleId) : String(finding?.ruleId || "");
   const entry = entries[`${scanner}:${ruleId}`] || (scanner === "dependency" ? entries["dependency:*"] : null);
   if (!entry) return null;
   const [title, summary, steps] = entry;

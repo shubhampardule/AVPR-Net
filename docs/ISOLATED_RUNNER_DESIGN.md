@@ -1,8 +1,15 @@
 # Isolated patch verification runner (proposal)
 
-**Status: designed, not implemented.** SecurePatch currently validates a patch against the exact scanned source and performs limited syntax checks. It does not execute repository tests or patched code. Keep that behavior until an isolated runner is deployed, adversarially tested, and reviewed.
+**Status: customer test execution is not implemented/enabled.** AVPR-Net now validates a patch against the exact scanned source and can rescan a temporary patched snapshot without executing it. A gated GitHub-hosted Node profile and CI isolation contract are prepared; they have not passed hosted acceptance or been connected to customer jobs. See [the current verification flow and limits](PATCH_VERIFICATION.md). Keep repository tests unavailable until an isolated runner is deployed, adversarially tested, and reviewed.
 
 ## Boundary and deployment
+
+The original dedicated-host option below remains a design reference. Because no
+owned runner server is configured, a fresh standard GitHub-hosted VM is now the
+candidate first deployment boundary, with a restricted container inside it.
+Only the CI contract is wired; no customer source or jobs are dispatched to that
+profile. An authenticated job/result channel, cancellation and hosted/adversarial
+acceptance are prerequisites to replacing `allowed_tests: unavailable`.
 
 Keep the Vercel application as the control plane for authentication, authorization, scan records, and review. Run verification on a separate Linux service with a hardware virtualization boundary. Start one disposable Firecracker microVM per job through the matching Firecracker Jailer. Do not run repository commands inside the Vercel function, the API process, or the queue controller.
 
@@ -36,7 +43,7 @@ No profile may change a repository branch or default branch. A passing verificat
 - Correctness: wrong base SHA, wrong patch digest, wrong target path, unapplied patch, syntax failure, failing tests, skipped/unavailable profiles, and post-patch scanner findings.
 - Operations: patched host image, authenticated result channel, log redaction, capacity/quota enforcement, backup/restore, incident response, and independent security review.
 
-Do not implement patch application or test execution until the runner host, isolation boundary, profile policy, cleanup supervisor, and the tests above are available. Until then, keep syntax checks advisory and record project tests as `not_executed`.
+Applying a diff to temporary source for static analysis does not execute it and is now supported by the paired rescan path. Do not enable customer test execution until the runner host, isolation boundary, profile policy, cleanup supervisor, authenticated result channel, and tests above are available. Until then, keep syntax checks advisory and record project tests as `not_executed`.
 
 ## References
 

@@ -13,7 +13,7 @@ const BATCH_SIZE = 500;
 // application models' append-only rules, scoped to one disabled organization.
 const PURGE_MODELS = [
   "OrganizationInvitation", "RepositoryAutomation", "Notification", "AssistantCache", "Finding",
-  "RemediationVerification", "Scan", "AuditEvent", "OrganizationMember",
+  "PatchRescanJob", "RemediationVerification", "Scan", "AuditEvent", "OrganizationMember",
 ];
 
 async function requestOrganizationDeletion({ organizationId, actorId, confirmation, now = new Date() }) {

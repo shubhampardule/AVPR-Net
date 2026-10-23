@@ -10,6 +10,7 @@ jest.mock("../src/services/code-validation", () => ({
   validateCode: jest.fn(async () => ({ status: "passed", method: "babel-parser", executed: false })),
 }));
 jest.mock("../src/services/budget.service", () => ({ consume: jest.fn(async () => {}) }));
+jest.mock("../src/services/patch-rescan-jobs.service",()=>({requirePassed:jest.fn(async()=>({status:"passed",jobId:"rescan-job-1"}))}));
 
 const { getFileContent, resolveCommit } = require("../src/services/github.service");
 const { getInstallationOctokit, githubApp } = require("../src/config/github");

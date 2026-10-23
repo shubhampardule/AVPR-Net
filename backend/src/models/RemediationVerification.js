@@ -22,6 +22,11 @@ const remediationVerificationSchema = new mongoose.Schema({
   sourceSha256: { type: String, required: true, match: /^[a-f0-9]{64}$/, immutable: true },
   proposedSha256: { type: String, match: /^[a-f0-9]{64}$/, default: null, immutable: true },
   action: { type: String, enum: ["validation", "draft_pr"], required: true, immutable: true },
+  securityRescan: {type:new mongoose.Schema({
+    jobId:{type:mongoose.Schema.Types.ObjectId,required:true},
+    rulesHash:{type:String,required:true,match:/^[a-f0-9]{64}$/},
+    policyHash:{type:String,required:true,match:/^[a-f0-9]{64}$/},
+  },{_id:false,strict:"throw"}),default:null,immutable:true},
   checks: { type: [checkSchema], required: true, validate: value => value.length === CHECK_NAMES.length &&
     CHECK_NAMES.every(name => value.filter(check => check.name === name).length === 1), immutable: true },
   pullRequest: {

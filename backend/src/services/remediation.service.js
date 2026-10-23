@@ -11,9 +11,11 @@ async function source(scan, finding) {
   if (!language(finding.filePath) || finding.filePath.split("/").some(part => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) throw bad("This source path is not supported for remediation");
   const file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha);
   if (file.content.length > 8000) throw bad("File exceeds the 8000-character review limit; draft a smaller manual change", 413);
+  const ruleId=require("../utils/scanner-rule").canonicalRule(finding.ruleId);
+  const guidance=require("./remediation-guidance.service").forFinding(finding);
   return { findingId: String(finding._id), scanId: String(scan._id), commitSha: scan.commitSha, filePath: finding.filePath,
     language: language(finding.filePath), originalCode: file.content,
-    request: `Remediate the scanner finding ${finding.ruleId}: ${finding.title}. Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes and suggest regression tests.`.slice(0, 3000) };
+    request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance?guidance.steps.join(" "):""} Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3000) };
 }
 function applyExactDiff(original, patch, filePath) {
   if (typeof patch !== "string" || patch.length > 18000) throw bad("Provide a bounded unified diff", 400, "PATCH_INTEGRITY_FAILED");
@@ -34,9 +36,11 @@ async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {
   if (syntax.status === "failed" && !allowSyntaxFailure) throw bad("Proposed source failed syntax validation");
   return { context, content, syntax };
 }
-async function createPullRequest(scan, finding, { patch, acknowledged }) {
+async function createPullRequest(scan, finding, { patch, acknowledged, rescanJobId }) {
   if (acknowledged !== true) throw bad("Review the diff and acknowledge unexecuted tests before creating a draft PR");
   const { context, content, syntax } = await validate(scan, finding, patch);
+  const securityRescan=await require("./patch-rescan-jobs.service").requirePassed({jobId:rescanJobId,scan,finding,patch,
+    validation:{context,content,syntax}});
   const current = await resolveCommit(scan.installationId, scan.owner, scan.repo);
   if (current.sha !== scan.commitSha) throw bad("The default branch changed. Rescan before creating the PR.", 409, "BASE_CHANGED");
   const client = await getInstallationOctokit(scan.installationId);
@@ -61,9 +65,9 @@ async function createPullRequest(scan, finding, { patch, acknowledged }) {
     if (latest.sha !== current.sha || latest.branch !== current.branch) throw bad("The default branch changed. Rescan before creating the PR.", 409, "BASE_CHANGED");
     const { data: pr } = await client.request("POST /repos/{owner}/{repo}/pulls", { ...base, head: branch, base: current.branch, draft: true,
       title: `Review remediation: ${finding.ruleId}`.slice(0, 200),
-      body: `Draft remediation for ${finding.ruleId} in ${context.filePath}.\n\nBase commit: ${current.sha}\nSyntax: ${syntax.status}.\nTests were not executed. The patch requires independent correctness and security review.\n\nScanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not a probability).` });
+      body: `Draft remediation for ${finding.ruleId} in ${context.filePath}.\n\nBase commit: ${current.sha}\nSyntax: ${syntax.status}.\nStatic before/after rescan passed for this exact patch (job ${securityRescan.jobId}). This is scanner evidence, not proof of correctness.\nTests were not executed. The patch requires independent correctness and security review.\n\nScanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not a probability).` });
     return { url: pr.html_url, number: pr.number, draft: true, branch, baseSha: current.sha, syntax, tests: "not_executed",
-      verificationMaterial: { context, content, syntax } };
+      verificationMaterial: { context, content, syntax, securityRescan } };
   } catch (error) {
     // Remove only the new proposal branch if PR creation failed; base refs are never changed.
     await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { ...base, ref: `heads/${branch}` }).catch(() => {});
