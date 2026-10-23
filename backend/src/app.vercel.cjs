@@ -4423,6 +4423,36 @@ var require_orchestrator = __commonJS({
   }
 });
 
+// src/utils/patch-policy.js
+var require_patch_policy = __commonJS({
+  "src/utils/patch-policy.js"(exports2, module2) {
+    var fs = require("node:fs");
+    var path = require("node:path");
+    var { createHash } = require("node:crypto");
+    function computePolicyHash(sourceRoot) {
+      if (!sourceRoot) throw Object.assign(new Error("Scanner policy sources unavailable"), { code: "RESCAN_POLICY_UNAVAILABLE" });
+      const hash = createHash("sha256");
+      for (const file of [
+        "services/patch-rescan.service.js",
+        "services/normalizer.service.js",
+        "scanners/orchestrator.js",
+        "scanners/process.js",
+        "scanners/semgrep.adapter.js",
+        "scanners/bandit.adapter.js",
+        "scanners/repository-data.adapter.js",
+        "scanners/rules.yml",
+        "utils/scanner-rule.js",
+        "utils/exact-patch.js",
+        "utils/patch-policy.js"
+      ]) {
+        hash.update(file).update("\0").update(fs.readFileSync(path.join(sourceRoot, file), "utf8").replace(/\r\n/g, "\n")).update("\0");
+      }
+      return hash.digest("hex");
+    }
+    module2.exports = { computePolicyHash };
+  }
+});
+
 // src/utils/github-rate-limit.js
 var require_github_rate_limit = __commonJS({
   "src/utils/github-rate-limit.js"(exports2, module2) {
@@ -4615,26 +4645,12 @@ var require_patch_rescan_service = __commonJS({
     var { validateCode } = require_code_validation();
     var digest = (text) => createHash("sha256").update(text).digest("hex");
     var { canonicalRule } = require_scanner_rule();
+    var { computePolicyHash } = require_patch_policy();
     var fail = (code) => Object.assign(new Error(code), { code });
     var sourceRoot = [path.join(__dirname, ".."), __dirname].find((root) => require("node:fs").existsSync(path.join(root, "scanners/rules.yml")));
     function policyHash() {
-      if (true) return "456d31ee1a1097f39d901814a50e563cb11ce84583361d5938adc7d3411a19de";
-      if (!sourceRoot) throw fail("RESCAN_POLICY_UNAVAILABLE");
-      const hash = createHash("sha256");
-      for (const file of [
-        "services/patch-rescan.service.js",
-        "services/normalizer.service.js",
-        "scanners/orchestrator.js",
-        "scanners/process.js",
-        "scanners/semgrep.adapter.js",
-        "scanners/bandit.adapter.js",
-        "scanners/repository-data.adapter.js",
-        "scanners/rules.yml",
-        "utils/scanner-rule.js",
-        "utils/exact-patch.js"
-      ])
-        hash.update(file).update("\0").update(require("node:fs").readFileSync(path.join(sourceRoot, file), "utf8").replace(/\r\n/g, "\n")).update("\0");
-      return hash.digest("hex");
+      if (true) return "5b795a44841177a8f9796c6087950a85636eafe2e6dac388cd5525c3c59cfb70";
+      return computePolicyHash(sourceRoot);
     }
     function summarize(before, after, finding) {
       const target = (f) => f.scanner === finding.scanner && f.filePath === finding.filePath && canonicalRule(f.ruleId) === canonicalRule(finding.ruleId);

@@ -7,18 +7,14 @@ const Orchestrator = require("../scanners/orchestrator");
 const { validateCode } = require("./code-validation");
 const digest = text => createHash("sha256").update(text).digest("hex");
 const {canonicalRule}=require("../utils/scanner-rule");
+const {computePolicyHash}=require("../utils/patch-policy");
 const fail = code => Object.assign(new Error(code), { code });
 const sourceRoot = [path.join(__dirname,".."),__dirname].find(root=>require("node:fs").existsSync(path.join(root,"scanners/rules.yml")));
 function policyHash() {
   // The API bundle has no stable source-file layout. Embed the exact build-time
   // fingerprint there; the container worker still hashes its shipped sources.
   if (typeof __AVPR_RESCAN_POLICY_HASH__ !== "undefined") return __AVPR_RESCAN_POLICY_HASH__;
-  if (!sourceRoot) throw fail("RESCAN_POLICY_UNAVAILABLE");
-  const hash=createHash("sha256");
-  for(const file of ["services/patch-rescan.service.js","services/normalizer.service.js","scanners/orchestrator.js","scanners/process.js",
-    "scanners/semgrep.adapter.js","scanners/bandit.adapter.js","scanners/repository-data.adapter.js","scanners/rules.yml","utils/scanner-rule.js","utils/exact-patch.js"])
-    hash.update(file).update("\0").update(require("node:fs").readFileSync(path.join(sourceRoot,file),"utf8").replace(/\r\n/g,"\n")).update("\0");
-  return hash.digest("hex");
+  return computePolicyHash(sourceRoot);
 }
 
 function summarize(before, after, finding) {

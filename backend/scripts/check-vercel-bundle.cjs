@@ -2,7 +2,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
-const expectedPolicy = require("../src/services/patch-rescan.service").policyHash();
+const expectedPolicy = require("../src/utils/patch-policy").computePolicyHash(path.resolve(__dirname, "../src"));
+// The smoke check never connects to a database and needs no account credentials.
+process.env.DATABASE_URL = "mongodb://127.0.0.1:27017/avpr_bundle_check";
+process.env.NODE_ENV = "test";
 const file = path.resolve(__dirname, "../src/app.vercel.cjs");
 const source = fs.readFileSync(file, "utf8");
 assert(!/require\(["']diff["']\)/.test(source), "Diff implementation must ship inside the API bundle");

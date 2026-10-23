@@ -1,5 +1,5 @@
 const path = require("node:path");
-const { policyHash } = require("../src/services/patch-rescan.service");
+const { computePolicyHash } = require("../src/utils/patch-policy");
 
 require("esbuild").build({
   absWorkingDir: path.resolve(__dirname, ".."),
@@ -9,6 +9,6 @@ require("esbuild").build({
   format: "cjs",
   packages: "external",
   alias: { diff: require.resolve("diff") },
-  define: { __AVPR_RESCAN_POLICY_HASH__: JSON.stringify(policyHash()) },
+  define: { __AVPR_RESCAN_POLICY_HASH__: JSON.stringify(computePolicyHash(path.resolve(__dirname, "../src"))) },
   outfile: "src/app.vercel.cjs",
 }).catch(() => { process.exitCode = 1; });
