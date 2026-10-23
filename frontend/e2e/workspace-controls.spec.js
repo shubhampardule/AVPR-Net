@@ -275,6 +275,9 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(page.getByRole("heading", { name: "New Product Team" })).toBeVisible();
     expect(state.calls.filter(call => call.method === "POST" && call.pathname.endsWith("/organizations")).map(call => call.body.name)).toEqual(["New Product Team", "New Product Team"]);
 
+    // The heading appears before the new workspace's initial overview request completes.
+    // Inject the refresh failure only once that request has settled (including StrictMode's replay).
+    await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
     state.failNext.dashboard = "Dashboard temporarily unavailable";
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByRole("heading", { name: "Unable to load the security overview" })).toBeVisible();
