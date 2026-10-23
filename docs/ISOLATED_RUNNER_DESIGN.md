@@ -1,6 +1,6 @@
 # Isolated patch verification runner (proposal)
 
-**Status: customer test execution is not implemented/enabled.** AVPR-Net now validates a patch against the exact scanned source and can rescan a temporary patched snapshot without executing it. A gated GitHub-hosted Node profile and CI isolation contract are prepared; they have not passed hosted acceptance or been connected to customer jobs. See [the current verification flow and limits](PATCH_VERIFICATION.md). Keep repository tests unavailable until an isolated runner is deployed, adversarially tested, and reviewed.
+**Status: bounded GitHub-hosted npm execution is implemented, with production enablement gated on hosted contracts and a pinned supervisor SHA.** See [the current hosted runner](PROJECT_TEST_RUNNER.md). The microVM design below remains an alternative proposal; it is not the deployed implementation. Independent security assessment and broader language/dependency support remain open.
 
 ## Boundary and deployment
 

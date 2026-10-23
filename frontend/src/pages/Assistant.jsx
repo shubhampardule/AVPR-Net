@@ -4,6 +4,7 @@ import { API_BASE_URL } from "../config/api";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { BrandLockup } from "../components/ui/BrandLogo";
 import PatchRescanPanel from "../components/ui/PatchRescanPanel";
+import ProjectTestsPanel from "../components/ui/ProjectTestsPanel";
 
 const box = "rounded-xl border border-text-primary/10 bg-bg-secondary p-5 shadow-card sm:p-6";
 const field = "w-full rounded-md border border-text-primary/15 bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-security focus:ring-1 focus:ring-accent-security/40";
@@ -95,6 +96,8 @@ export default function Assistant({ demo = false }) {
   const [verificationError, setVerificationError] = useState("");
   const [verificationRevision, setVerificationRevision] = useState(0);
   const [verifiedRescanId, setVerifiedRescanId] = useState(null);
+  const [verifiedTestId, setVerifiedTestId] = useState(null);
+  useEffect(() => { setVerifiedTestId(null); }, [verifiedRescanId,result?.proposal?.code,draftContext?.scanId,draftContext?.findingId]);
   useEffect(() => { setVerifiedRescanId(null); }, [result?.proposal?.code, draftContext?.scanId, draftContext?.findingId]);
   const activeBase = useRef(base);
   const pendingRequest = useRef(null);
@@ -253,7 +256,7 @@ export default function Assistant({ demo = false }) {
     try {
       const response = await fetch(`${API_BASE_URL}/scans/${draftContext.scanId}/findings/${draftContext.findingId}/${action}`, {
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patch: result.proposal.code, acknowledged, rescanJobId: verifiedRescanId }),
+        body: JSON.stringify({ patch: result.proposal.code, acknowledged, rescanJobId: verifiedRescanId, ...(verifiedTestId?{projectTestJobId:verifiedTestId}:{}) }),
       });
       verificationRecordedHeader = response.headers.get("X-SecurePatch-Verification-Recorded");
       const body = await response.json();
@@ -376,7 +379,7 @@ export default function Assistant({ demo = false }) {
               <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
           </details>
           <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
-          <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged and project tests are not run." : "Nothing is applied, executed, blocked or deployed."}</p>
+          <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged. Project tests require separate approval after static checks pass." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
         <section className={`${box} min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
           {!result && <div className="flex min-h-[18rem] flex-col justify-center border-l-2 border-text-primary/10 pl-5"><p className="text-base font-semibold text-text-primary">Your review will appear here.</p>
@@ -391,7 +394,7 @@ export default function Assistant({ demo = false }) {
           </>}
           {result?.proposal && <>
             <p className="text-sm leading-6 text-text-primary">{result.proposal.explanation}</p>
-            <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: not executed</p>
+            <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
             {result.validation?.message && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
             <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>
             <div className="flex gap-4"><button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
@@ -406,7 +409,8 @@ export default function Assistant({ demo = false }) {
                   setError("Scanner feedback added. Review the updated request and approve sharing it before drafting again.");
                 }} />
                 : <p className="text-xs text-severity-medium">Security rescanning is unavailable for this language. Review and verify the proposal in your own CI before applying it.</p>}
-              <label className="block text-text-primary"><input type="checkbox" className="mr-2 accent-accent-security" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> I reviewed this patch and understand that tests were not executed.</label>
+              {verifiedRescanId&&<ProjectTestsPanel key={`${verifiedRescanId}:${result.proposal.code}`} context={draftContext} patch={result.proposal.code} rescanJobId={verifiedRescanId} onVerified={setVerifiedTestId}/>}
+              <label className="block text-text-primary"><input type="checkbox" className="mr-2 accent-accent-security" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> {verifiedTestId?"I reviewed this patch and the limits of its passing test results.":"I reviewed this patch and understand that tests were not executed."}</label>
               <button disabled={busy || !acknowledged || !verifiedRescanId || patchCheck?.syntax?.status === "failed" || Boolean(pullRequest) || !canCreatePullRequest} className={`${button} text-xs`} onClick={() => patchAction("pull-request")}>Create draft pull request</button>
               <p className="text-xs leading-5 text-text-muted">Owner/admin role and approved GitHub App write permissions required. The default branch must still match the scanned commit.</p>
               {pullRequest && <a target="_blank" rel="noreferrer" href={pullRequest.url} className="block font-medium text-accent-security underline underline-offset-2">Open draft pull request #{pullRequest.number}</a>}

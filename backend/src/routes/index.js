@@ -8,6 +8,7 @@ const scanRoutes = require("./scan.routes");
 const dashboardRoutes = require("./dashboard.routes");
 
 const router = express.Router();
+router.use("/internal/project-tests", require("./project-test-runner.routes"));
 router.use(require("./automation.routes"));
 router.use(require("./invitation-email-webhook.routes"));
 

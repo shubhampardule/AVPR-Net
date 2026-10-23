@@ -44,7 +44,7 @@ test("storage failure is propagated instead of falsely acknowledging deletion", 
   expect(Audit.create).not.toHaveBeenCalled();
 });
 
-const modelNames = ["OrganizationInvitation", "RepositoryAutomation", "Notification", "AssistantCache", "Finding", "PatchRescanJob", "RemediationVerification", "Scan", "AuditEvent", "OrganizationMember"];
+const modelNames = ["OrganizationInvitation", "RepositoryAutomation", "Notification", "AssistantCache", "Finding", "ProjectTestJob", "PatchRescanJob", "RemediationVerification", "Scan", "AuditEvent", "OrganizationMember"];
 function purgeSetup({ remaining = false, fail = false } = {}) {
   const query = { select: jest.fn().mockReturnThis(), sort: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue([{ _id: organizationId }]) };
   jest.spyOn(Organization, "find").mockReturnValue(query);

@@ -31,6 +31,21 @@ async function archiveRateLimit(response) {
   }
   return githubRateLimit({ status: response.status, headers: response.headers, message });
 }
+async function signedArchiveUrl(installationId, owner, repo, ref) {
+  repository(owner, repo);
+  if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+  const client = await getInstallationOctokit(installationId);
+  const { token } = await client.auth({ type: "installation" });
+  const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${ref}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" },
+    redirect: "manual", signal: AbortSignal.timeout(15000),
+  });
+  await response.body?.cancel();
+  if (![301, 302, 307, 308].includes(response.status)) throw bad("GitHub archive unavailable", 502);
+  const url = new URL(response.headers.get("location"));
+  if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+  return url.toString();
+}
 async function download(installationId, owner, repo, ref) {
   const client = await getInstallationOctokit(installationId);
   const { token } = await client.auth({ type: "installation" });
@@ -90,4 +105,4 @@ async function createEphemeralWorkspace(installationId, owner, repo, ref) {
     return { workspacePath: scannerWorkspacePath, cleanup };
   } catch (error) { await cleanup(); throw error; }
 }
-module.exports = { createEphemeralWorkspace, download };
+module.exports = { createEphemeralWorkspace, download, signedArchiveUrl };

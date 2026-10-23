@@ -20,6 +20,8 @@ jobs:
         run: docker pull node:22.23.1-bookworm-slim@sha256:8607a9064d4a571140998ae9e52a3b3fcf9cff361d04642d5971e6cd76d39e27
       - name: Exercise test profile isolation and cleanup
         run: node backend/runner/contract.cjs
+      - name: Exercise npm project tests and regression detection
+        run: node backend/runner/npm-contract.cjs
   tests:
     runs-on: ubuntu-24.04
     steps:

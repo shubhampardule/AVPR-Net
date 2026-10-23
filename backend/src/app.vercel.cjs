@@ -1622,6 +1622,33 @@ var require_Scan = __commonJS({
   }
 });
 
+// src/utils/exact-patch.js
+var require_exact_patch = __commonJS({
+  "src/utils/exact-patch.js"(exports2, module2) {
+    var { parsePatch, applyPatch } = require("diff");
+    var { bad } = require_input();
+    function applyExactDiff(original, patch, filePath) {
+      if (typeof patch !== "string" || patch.length > 18e3) throw bad("Provide a bounded unified diff", 400, "PATCH_INTEGRITY_FAILED");
+      let entries;
+      try {
+        entries = parsePatch(patch, { strict: true });
+      } catch {
+        throw bad("Invalid unified diff", 400, "PATCH_INTEGRITY_FAILED");
+      }
+      if (entries.length !== 1 || entries[0].oldFileName !== `a/${filePath}` || entries[0].newFileName !== `b/${filePath}` || !entries[0].hunks.length) throw bad("Diff must modify only the selected source file", 400, "PATCH_INTEGRITY_FAILED");
+      let content;
+      try {
+        content = applyPatch(original, entries[0], { fuzzFactor: 0 });
+      } catch {
+        throw bad("Diff does not apply to the scanned source", 409, "PATCH_INTEGRITY_FAILED");
+      }
+      if (content === false || content === original || content.length > 16e3) throw bad("Diff is empty, too large, or does not match the scanned source", 409, "PATCH_INTEGRITY_FAILED");
+      return content;
+    }
+    module2.exports = { applyExactDiff };
+  }
+});
+
 // src/config/env.js
 var require_env = __commonJS({
   "src/config/env.js"(exports2, module2) {
@@ -2535,6 +2562,22 @@ var require_workspace_service = __commonJS({
       }
       return githubRateLimit({ status: response.status, headers: response.headers, message });
     }
+    async function signedArchiveUrl(installationId, owner, repo, ref) {
+      repository(owner, repo);
+      if (!/^[a-f0-9]{40}$/.test(ref || "")) throw bad("An immutable commit SHA is required");
+      const client = await getInstallationOctokit(installationId);
+      const { token } = await client.auth({ type: "installation" });
+      const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${ref}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "AVPR-Net" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(15e3)
+      });
+      await response.body?.cancel();
+      if (![301, 302, 307, 308].includes(response.status)) throw bad("GitHub archive unavailable", 502);
+      const url = new URL(response.headers.get("location"));
+      if (url.protocol !== "https:" || url.hostname !== "codeload.github.com" || url.port || url.username || url.password) throw bad("Unexpected archive host", 502);
+      return url.toString();
+    }
     async function download(installationId, owner, repo, ref) {
       const client = await getInstallationOctokit(installationId);
       const { token } = await client.auth({ type: "installation" });
@@ -2609,7 +2652,7 @@ var require_workspace_service = __commonJS({
         throw error;
       }
     }
-    module2.exports = { createEphemeralWorkspace, download };
+    module2.exports = { createEphemeralWorkspace, download, signedArchiveUrl };
   }
 });
 
@@ -2638,7 +2681,8 @@ var require_patch_rescan_service = __commonJS({
         "scanners/bandit.adapter.js",
         "scanners/repository-data.adapter.js",
         "scanners/rules.yml",
-        "utils/scanner-rule.js"
+        "utils/scanner-rule.js",
+        "utils/exact-patch.js"
       ])
         hash.update(file).update("\0").update(require("node:fs").readFileSync(path.join(sourceRoot, file), "utf8").replace(/\r\n/g, "\n")).update("\0");
       return hash.digest("hex");
@@ -2924,10 +2968,237 @@ var require_patch_rescan_jobs_service = __commonJS({
   }
 });
 
+// src/models/ProjectTestJob.js
+var require_ProjectTestJob = __commonJS({
+  "src/models/ProjectTestJob.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var schema = new mongoose.Schema({
+      organization: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+      scan: { type: mongoose.Schema.Types.ObjectId, required: true },
+      finding: { type: mongoose.Schema.Types.ObjectId, required: true },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, required: true },
+      rescan: { type: mongoose.Schema.Types.ObjectId, required: true },
+      key: { type: String, required: true, unique: true },
+      patch: { type: String, maxlength: 18e3, select: false },
+      patchHash: String,
+      sourceHash: String,
+      proposedHash: String,
+      policyHash: String,
+      commitSha: String,
+      targetPath: String,
+      runnerRevision: String,
+      status: { type: String, enum: ["queued", "running", "completed", "failed", "cancelled"], required: true },
+      runId: String,
+      lease: { type: String, select: false },
+      leaseUntil: Date,
+      result: { type: mongoose.Schema.Types.Mixed, default: null },
+      errorCode: String,
+      deadlineAt: Date,
+      completedAt: Date,
+      expiresAt: { type: Date, expires: 0 }
+    }, { timestamps: true, strict: "throw" });
+    schema.index({ status: 1, deadlineAt: 1 });
+    schema.index({ runId: 1 }, { unique: true, partialFilterExpression: { runId: { $type: "string" } } });
+    module2.exports = mongoose.models.ProjectTestJob || mongoose.model("ProjectTestJob", schema);
+  }
+});
+
+// src/services/project-test-jobs.service.js
+var require_project_test_jobs_service = __commonJS({
+  "src/services/project-test-jobs.service.js"(exports2, module2) {
+    var crypto = require("node:crypto");
+    var Job = require_ProjectTestJob();
+    var Scan = require_Scan();
+    var Rescan = require_PatchRescanJob();
+    var Organization = require_Organization();
+    var Member = require_OrganizationMember();
+    var { bad } = require_input();
+    var { digest } = require_patch_rescan_service();
+    var PROFILE = "npm-ci-tests-v1";
+    function configured() {
+      return /^[a-f0-9]{40}$/.test(process.env.PROJECT_TEST_RUNNER_SHA || "");
+    }
+    function publicJob(job) {
+      return {
+        id: String(job._id),
+        status: job.status,
+        result: job.result,
+        errorCode: job.errorCode,
+        commitSha: job.commitSha,
+        patchHash: job.patchHash,
+        createdAt: job.createdAt,
+        deadlineAt: job.deadlineAt,
+        completedAt: job.completedAt
+      };
+    }
+    async function active(job) {
+      return Boolean(await Organization.exists({ _id: job.organization, status: "active" }) && await Member.exists({ organization: job.organization, user: job.requestedBy, status: "active" }));
+    }
+    async function enqueue({ scan, finding, patch, rescanJobId, actorId }) {
+      if (!configured()) throw bad("Project-test runner is not configured", 503, "PROJECT_TESTS_UNAVAILABLE");
+      await require_budget_service().consume(`project-test-requests:${scan.organization}`, 60, 36e5);
+      await Job.init();
+      const validation = await require_remediation_service().validate(scan, finding, patch);
+      const proof = await require_patch_rescan_jobs_service().requirePassed({ jobId: rescanJobId, scan, finding, patch, validation });
+      const key = digest(JSON.stringify([String(scan.organization), String(scan._id), String(finding._id), digest(patch), proof.policyHash, process.env.PROJECT_TEST_RUNNER_SHA]));
+      const previous = await Job.findOne({ key });
+      if (previous && ["queued", "running", "completed"].includes(previous.status) && previous.deadlineAt > /* @__PURE__ */ new Date()) return publicJob(previous);
+      await require_budget_service().consume(`project-tests:${scan.organization}`, 3, 36e5);
+      await require_budget_service().consume("project-tests-global", 20, 864e5);
+      const now = Date.now(), fields = {
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        requestedBy: actorId,
+        rescan: rescanJobId,
+        key,
+        patch,
+        patchHash: digest(patch),
+        sourceHash: digest(validation.context.originalCode),
+        proposedHash: digest(validation.content),
+        policyHash: proof.policyHash,
+        commitSha: scan.commitSha,
+        targetPath: finding.filePath,
+        runnerRevision: process.env.PROJECT_TEST_RUNNER_SHA,
+        status: "queued",
+        runId: null,
+        lease: null,
+        leaseUntil: null,
+        result: null,
+        errorCode: null,
+        completedAt: null,
+        deadlineAt: new Date(now + 20 * 6e4),
+        expiresAt: new Date(now + 864e5)
+      };
+      let job;
+      if (previous) job = await Job.findOneAndUpdate({ _id: previous._id, $or: [{ status: { $in: ["failed", "cancelled"] } }, { deadlineAt: { $lte: /* @__PURE__ */ new Date() } }] }, { $set: fields }, { returnDocument: "after" });
+      else try {
+        job = await Job.create(fields);
+      } catch (error) {
+        if (error.code !== 11e3) throw error;
+        return publicJob(await Job.findOne({ key }));
+      }
+      if (!job) throw bad("Test job changed. Refresh and retry", 409);
+      try {
+        const client = await require_github().getInstallationOctokit(173100925);
+        await client.request("POST /repos/{owner}/{repo}/dispatches", { owner: "shubhampardule", repo: "AVPR-Net", event_type: "avpr-project-tests", client_payload: { jobId: String(job._id) } });
+      } catch {
+        await Job.updateOne({ _id: job._id, status: "queued" }, { $set: { status: "failed", errorCode: "RUNNER_DISPATCH_FAILED", completedAt: /* @__PURE__ */ new Date() }, $unset: { patch: "" } });
+        throw bad("The hosted runner could not start. Check the App installation and retry", 503, "RUNNER_DISPATCH_FAILED");
+      }
+      return publicJob(job);
+    }
+    async function get(scope) {
+      await Job.updateOne({ ...scope, status: { $in: ["queued", "running"] }, deadlineAt: { $lte: /* @__PURE__ */ new Date() } }, { $set: { status: "failed", errorCode: "RUNNER_DEADLINE_EXCEEDED", completedAt: /* @__PURE__ */ new Date() }, $unset: { patch: "", lease: "" } });
+      const job = await Job.findOne(scope);
+      if (!job) throw bad("Project-test job not found", 404);
+      return publicJob(job);
+    }
+    async function cancel(scope) {
+      await Job.updateOne({ ...scope, status: { $in: ["queued", "running"] } }, { $set: { status: "cancelled", completedAt: /* @__PURE__ */ new Date() }, $unset: { patch: "", lease: "" } });
+      return get(scope);
+    }
+    async function claim(id, identity) {
+      const current = await Job.findById(id);
+      if (!current || !await active(current)) throw bad("Test job is unavailable", 409);
+      const rescan = await Rescan.findOne({ _id: current.rescan, status: "completed", "result.status": "passed", policyHash: current.policyHash, expiresAt: { $gt: /* @__PURE__ */ new Date() } });
+      if (!rescan) throw bad("Static verification expired", 409);
+      const lease = crypto.randomBytes(32).toString("hex");
+      const job = await Job.findOneAndUpdate(
+        { _id: id, status: "queued", runnerRevision: identity.revision, deadlineAt: { $gt: /* @__PURE__ */ new Date() } },
+        { $set: { status: "running", runId: identity.runId, lease, leaseUntil: new Date(Date.now() + 6e4) } },
+        { returnDocument: "after" }
+      ).select("+patch");
+      if (!job) throw bad("Test job was already claimed or expired", 409);
+      try {
+        const scan = await Scan.findOne({ _id: job.scan, organization: job.organization, commitSha: job.commitSha }).lean();
+        if (!scan) throw bad("Scanned source is unavailable", 409);
+        const archiveUrl = await require_workspace_service().signedArchiveUrl(scan.installationId, scan.owner, scan.repo, scan.commitSha);
+        return {
+          id: String(job._id),
+          lease,
+          archiveUrl,
+          patch: job.patch,
+          targetPath: job.targetPath,
+          commitSha: job.commitSha,
+          patchHash: job.patchHash,
+          sourceHash: job.sourceHash,
+          proposedHash: job.proposedHash,
+          profile: PROFILE
+        };
+      } catch {
+        await Job.updateOne({ _id: id, status: "running", runId: identity.runId, lease }, { $set: { status: "failed", errorCode: "RUNNER_SOURCE_UNAVAILABLE", completedAt: /* @__PURE__ */ new Date() }, $unset: { patch: "", lease: "" } });
+        throw bad("The pinned source is unavailable", 503, "RUNNER_SOURCE_UNAVAILABLE");
+      }
+    }
+    function leaseScope(id, identity, lease) {
+      if (!/^[a-f0-9]{64}$/.test(lease || "")) throw bad("Invalid job lease", 401);
+      return { _id: id, status: "running", runId: identity.runId, runnerRevision: identity.revision, lease, leaseUntil: { $gt: /* @__PURE__ */ new Date() }, deadlineAt: { $gt: /* @__PURE__ */ new Date() } };
+    }
+    async function pulse(id, identity, lease) {
+      const scope = leaseScope(id, identity, lease), job = await Job.findOne(scope);
+      if (!job || !await active(job)) throw bad("Test job cancelled or access changed", 409);
+      if (!await Job.findOneAndUpdate(scope, { $set: { leaseUntil: new Date(Date.now() + 6e4) } })) throw bad("Test job lease expired", 409);
+      return { active: true };
+    }
+    function cleanResult(value, job) {
+      if (value?.patchHash !== job.patchHash || value?.sourceHash !== job.sourceHash || value?.proposedHash !== job.proposedHash || value?.commitSha !== job.commitSha || value?.profile !== PROFILE || !["passed", "failed", "unavailable"].includes(value.status) || !Array.isArray(value.packages) || value.packages.length > 2) throw bad("Mismatched test result", 400);
+      const packages = value.packages.map((item) => {
+        if (![".", "backend", "frontend"].includes(item.root)) throw bad("Invalid test package", 400);
+        const outcome = (entry) => {
+          if (!["passed", "failed", "unavailable"].includes(entry?.status) || !Number.isInteger(entry.outputBytes) || entry.outputBytes < 0 || entry.outputBytes > 65536 || !["PROFILE_EXIT_ZERO", "PROFILE_EXIT_NONZERO", "OUTPUT_LIMIT", "TIMEOUT", "CANCELLED", "CONTAINER_START_FAILED"].includes(entry.reason)) throw bad("Invalid test outcome", 400);
+          if (entry.status === "passed" && (entry.exitCode !== 0 || entry.reason !== "PROFILE_EXIT_ZERO")) throw bad("Invalid passing test outcome", 400);
+          return { status: entry.status, reason: entry.reason, exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null, outputBytes: entry.outputBytes };
+        };
+        return { root: item.root, baseline: outcome(item.baseline), proposed: outcome(item.proposed) };
+      });
+      if (new Set(packages.map((p) => p.root)).size !== packages.length || value.status === "passed" && (!packages.length || packages.some((p) => p.baseline.status !== "passed" || p.proposed.status !== "passed"))) throw bad("Invalid passing test result", 400);
+      const reason = ["TESTS_PASSED", "BASELINE_TESTS_FAILED", "PROPOSED_TESTS_FAILED", "NO_SUPPORTED_NPM_PROJECT", "DEPENDENCY_PREPARATION_FAILED", "RUNNER_UNAVAILABLE"].includes(value.reason) ? value.reason : "RUNNER_UNAVAILABLE";
+      return {
+        status: value.status,
+        reason,
+        profile: PROFILE,
+        packages,
+        commitSha: job.commitSha,
+        patchHash: job.patchHash,
+        sourceHash: job.sourceHash,
+        proposedHash: job.proposedHash,
+        runUrl: `https://github.com/shubhampardule/AVPR-Net/actions/runs/${job.runId}`
+      };
+    }
+    async function complete(id, identity, lease, result) {
+      const scope = leaseScope(id, identity, lease), job = await Job.findOne(scope);
+      if (!job || !await active(job)) throw bad("Test job cancelled, expired or access changed", 409);
+      const cleaned = cleanResult(result, job);
+      if (!await Job.findOneAndUpdate(scope, { $set: { status: "completed", result: cleaned, completedAt: /* @__PURE__ */ new Date() }, $unset: { patch: "", lease: "" } })) throw bad("Job lease changed", 409);
+      return { recorded: true };
+    }
+    async function requirePassed({ jobId, scan, finding, patch, validation }) {
+      if (!require("mongoose").isValidObjectId(jobId)) throw bad("Run project tests for this exact proposal", 409, "PROJECT_TESTS_REQUIRED");
+      const job = await Job.findOne({
+        _id: jobId,
+        organization: scan.organization,
+        scan: scan._id,
+        finding: finding._id,
+        status: "completed",
+        expiresAt: { $gt: /* @__PURE__ */ new Date() },
+        commitSha: scan.commitSha,
+        patchHash: digest(patch),
+        sourceHash: digest(validation.context.originalCode),
+        proposedHash: digest(validation.content),
+        "result.status": "passed"
+      }).lean();
+      if (!job) throw bad("Passing project tests are missing, expired or do not match this patch", 409, "PROJECT_TESTS_REQUIRED");
+      return { status: "passed", jobId: String(job._id), profile: PROFILE, runnerRevision: job.runnerRevision, runUrl: job.result.runUrl };
+    }
+    module2.exports = { enqueue, get, cancel, claim, pulse, complete, cleanResult, configured, publicJob, requirePassed };
+  }
+});
+
 // src/services/remediation.service.js
 var require_remediation_service = __commonJS({
   "src/services/remediation.service.js"(exports2, module2) {
-    var { parsePatch, applyPatch } = require("diff");
+    var { applyExactDiff } = require_exact_patch();
     var { getInstallationOctokit } = require_github();
     var { getFileContent, resolveCommit } = require_github_service();
     var { validateCode } = require_code_validation();
@@ -2952,24 +3223,6 @@ var require_remediation_service = __commonJS({
         request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance ? guidance.steps.join(" ") : ""} Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3e3)
       };
     }
-    function applyExactDiff(original, patch, filePath) {
-      if (typeof patch !== "string" || patch.length > 18e3) throw bad("Provide a bounded unified diff", 400, "PATCH_INTEGRITY_FAILED");
-      let entries;
-      try {
-        entries = parsePatch(patch, { strict: true });
-      } catch {
-        throw bad("Invalid unified diff", 400, "PATCH_INTEGRITY_FAILED");
-      }
-      if (entries.length !== 1 || entries[0].oldFileName !== `a/${filePath}` || entries[0].newFileName !== `b/${filePath}` || !entries[0].hunks.length) throw bad("Diff must modify only the selected source file", 400, "PATCH_INTEGRITY_FAILED");
-      let content;
-      try {
-        content = applyPatch(original, entries[0], { fuzzFactor: 0 });
-      } catch {
-        throw bad("Diff does not apply to the scanned source", 409, "PATCH_INTEGRITY_FAILED");
-      }
-      if (content === false || content === original || content.length > 16e3) throw bad("Diff is empty, too large, or does not match the scanned source", 409, "PATCH_INTEGRITY_FAILED");
-      return content;
-    }
     async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {}) {
       const context = await source(scan, finding);
       let content;
@@ -2983,7 +3236,7 @@ var require_remediation_service = __commonJS({
       if (syntax.status === "failed" && !allowSyntaxFailure) throw bad("Proposed source failed syntax validation");
       return { context, content, syntax };
     }
-    async function createPullRequest(scan, finding, { patch, acknowledged, rescanJobId }) {
+    async function createPullRequest(scan, finding, { patch, acknowledged, rescanJobId, projectTestJobId }) {
       if (acknowledged !== true) throw bad("Review the diff and acknowledge unexecuted tests before creating a draft PR");
       const { context, content, syntax } = await validate(scan, finding, patch);
       const securityRescan = await require_patch_rescan_jobs_service().requirePassed({
@@ -2993,6 +3246,7 @@ var require_remediation_service = __commonJS({
         patch,
         validation: { context, content, syntax }
       });
+      const projectTests = projectTestJobId ? await require_project_test_jobs_service().requirePassed({ jobId: projectTestJobId, scan, finding, patch, validation: { context, content, syntax } }) : null;
       const current = await resolveCommit(scan.installationId, scan.owner, scan.repo);
       if (current.sha !== scan.commitSha) throw bad("The default branch changed. Rescan before creating the PR.", 409, "BASE_CHANGED");
       const client = await getInstallationOctokit(scan.installationId);
@@ -3031,7 +3285,7 @@ var require_remediation_service = __commonJS({
 Base commit: ${current.sha}
 Syntax: ${syntax.status}.
 Static before/after rescan passed for this exact patch (job ${securityRescan.jobId}). This is scanner evidence, not proof of correctness.
-Tests were not executed. The patch requires independent correctness and security review.
+${projectTests ? `Baseline and proposed npm test scripts passed in isolated containers (${projectTests.profile}). Evidence: ${projectTests.runUrl}` : "Tests were not executed."} The patch requires independent correctness and security review.
 
 Scanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not a probability).`
         });
@@ -3042,8 +3296,8 @@ Scanner severity: ${finding.severity}; AVPR-Net risk: ${finding.riskScore} (not 
           branch,
           baseSha: current.sha,
           syntax,
-          tests: "not_executed",
-          verificationMaterial: { context, content, syntax, securityRescan }
+          tests: projectTests ? "passed" : "not_executed",
+          verificationMaterial: { context, content, syntax, securityRescan, projectTests }
         };
       } catch (error) {
         await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { ...base, ref: `heads/${branch}` }).catch(() => {
@@ -3967,6 +4221,12 @@ var require_RemediationVerification = __commonJS({
         rulesHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
         policyHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ }
       }, { _id: false, strict: "throw" }), default: null, immutable: true },
+      projectTests: { type: new mongoose.Schema({
+        jobId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        profile: { type: String, required: true, maxlength: 80 },
+        runnerRevision: { type: String, required: true, match: /^[a-f0-9]{40}$/ },
+        runUrl: { type: String, required: true, maxlength: 300 }
+      }, { _id: false, strict: "throw" }), default: null, immutable: true },
       checks: { type: [checkSchema], required: true, validate: (value) => value.length === CHECK_NAMES.length && CHECK_NAMES.every((name) => value.filter((check) => check.name === name).length === 1), immutable: true },
       pullRequest: {
         number: { type: Number, min: 1, default: null, immutable: true },
@@ -4456,6 +4716,7 @@ var init_2 = __esm({
       "../models/OrganizationInvitation.js": () => require_OrganizationInvitation(),
       "../models/OrganizationMember.js": () => require_OrganizationMember(),
       "../models/PatchRescanJob.js": () => require_PatchRescanJob(),
+      "../models/ProjectTestJob.js": () => require_ProjectTestJob(),
       "../models/RemediationVerification.js": () => require_RemediationVerification(),
       "../models/RepositoryAutomation.js": () => require_RepositoryAutomation(),
       "../models/Scan.js": () => require_Scan(),
@@ -4486,6 +4747,7 @@ var require_organization_deletion_service = __commonJS({
       "Notification",
       "AssistantCache",
       "Finding",
+      "ProjectTestJob",
       "PatchRescanJob",
       "RemediationVerification",
       "Scan",
@@ -7029,7 +7291,7 @@ var require_remediation_verification_service = __commonJS({
       return [
         { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
         { name: "syntax", status: syntaxStatus, method: validation.syntax?.method || null, detailCode: syntaxDetail },
-        { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
+        validation.projectTests?.status === "passed" ? { name: "allowed_tests", status: "passed", method: validation.projectTests.profile, detailCode: "baseline_and_proposal_tests_passed" } : { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
         validation.securityRescan?.status === "passed" ? { name: "security_rescan", status: "passed", method: "paired-pinned-snapshot", detailCode: "target_alert_absent_no_new_counts" } : { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" }
       ];
     }
@@ -7065,6 +7327,12 @@ var require_remediation_verification_service = __commonJS({
         proposedSha256: DIGEST(validation.content),
         action,
         checks: checkRecord(validation),
+        ...validation.projectTests?.status === "passed" ? { projectTests: {
+          jobId: validation.projectTests.jobId,
+          profile: validation.projectTests.profile,
+          runnerRevision: validation.projectTests.runnerRevision,
+          runUrl: validation.projectTests.runUrl
+        } } : {},
         ...validation.securityRescan?.status === "passed" ? { securityRescan: {
           jobId: validation.securityRescan.jobId,
           rulesHash: validation.securityRescan.rulesHash,
@@ -7134,6 +7402,24 @@ var require_scan_routes = __commonJS({
       if (!scan || !finding) throw bad("Finding not found", 404);
       return { scan, finding };
     }
+    router.post("/:scanId/findings/:findingId/project-tests", requireAuth, requireScanMember, handler(async (req, res) => {
+      const { scan, finding } = await findingContext(req);
+      if (req.body?.acknowledged !== true) throw bad("Approve isolated execution of the repository tests before starting");
+      const job = await require_project_test_jobs_service().enqueue({ scan, finding, patch: req.body?.patch, rescanJobId: req.body?.rescanJobId, actorId: req.user._id });
+      res.status(202).json({ success: true, data: { job } });
+    }));
+    router.get("/:scanId/findings/:findingId/project-tests/:jobId", requireAuth, requireScanMember, handler(async (req, res) => {
+      objectId(req.params.jobId);
+      const { scan } = await findingContext(req);
+      const job = await require_project_test_jobs_service().get({ _id: req.params.jobId, scan: scan._id, finding: req.params.findingId, organization: scan.organization });
+      res.json({ success: true, data: { job } });
+    }));
+    router.post("/:scanId/findings/:findingId/project-tests/:jobId/cancel", requireAuth, requireScanMember, handler(async (req, res) => {
+      objectId(req.params.jobId);
+      const { scan } = await findingContext(req);
+      const job = await require_project_test_jobs_service().cancel({ _id: req.params.jobId, scan: scan._id, finding: req.params.findingId, organization: scan.organization });
+      res.json({ success: true, data: { job } });
+    }));
     router.get("/:scanId/findings/:findingId/source", requireAuth, requireScanMember, handler(async (req, res) => {
       const { scan, finding } = await findingContext(req);
       res.json({ success: true, data: await remediation.source(scan, finding) });
@@ -7552,6 +7838,85 @@ var require_dashboard_routes = __commonJS({
   }
 });
 
+// src/services/runner-identity.service.js
+var require_runner_identity_service = __commonJS({
+  "src/services/runner-identity.service.js"(exports2, module2) {
+    var crypto = require("node:crypto");
+    var { bad } = require_input();
+    var ISSUER = "https://token.actions.githubusercontent.com";
+    var REPOSITORY = "shubhampardule/AVPR-Net";
+    var AUDIENCE = "https://avpr-psi.vercel.app/project-tests";
+    var cached;
+    function validateClaims(claims, now = Date.now() / 1e3, expectedSha = process.env.PROJECT_TEST_RUNNER_SHA) {
+      if (!/^[a-f0-9]{40}$/.test(expectedSha || "")) throw bad("Project-test runner is not configured", 503);
+      if (claims.iss !== ISSUER || claims.aud !== AUDIENCE || claims.repository !== REPOSITORY || claims.repository_id !== "1425869481" || claims.repository_owner_id !== "166275831" || claims.ref !== "refs/heads/main" || claims.sub !== `repo:${REPOSITORY}:ref:refs/heads/main` || claims.workflow_ref !== `${REPOSITORY}/.github/workflows/project-tests.yml@refs/heads/main` || claims.sha !== expectedSha || claims.workflow_sha !== expectedSha || !["repository_dispatch", "workflow_dispatch"].includes(claims.event_name) || claims.runner_environment !== "github-hosted" || !/^\d+$/.test(claims.run_id || "") || !/^[1-9]\d*$/.test(claims.run_attempt || "") || !Number.isFinite(claims.exp) || claims.exp <= now || claims.exp > now + 600 || !Number.isFinite(claims.nbf) || claims.nbf > now + 15 || !Number.isFinite(claims.iat) || claims.iat > now + 15 || claims.iat < now - 600)
+        throw bad("Runner identity was refused", 401);
+      return { runId: claims.run_id, revision: claims.sha, attempt: claims.run_attempt };
+    }
+    async function verify(token) {
+      if (typeof token !== "string" || token.length > 16e3) throw bad("Runner identity required", 401);
+      const parts = token.split(".");
+      if (parts.length !== 3 || parts.some((value) => !/^[A-Za-z0-9_-]+$/.test(value))) throw bad("Invalid runner identity", 401);
+      let header, claims;
+      try {
+        header = JSON.parse(Buffer.from(parts[0], "base64url"));
+        claims = JSON.parse(Buffer.from(parts[1], "base64url"));
+      } catch {
+        throw bad("Invalid runner identity", 401);
+      }
+      if (header.alg !== "RS256" || typeof header.kid !== "string") throw bad("Invalid runner identity", 401);
+      const identity = validateClaims(claims);
+      if (!cached || cached.until < Date.now()) {
+        const response = await fetch(`${ISSUER}/.well-known/jwks`, { signal: AbortSignal.timeout(5e3), redirect: "error" });
+        if (!response.ok) throw bad("Runner identity provider unavailable", 503);
+        const text = await response.text();
+        if (text.length > 1e5) throw bad("Runner identity provider unavailable", 503);
+        const data = JSON.parse(text);
+        if (!Array.isArray(data.keys)) throw bad("Runner identity provider unavailable", 503);
+        cached = { keys: data.keys, until: Date.now() + 3e5 };
+      }
+      const jwk = cached.keys.find((key) => key.kid === header.kid && key.kty === "RSA" && key.use === "sig" && key.alg === "RS256");
+      if (!jwk || !crypto.verify(
+        "RSA-SHA256",
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        crypto.createPublicKey({ key: jwk, format: "jwk" }),
+        Buffer.from(parts[2], "base64url")
+      )) throw bad("Runner signature was refused", 401);
+      return identity;
+    }
+    module2.exports = { verify, validateClaims, AUDIENCE };
+  }
+});
+
+// src/routes/project-test-runner.routes.js
+var require_project_test_runner_routes = __commonJS({
+  "src/routes/project-test-runner.routes.js"(exports2, module2) {
+    var router = require("express").Router();
+    var handler = require_asyncHandler();
+    var { objectId, bad } = require_input();
+    var jobs = require_project_test_jobs_service();
+    router.use(handler(async (req, res, next) => {
+      const value = req.get("authorization") || "";
+      if (!value.startsWith("Bearer ")) throw bad("Runner identity required", 401);
+      req.runnerIdentity = await require_runner_identity_service().verify(value.slice(7));
+      next();
+    }));
+    router.post("/:jobId/claim", handler(async (req, res) => {
+      objectId(req.params.jobId);
+      res.json({ success: true, data: await jobs.claim(req.params.jobId, req.runnerIdentity) });
+    }));
+    router.post("/:jobId/pulse", handler(async (req, res) => {
+      objectId(req.params.jobId);
+      res.json({ success: true, data: await jobs.pulse(req.params.jobId, req.runnerIdentity, req.body?.lease) });
+    }));
+    router.post("/:jobId/complete", handler(async (req, res) => {
+      objectId(req.params.jobId);
+      res.json({ success: true, data: await jobs.complete(req.params.jobId, req.runnerIdentity, req.body?.lease, req.body?.result) });
+    }));
+    module2.exports = router;
+  }
+});
+
 // src/services/operations.service.js
 var require_operations_service = __commonJS({
   "src/services/operations.service.js"(exports2, module2) {
@@ -7814,6 +8179,7 @@ var require_routes = __commonJS({
     var scanRoutes = require_scan_routes();
     var dashboardRoutes = require_dashboard_routes();
     var router = express2.Router();
+    router.use("/internal/project-tests", require_project_test_runner_routes());
     router.use(require_automation_routes());
     router.use(require_invitation_email_webhook_routes());
     router.use("/health", healthRoutes);

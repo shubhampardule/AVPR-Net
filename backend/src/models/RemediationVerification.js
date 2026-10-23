@@ -27,6 +27,10 @@ const remediationVerificationSchema = new mongoose.Schema({
     rulesHash:{type:String,required:true,match:/^[a-f0-9]{64}$/},
     policyHash:{type:String,required:true,match:/^[a-f0-9]{64}$/},
   },{_id:false,strict:"throw"}),default:null,immutable:true},
+  projectTests: {type:new mongoose.Schema({
+    jobId:{type:mongoose.Schema.Types.ObjectId,required:true},profile:{type:String,required:true,maxlength:80},
+    runnerRevision:{type:String,required:true,match:/^[a-f0-9]{40}$/},runUrl:{type:String,required:true,maxlength:300},
+  },{_id:false,strict:"throw"}),default:null,immutable:true},
   checks: { type: [checkSchema], required: true, validate: value => value.length === CHECK_NAMES.length &&
     CHECK_NAMES.every(name => value.filter(check => check.name === name).length === 1), immutable: true },
   pullRequest: {

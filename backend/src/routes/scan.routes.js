@@ -26,6 +26,22 @@ async function findingContext(req) {
   if (!scan || !finding) throw bad("Finding not found", 404);
   return { scan, finding };
 }
+router.post("/:scanId/findings/:findingId/project-tests",requireAuth,requireScanMember,handler(async(req,res)=>{
+  const {scan,finding}=await findingContext(req);
+  if(req.body?.acknowledged!==true)throw bad("Approve isolated execution of the repository tests before starting");
+  const job=await require("../services/project-test-jobs.service").enqueue({scan,finding,patch:req.body?.patch,rescanJobId:req.body?.rescanJobId,actorId:req.user._id});
+  res.status(202).json({success:true,data:{job}});
+}));
+router.get("/:scanId/findings/:findingId/project-tests/:jobId",requireAuth,requireScanMember,handler(async(req,res)=>{
+  objectId(req.params.jobId);const {scan}=await findingContext(req);
+  const job=await require("../services/project-test-jobs.service").get({_id:req.params.jobId,scan:scan._id,finding:req.params.findingId,organization:scan.organization});
+  res.json({success:true,data:{job}});
+}));
+router.post("/:scanId/findings/:findingId/project-tests/:jobId/cancel",requireAuth,requireScanMember,handler(async(req,res)=>{
+  objectId(req.params.jobId);const {scan}=await findingContext(req);
+  const job=await require("../services/project-test-jobs.service").cancel({_id:req.params.jobId,scan:scan._id,finding:req.params.findingId,organization:scan.organization});
+  res.json({success:true,data:{job}});
+}));
 router.get("/:scanId/findings/:findingId/source", requireAuth, requireScanMember, handler(async (req, res) => {
   const { scan, finding } = await findingContext(req);
   res.json({ success: true, data: await remediation.source(scan, finding) });

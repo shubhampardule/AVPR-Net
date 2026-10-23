@@ -73,28 +73,18 @@ without changing stored finding identities or review history.
 The disposable MongoDB acceptance suite also exercises cancellation, duplicate
 delivery, stale leases, exact proof binding and cross-organization isolation.
 
-## Project-test runner: gated next stage
+## Hosted project-test execution
 
-No separately owned Linux server is configured. A GitHub-hosted runner profile and
-CI isolation contract are prepared under `backend/runner/`; customer test execution
-is not wired into rescan results. It supports dependency-free Node tests only and
-must first pass its hosted isolation contract. It is not a general npm/pip runner.
+The hosted npm profile now has authenticated exact-job orchestration, separate
+execution approval, cancellation and baseline/proposal results. Supported projects
+have root or backend/frontend npm test scripts and npm lockfile v2/v3. Installation
+scripts and non-registry dependencies are excluded. The exact supervisor revision
+must pass its hosted CI contracts before the production pin is enabled. Missing
+configuration, unsupported projects, infrastructure errors and failed tests remain
+explicitly unavailable or failed, never passing.
 
-The supervisor requires a standard GitHub-hosted Linux x64 VM; runs a digest-pinned
-Node image with no network, a read-only root/source, nonroot UID, dropped
-capabilities, no-new-privileges, bounded memory/CPU/PIDs/files/output/time and no
-inherited application credentials; and confirms container removal. It never
-executes arbitrary command strings or runs dependency installation. Missing tests,
-an unavailable image/engine or failed cleanup are not passes.
-
-Before enabling customer tests: pass hosted boundary/timeout/output/cleanup checks,
-review the supervisor independently, implement an authenticated exact-job/commit/
-patch result channel and cancellation, and prepare a reviewed dependency policy
-for projects needing packages. Keep the existing `allowed_tests: unavailable`
-record until those conditions hold. The profile's environment check is an operator
-guard, not cryptographic proof that a host is GitHub-operated.
-
-References: [GitHub-hosted VM boundaries](https://docs.github.com/en/actions/reference/runners/github-hosted-runners),
-[GitHub token permissions](https://docs.github.com/en/actions/reference/security/secure-use),
-[Docker runtime controls](https://docs.docker.com/reference/cli/docker/container/run),
-[network isolation](https://docs.docker.com/engine/network/drivers/none/).
+Passing project-test proof can be attached to a draft PR. Static-only proposals
+still say tests were not executed. See [the hosted runner flow, dependency policy,
+operating limits and configuration](PROJECT_TEST_RUNNER.md). This profile does not
+support arbitrary languages, pip environments, network-dependent tests, or custom
+host commands. Independent security assessment remains outstanding.

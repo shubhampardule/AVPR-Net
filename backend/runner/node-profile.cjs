@@ -24,7 +24,7 @@ async function snapshot(source,destination){
  async function walk(from,to){
   await fs.mkdir(to,{recursive:true,mode:0o755});
   for(const entry of await fs.readdir(from,{withFileTypes:true})){
-   if([".git","node_modules",".env",".local"].includes(entry.name))continue;
+   if([".git","node_modules",".env",".local"].includes(entry.name)||entry.name.startsWith(".env."))continue;
    const original=path.join(from,entry.name),target=path.join(to,entry.name);
    if(entry.isSymbolicLink()||(!entry.isFile()&&!entry.isDirectory()))throw new Error("Source contains an unsupported entry");
    if(++count>5000)throw new Error("Source file limit exceeded");
@@ -39,16 +39,17 @@ async function snapshot(source,destination){
  if(tests.length>50)throw new Error("Too many test files");
  return tests;
 }
-async function execute(name,timeoutMs){
+async function execute(name,timeoutMs,signal){
  let bytes=0,reason=null;
  const child=spawn("docker",["start","--attach",name],{env:dockerEnv(),stdio:["ignore","pipe","pipe"]});
  const stop=async code=>{if(reason)return;reason=code;await command(["rm","--force",name]).catch(()=>{});child.kill("SIGKILL");};
  for(const stream of [child.stdout,child.stderr])stream.on("data",chunk=>{bytes+=chunk.length;if(bytes>OUTPUT_LIMIT)void stop("OUTPUT_LIMIT");});
  const timer=setTimeout(()=>void stop("TIMEOUT"),timeoutMs);
+ const abort=()=>void stop("CANCELLED");signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
  try{return await new Promise(resolve=>{
-  child.once("error",()=>resolve({status:"unavailable",reason:"CONTAINER_START_FAILED"}));
+  child.once("error",()=>resolve({status:"unavailable",reason:"CONTAINER_START_FAILED",outputBytes:Math.min(bytes,OUTPUT_LIMIT)}));
   child.once("close",code=>resolve({status:(reason||code!==0)?"failed":"passed",reason:reason||(code===0?"PROFILE_EXIT_ZERO":"PROFILE_EXIT_NONZERO"),exitCode:code,outputBytes:Math.min(bytes,OUTPUT_LIMIT)}));
- });}finally{clearTimeout(timer);}
+ });}finally{clearTimeout(timer);signal?.removeEventListener("abort",abort);}
 }
 async function runProfile(source,{timeoutMs=120000}={}){
  requireHostedVm();
@@ -79,4 +80,4 @@ async function runProfile(source,{timeoutMs=120000}={}){
 if(require.main===module)runProfile(process.argv[2]||process.cwd()).then(result=>{
  console.log(JSON.stringify(result));process.exitCode=result.status==="passed"?0:result.status==="unavailable"?3:1;
 }).catch(()=>{console.error("Isolated test profile unavailable; no passing test result is claimed.");process.exitCode=3;});
-module.exports={IMAGE,requireHostedVm,containerArgs,snapshot,runProfile};
+module.exports={IMAGE,requireHostedVm,containerArgs,snapshot,runProfile,command,execute};

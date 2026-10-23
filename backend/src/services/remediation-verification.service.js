@@ -12,7 +12,9 @@ function checkRecord(validation) {
   return [
     { name: "patch_integrity", status: "passed", method: "strict-single-file-diff", detailCode: "exact_source_context" },
     { name: "syntax", status: syntaxStatus, method: validation.syntax?.method || null, detailCode: syntaxDetail },
-    { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
+    validation.projectTests?.status==="passed"
+      ? {name:"allowed_tests",status:"passed",method:validation.projectTests.profile,detailCode:"baseline_and_proposal_tests_passed"}
+      : { name: "allowed_tests", status: "unavailable", method: null, detailCode: "isolated_runner_unavailable" },
     validation.securityRescan?.status==="passed"
       ? {name:"security_rescan",status:"passed",method:"paired-pinned-snapshot",detailCode:"target_alert_absent_no_new_counts"}
       : { name: "security_rescan", status: "unavailable", method: null, detailCode: "proposal_branch_scan_unavailable" },
@@ -51,6 +53,8 @@ async function recordVerification({ scan, finding, actorId, patch, validation, a
     proposedSha256: DIGEST(validation.content),
     action,
     checks: checkRecord(validation),
+    ...(validation.projectTests?.status==="passed"?{projectTests:{jobId:validation.projectTests.jobId,profile:validation.projectTests.profile,
+      runnerRevision:validation.projectTests.runnerRevision,runUrl:validation.projectTests.runUrl}}:{}),
     ...(validation.securityRescan?.status==="passed"?{securityRescan:{jobId:validation.securityRescan.jobId,
       rulesHash:validation.securityRescan.rulesHash,policyHash:validation.securityRescan.policyHash}}:{}),
     pullRequest: pullRequestRecord(pullRequest),
