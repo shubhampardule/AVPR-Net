@@ -7849,7 +7849,10 @@ var require_runner_identity_service = __commonJS({
     var cached;
     function validateClaims(claims, now = Date.now() / 1e3, expectedSha = process.env.PROJECT_TEST_RUNNER_SHA) {
       if (!/^[a-f0-9]{40}$/.test(expectedSha || "")) throw bad("Project-test runner is not configured", 503);
-      if (claims.iss !== ISSUER || claims.aud !== AUDIENCE || claims.repository !== REPOSITORY || claims.repository_id !== "1425869481" || claims.repository_owner_id !== "166275831" || claims.ref !== "refs/heads/main" || claims.sub !== `repo:${REPOSITORY}:ref:refs/heads/main` || claims.workflow_ref !== `${REPOSITORY}/.github/workflows/project-tests.yml@refs/heads/main` || claims.sha !== expectedSha || claims.workflow_sha !== expectedSha || !["repository_dispatch", "workflow_dispatch"].includes(claims.event_name) || claims.runner_environment !== "github-hosted" || !/^\d+$/.test(claims.run_id || "") || !/^[1-9]\d*$/.test(claims.run_attempt || "") || !Number.isFinite(claims.exp) || claims.exp <= now || claims.exp > now + 600 || !Number.isFinite(claims.nbf) || claims.nbf > now + 15 || !Number.isFinite(claims.iat) || claims.iat > now + 15 || claims.iat < now - 600)
+      if (claims.iss !== ISSUER || claims.aud !== AUDIENCE || claims.repository !== REPOSITORY || claims.repository_id !== "1425869481" || claims.repository_owner_id !== "166275831" || claims.ref !== "refs/heads/main" || ![
+        `repo:${REPOSITORY}:ref:refs/heads/main`,
+        "repo:shubhampardule@166275831/AVPR-Net@1425869481:ref:refs/heads/main"
+      ].includes(claims.sub) || claims.workflow_ref !== `${REPOSITORY}/.github/workflows/project-tests.yml@refs/heads/main` || claims.sha !== expectedSha || claims.workflow_sha !== expectedSha || !["repository_dispatch", "workflow_dispatch"].includes(claims.event_name) || claims.runner_environment !== "github-hosted" || !/^\d+$/.test(claims.run_id || "") || !/^[1-9]\d*$/.test(claims.run_attempt || "") || !Number.isFinite(claims.exp) || claims.exp <= now || claims.exp > now + 600 || !Number.isFinite(claims.nbf) || claims.nbf > now + 15 || !Number.isFinite(claims.iat) || claims.iat > now + 15 || claims.iat < now - 600)
         throw bad("Runner identity was refused", 401);
       return { runId: claims.run_id, revision: claims.sha, attempt: claims.run_attempt };
     }

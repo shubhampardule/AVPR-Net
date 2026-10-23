@@ -8,7 +8,8 @@ function validateClaims(claims, now = Date.now() / 1000, expectedSha = process.e
   if (!/^[a-f0-9]{40}$/.test(expectedSha || "")) throw bad("Project-test runner is not configured", 503);
   if (claims.iss !== ISSUER || claims.aud !== AUDIENCE || claims.repository !== REPOSITORY ||
       claims.repository_id !== "1425869481" || claims.repository_owner_id !== "166275831" ||
-      claims.ref !== "refs/heads/main" || claims.sub !== `repo:${REPOSITORY}:ref:refs/heads/main` ||
+      claims.ref !== "refs/heads/main" || ![`repo:${REPOSITORY}:ref:refs/heads/main`,
+        "repo:shubhampardule@166275831/AVPR-Net@1425869481:ref:refs/heads/main"].includes(claims.sub) ||
       claims.workflow_ref !== `${REPOSITORY}/.github/workflows/project-tests.yml@refs/heads/main` ||
       claims.sha !== expectedSha || claims.workflow_sha !== expectedSha ||
       !["repository_dispatch", "workflow_dispatch"].includes(claims.event_name) ||
