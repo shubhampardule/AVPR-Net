@@ -37,6 +37,8 @@ jobs:
         working-directory: backend
       - run: npm test
         working-directory: backend
+      - run: npm run test:vercel-bundle
+        working-directory: backend
       - run: node backend/src/cli/check-secrets.js
       - run: npm audit --omit=dev --audit-level=moderate
         working-directory: backend

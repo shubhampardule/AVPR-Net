@@ -25,7 +25,8 @@
     "benchmark:advisories": "node src/cli/advisory-pilot.js",
     "test:lifecycle:live": "node src/cli/lifecycle-acceptance.js --disposable",
     "test:remediation:live": "node src/cli/remediation-acceptance.js --live-nvidia",
-    "build:vercel": "esbuild src/app.js --bundle --platform=node --format=cjs --packages=external --alias:diff=./node_modules/diff/libcjs/index.js --outfile=src/app.vercel.cjs"
+    "build:vercel": "node scripts/build-vercel.cjs",
+    "test:vercel-bundle": "npm run build:vercel && node scripts/check-vercel-bundle.cjs"
   },
   "keywords": [],
   "author": "",
