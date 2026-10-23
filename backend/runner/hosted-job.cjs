@@ -5,16 +5,25 @@ const BASE="https://avpr-psi.vercel.app/api/v1/internal/project-tests",AUDIENCE=
 const digest=value=>crypto.createHash("sha256").update(value,"utf8").digest("hex");
 async function oidc(){
  const url=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
- if(url.protocol!=="https:"||!url.hostname.endsWith(".actions.githubusercontent.com"))throw new Error("Invalid identity endpoint");
+ if(url.protocol!=="https:"||!url.hostname.endsWith(".actions.githubusercontent.com")){console.error(JSON.stringify({category:"IDENTITY_ORIGIN_REFUSED"}));throw new Error("Invalid identity endpoint");}
  url.searchParams.set("audience",AUDIENCE);
  const response=await fetch(url,{headers:{Authorization:`Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`},redirect:"error",signal:AbortSignal.timeout(15000)});
- if(!response.ok)throw new Error("Identity unavailable");
+ if(!response.ok){console.error(JSON.stringify({category:"IDENTITY_UNAVAILABLE",httpStatus:response.status}));throw new Error("Identity unavailable");}
  const data=await response.json();if(typeof data.value!=="string")throw new Error("Identity unavailable");return data.value;
 }
 async function request(id,action,body={}){
- const response=await fetch(`${BASE}/${id}/${action}`,{method:"POST",headers:{Authorization:`Bearer ${await oidc()}`,"Content-Type":"application/json"},
+ const identity=await oidc();
+ const response=await fetch(`${BASE}/${id}/${action}`,{method:"POST",headers:{Authorization:`Bearer ${identity}`,"Content-Type":"application/json"},
   body:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(20000)});
- if(!response.ok)throw new Error("Runner request refused");return (await response.json()).data;
+ if(!response.ok){
+  // Fixed supervisor metadata only: never emit tokens, archive URLs, source or provider messages.
+  console.error(JSON.stringify({operation:action,httpStatus:response.status,category:"RUNNER_REQUEST_REFUSED"}));
+  if(action==="claim"){
+   const claims=JSON.parse(Buffer.from(identity.split(".")[1],"base64url"));
+   console.error(JSON.stringify({category:"RUNNER_IDENTITY_METADATA",...Object.fromEntries(["repository","repository_id","repository_owner_id","ref","sub","workflow_ref","sha","workflow_sha","event_name","runner_environment","run_id","run_attempt","iat","nbf","exp"].map(key=>[key,claims[key]??null]))}));
+  }
+  throw new Error("Runner request refused");
+ }return (await response.json()).data;
 }
 async function extract(url,destination){
  const parsed=new URL(url);if(parsed.protocol!=="https:"||parsed.hostname!=="codeload.github.com"||parsed.port||parsed.username||parsed.password)throw new Error("Invalid archive origin");
