@@ -6,6 +6,11 @@ const expectedPolicy = require("../src/utils/patch-policy").computePolicyHash(pa
 // The smoke check never connects to a database and needs no account credentials.
 process.env.DATABASE_URL = "mongodb://127.0.0.1:27017/avpr_bundle_check";
 process.env.NODE_ENV = "test";
+process.env.GOOGLE_CLIENT_ID = "bundle-check";
+process.env.GOOGLE_CLIENT_SECRET = "bundle-check";
+process.env.GOOGLE_CALLBACK_URL = "http://localhost/bundle-check";
+process.env.GITHUB_PRIVATE_KEY = "BEGIN BUNDLE CHECK — not a signing key";
+process.env.SESSION_SECRET = "bundle-check-only";
 const file = path.resolve(__dirname, "../src/app.vercel.cjs");
 const source = fs.readFileSync(file, "utf8");
 assert(!/require\(["']diff["']\)/.test(source), "Diff implementation must ship inside the API bundle");
