@@ -3013,7 +3013,7 @@ var require_project_test_jobs_service = __commonJS({
     var Organization = require_Organization();
     var Member = require_OrganizationMember();
     var { bad } = require_input();
-    var { digest } = require_patch_rescan_service();
+    var digest = (value) => crypto.createHash("sha256").update(value, "utf8").digest("hex");
     var PROFILE = "npm-ci-tests-v1";
     function configured() {
       return /^[a-f0-9]{40}$/.test(process.env.PROJECT_TEST_RUNNER_SHA || "");

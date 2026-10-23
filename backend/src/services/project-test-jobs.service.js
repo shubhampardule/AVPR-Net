@@ -1,7 +1,8 @@
 const crypto=require("node:crypto");
 const Job=require("../models/ProjectTestJob"),Scan=require("../models/Scan"),Rescan=require("../models/PatchRescanJob");
 const Organization=require("../models/Organization"),Member=require("../models/OrganizationMember");
-const {bad}=require("../utils/input"),{digest}=require("./patch-rescan.service");
+const {bad}=require("../utils/input");
+const digest=value=>crypto.createHash("sha256").update(value,"utf8").digest("hex");
 const PROFILE="npm-ci-tests-v1";
 function configured(){return /^[a-f0-9]{40}$/.test(process.env.PROJECT_TEST_RUNNER_SHA||"");}
 function publicJob(job){return {id:String(job._id),status:job.status,result:job.result,errorCode:job.errorCode,

@@ -4,8 +4,12 @@ const {IMAGE,requireHostedVm,snapshot,command,execute}=require("./node-profile.c
 const PROFILE="npm-ci-tests-v1";
 function validateManifest(manifest,lock){
  if(typeof manifest.scripts?.test!=="string"||!manifest.scripts.test.trim())throw new Error("NO_TEST_SCRIPT");
- if(![2,3].includes(lock.lockfileVersion)||!lock.packages||manifest.workspaces)throw new Error("UNSUPPORTED_LOCKFILE");
+ if(![2,3].includes(lock.lockfileVersion)||!lock.packages||manifest.workspaces||manifest.overrides)throw new Error("UNSUPPORTED_LOCKFILE");
+ const specs=object=>{for(const group of ["dependencies","devDependencies","optionalDependencies"])
+  for(const spec of Object.values(object[group]||{}))if(typeof spec!=="string"||!spec||!/^[A-Za-z0-9.*~^<>=| +_-]+$/.test(spec))throw new Error("UNSUPPORTED_DEPENDENCY");};
+ specs(manifest);
  for(const [name,item] of Object.entries(lock.packages)){
+  specs(item);
   if(item.link||name.includes("..")||name.startsWith("/")||name.includes("\\"))throw new Error("UNSUPPORTED_DEPENDENCY");
   if(item.resolved){let url;try{url=new URL(item.resolved);}catch{throw new Error("UNSUPPORTED_DEPENDENCY");}
    if(url.protocol!=="https:"||url.hostname!=="registry.npmjs.org"||url.port||url.username||url.password||url.search||url.hash||!/^sha(?:256|384|512)-/.test(item.integrity||""))throw new Error("UNSUPPORTED_DEPENDENCY");}

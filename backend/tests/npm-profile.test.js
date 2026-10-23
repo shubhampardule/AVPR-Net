@@ -7,6 +7,9 @@ test("workspace links and unlocked packages are refused",()=>{
  expect(()=>validateManifest(manifest,{...lock,packages:{a:{link:true}}})).toThrow();
  expect(()=>validateManifest(manifest,{...lock,lockfileVersion:1})).toThrow();
 });
+test.each(["file:../package","github:someone/repo","https://evil.example/package.tgz","someone/repo"])("manifest dependency specs cannot trigger non-registry resolution: %s",spec=>{
+ expect(()=>validateManifest({...manifest,dependencies:{example:spec}},lock)).toThrow();
+});
 test("only dependency preparation has network access and writable metadata",()=>{
  const base=["avpr-test-"+"a".repeat(24),path.resolve("source"),path.resolve("deps"),"backend"];
  const install=args(...base,true),tests=args(...base,false);
