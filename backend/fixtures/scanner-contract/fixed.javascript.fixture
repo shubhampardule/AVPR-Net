@@ -1,6 +1,10 @@
 const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
+const decoder = new TextDecoder();
+const text = decoder.decode(new Uint8Array());
+const unrelatedCodec = { decode: value => value };
+unrelatedCodec.decode(text);
 
 function fixed(req, db, token, html, done) {
   const rows = db.query("SELECT * FROM accounts WHERE id = ?", [req.query.id]);

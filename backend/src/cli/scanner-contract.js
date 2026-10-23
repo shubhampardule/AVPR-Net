@@ -16,6 +16,7 @@ const expectedSemgrep = new Set([
   "unsafe.js:securepatch.js.sql-concatenation",
   "unsafe.js:securepatch.js.disabled-tls",
   "unsafe.js:securepatch.js.jwt-unverified",
+  "jwt.js:securepatch.js.jwt-unverified",
   "unsafe.py:securepatch.python.pickle",
   "unsafe.py:securepatch.python.dynamic-eval",
   "unsafe.py:securepatch.python.shell",
@@ -37,6 +38,7 @@ async function main() {
     await Promise.all([
       fs.copyFile(path.join(fixtureRoot, "unsafe.javascript.fixture"), path.join(workspace, "unsafe.js")),
       fs.copyFile(path.join(fixtureRoot, "fixed.javascript.fixture"), path.join(workspace, "fixed.js")),
+      fs.copyFile(path.join(fixtureRoot, "jwt.javascript.fixture"), path.join(workspace, "jwt.js")),
       fs.copyFile(path.join(fixtureRoot, "unsafe.python.fixture"), path.join(workspace, "unsafe.py")),
       fs.copyFile(path.join(fixtureRoot, "fixed.python.fixture"), path.join(workspace, "fixed.py")),
     ]);
@@ -58,6 +60,8 @@ async function main() {
     }
     assert.deepEqual(missedRules, [], `Semgrep missed baseline cases: ${missedRules.join(", ")}`);
     assert.deepEqual(unexpectedSemgrep, [], `Semgrep produced findings outside baseline cases: ${unexpectedSemgrep.join(", ")}`);
+    assert.equal(semgrep.filter(item => path.basename(item.path) === "jwt.js").length, 7,
+      "JWT decoding must be detected through CommonJS and ES module imports, including aliases");
     assert.ok(NormalizerService.normalize("semgrep", semgrep, workspace).some((finding) => finding.filePath === "unsafe.js"),
       "Semgrep paths must normalize to workspace-relative repository paths");
 

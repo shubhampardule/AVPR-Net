@@ -262,3 +262,24 @@ A dependency-free Node test profile for fresh GitHub-hosted VMs and its CI isola
 contract are prepared but not yet hosted-validated or connected to customer jobs.
 Local Docker's engine is unavailable; unit checks of the command policy do not
 substitute for that hosted contract. Customer test execution remains disabled.
+
+## Authorized submission deployment and Edge checks
+
+On explicit push authorization, 7e6d6e0 deployed successfully with MongoDB connected.
+Edge's existing GitHub session completed production OAuth, loaded both authorized
+repositories, browsed the real AVPR-Net source tree and completed a pinned-commit
+scan with Semgrep, Bandit and credential checks. This is live account/scan evidence,
+not a claim that every external flow is accepted.
+
+GitHub's first 90-journey browser run exposed a test-fixture race: the simulated
+refresh failure could be consumed by the new workspace's unfinished initial load.
+4382243 waits for the enabled refresh control before injecting the failure. Ten
+local repeats and the full GitHub run (all 90 browser journeys) passed. All three
+CI jobs passed, including the hosted runner isolation/cleanup contract. That
+contract success does not connect customer project-test execution, which stays off.
+
+The live scan also exposed an overly broad JWT rule matching TextDecoder.decode.
+The rule now requires jsonwebtoken imports/calls. Real local Semgrep and Bandit
+contract checks passed: all 13 expected file/rule pairs, all seven JWT import/call
+variants, and no alerts for TextDecoder or an unrelated decode method. Historical
+scan records are retained; a fresh deployment/scan is needed to evaluate this rule.

@@ -1,0 +1,16 @@
+const claimsReader = require("jsonwebtoken");
+let alternateReader = require("jsonwebtoken");
+var legacyReader = require("jsonwebtoken");
+import importedReader from "jsonwebtoken";
+import * as namespaceReader from "jsonwebtoken";
+import { decode as readClaims } from "jsonwebtoken";
+
+function inspect(token) {
+  claimsReader.decode(token);
+  alternateReader.decode(token);
+  legacyReader.decode(token);
+  importedReader.decode(token);
+  namespaceReader.decode(token);
+  readClaims(token);
+  require("jsonwebtoken").decode(token);
+}

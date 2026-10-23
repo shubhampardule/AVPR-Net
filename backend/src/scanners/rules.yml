@@ -55,7 +55,31 @@ rules:
     message: Decoding a JWT does not verify its signature or claims.
     severity: WARNING
     metadata: {cwe: ["CWE-347"], baseline: "securepatch-v1"}
-    pattern: $JWT.decode(...)
+    pattern-either:
+      - pattern: require("jsonwebtoken").decode(...)
+      - patterns:
+          - pattern: $JWT.decode(...)
+          - pattern-either:
+              - pattern-inside: |
+                  const $JWT = require("jsonwebtoken");
+                  ...
+              - pattern-inside: |
+                  let $JWT = require("jsonwebtoken");
+                  ...
+              - pattern-inside: |
+                  var $JWT = require("jsonwebtoken");
+                  ...
+              - pattern-inside: |
+                  import $JWT from "jsonwebtoken";
+                  ...
+              - pattern-inside: |
+                  import * as $JWT from "jsonwebtoken";
+                  ...
+      - patterns:
+          - pattern: $DECODE(...)
+          - pattern-inside: |
+              import { decode as $DECODE } from "jsonwebtoken";
+              ...
   - id: securepatch.python.dynamic-eval
     languages: [python]
     message: Avoid evaluating source supplied as data.
