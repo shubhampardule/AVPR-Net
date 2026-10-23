@@ -18,6 +18,16 @@ function setup(language = "javascript", overrides = {}) {
   return { provider, rag, validator, service: new AssistantService({ provider, rag, validator, ...overrides }) };
 }
 
+test("runtime diagnostics name the failed stage without logging customer or exception text", async () => {
+  const logger = { warn: jest.fn() };
+  const { service, validator } = setup("javascript", { logger });
+  validator.mockRejectedValue(new TypeError("private source and secret token"));
+  const result = await service.generateCode({ language: "javascript", mode: "generate", request: "Validate input" });
+  expect(result.status).toBe("unavailable");
+  expect(JSON.parse(logger.warn.mock.calls[0][0])).toEqual({ service: "assistant", operation: "code", stage: "syntax_validation", category: "TypeError" });
+  expect(logger.warn.mock.calls[0][0]).not.toMatch(/private|secret|Validate input/);
+});
+
 test.each(Object.keys(snippets))("shared code service supports %s without executing output", async (language) => {
   const { service, validator } = setup(language);
   const result = await service.generateCode({ language, mode: "generate", request: "Validate defensive input" });

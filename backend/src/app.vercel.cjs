@@ -841,11 +841,12 @@ var require_assistant_service = __commonJS({
       };
     }
     var AssistantService = class {
-      constructor({ provider, rag, validator = validateCode, env: env2 = process.env }) {
+      constructor({ provider, rag, validator = validateCode, env: env2 = process.env, logger = null }) {
         this.provider = provider;
         this.rag = rag;
         this.validator = validator;
         this.env = env2;
+        this.logger = logger;
       }
       languages() {
         return (this.env.AI_LANGUAGES || ALL_LANGUAGES.join(",")).split(",").map((s) => s.trim()).filter((s, i, all) => ALL_LANGUAGES.includes(s) && all.indexOf(s) === i);
@@ -858,11 +859,13 @@ var require_assistant_service = __commonJS({
         const clean = sanitize(input);
         const targetPath = input.targetPath || "source";
         let retrieval;
+        let stage = "retrieval";
         try {
           retrieval = await this.rag.retrieve(
             `${clean.language} secure coding guidance ${clean.request}`.slice(0, 1500),
             { minScore: 0.15 }
           );
+          stage = "provider";
           const response = await this.provider.chat([
             { role: "system", content: SYSTEM_POLICY },
             { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
@@ -887,8 +890,10 @@ ${JSON.stringify({
               retrieved_context: retrieval.sources
             })}` }
           ], { json: true });
+          stage = "structured_output";
           const proposal = parseObject(response.text, CODE_FIELDS);
           if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16e3)) {
+            stage = "diff_creation";
             proposal.code = require("diff").createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
             proposal.format = "diff";
           }
@@ -912,7 +917,9 @@ ${JSON.stringify({
               throw invalid();
             }
           }
+          stage = "citations";
           const sources = resolveSources(proposal.sources, retrieval.sources);
+          stage = "syntax_validation";
           const validation = await this.validator(input.language, proposal.code, proposal.format);
           return {
             status: "complete",
@@ -933,6 +940,12 @@ ${JSON.stringify({
             ]
           };
         } catch (error) {
+          this.logger?.warn(JSON.stringify({
+            service: "assistant",
+            operation: "code",
+            stage,
+            category: ["MODULE_NOT_FOUND", "ERR_REQUIRE_ESM"].includes(error.code) ? error.code : ["TypeError", "ReferenceError", "RangeError"].includes(error.name) ? error.name : /^(?:NVIDIA_|RAG_|AI_)[A-Z_]+$/.test(error.code || "") ? error.code : "UNEXPECTED"
+          }));
           if (retryInvalid && error.code === "AI_INVALID_OUTPUT") return this.generateCode(input, false);
           return {
             status: "unavailable",
@@ -3366,7 +3379,7 @@ var require_assistant_routes = __commonJS({
       const { demo = false } = options;
       const provider = options.provider || new NvidiaService({ logger: require_logger() });
       const rag = options.rag || new RagService({ provider });
-      const service = options.service || new AssistantService({ provider, rag });
+      const service = options.service || new AssistantService({ provider, rag, logger: require_logger() });
       const findOrganization = options.findOrganization || (async (organizationId) => require_Organization().findById(organizationId).select("hostedAiEnabled").lean());
       const router = express2.Router({ mergeParams: true });
       const origins = /* @__PURE__ */ new Set(["http://localhost:5174", "http://127.0.0.1:5174"]);

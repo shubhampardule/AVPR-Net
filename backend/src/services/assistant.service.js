@@ -59,8 +59,9 @@ function findingAdapter(finding) {
 }
 
 class AssistantService {
-  constructor({ provider, rag, validator = validateCode, env = process.env }) {
+  constructor({ provider, rag, validator = validateCode, env = process.env, logger = null }) {
     this.provider = provider; this.rag = rag; this.validator = validator; this.env = env;
+    this.logger = logger;
   }
 
   languages() {
@@ -82,9 +83,11 @@ class AssistantService {
     const clean = sanitize(input);
     const targetPath = input.targetPath || "source";
     let retrieval;
+    let stage = "retrieval";
     try {
       retrieval = await this.rag.retrieve(`${clean.language} secure coding guidance ${clean.request}`.slice(0, 1500),
         { minScore: 0.15 });
+      stage = "provider";
       const response = await this.provider.chat([
         { role: "system", content: SYSTEM_POLICY },
         { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
@@ -105,8 +108,10 @@ dependencies. ${retryInvalid ? "" : "A previous response failed validation. Chec
 UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
             retrieval_status: retrieval.status, retrieved_context: retrieval.sources })}` },
       ], { json: true });
+      stage = "structured_output";
       const proposal = parseObject(response.text, CODE_FIELDS);
       if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16000)) {
+        stage = "diff_creation";
         proposal.code = require("diff").createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
         proposal.format = "diff";
       }
@@ -134,7 +139,9 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
           if (changed === false || changed === clean.originalCode || changed.length > 16000) throw invalid();
         } catch { throw invalid(); }
       }
+      stage = "citations";
       const sources = resolveSources(proposal.sources, retrieval.sources);
+      stage = "syntax_validation";
       const validation = await this.validator(input.language, proposal.code, proposal.format);
       return { status: "complete", advisory: true, language: input.language, mode: input.mode,
         proposal: { ...proposal, sources }, validation, requestId: response.requestId,
@@ -144,6 +151,11 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
           "Generated code and tests require independent review; no changes were applied.",
           ...(!retrieval.sources.length ? ["Retrieved context is insufficient; proposal is not source-grounded."] : [])] };
     } catch (error) {
+      // Fixed categories only: exception messages may contain source code or secrets.
+      this.logger?.warn(JSON.stringify({ service: "assistant", operation: "code", stage,
+        category: ["MODULE_NOT_FOUND", "ERR_REQUIRE_ESM"].includes(error.code) ? error.code
+          : ["TypeError", "ReferenceError", "RangeError"].includes(error.name) ? error.name
+          : /^(?:NVIDIA_|RAG_|AI_)[A-Z_]+$/.test(error.code || "") ? error.code : "UNEXPECTED" }));
       // A hosted model may occasionally violate the output contract. Retry
       // once with the same bounded request; never relax schema/citation checks.
       if (retryInvalid && error.code === "AI_INVALID_OUTPUT") return this.generateCode(input, false);

@@ -7,7 +7,7 @@ function createAssistantRouter(options = {}) {
   const { demo = false } = options;
   const provider = options.provider || new NvidiaService({ logger: require("../config/logger") });
   const rag = options.rag || new RagService({ provider });
-  const service = options.service || new AssistantService({ provider, rag });
+  const service = options.service || new AssistantService({ provider, rag, logger: require("../config/logger") });
   const findOrganization = options.findOrganization || (async (organizationId) =>
     require("../models/Organization").findById(organizationId).select("hostedAiEnabled").lean());
   const router = express.Router({ mergeParams: true });
