@@ -53,6 +53,12 @@
     "standardwebhooks": "1.1.1",
     "winston": "^3.19.0"
   },
+  "overrides": {
+    "body-parser": "^2.4.0",
+    "@vercel/cli-config": {
+      "zod": "^4.6.6"
+    }
+  },
   "devDependencies": {
     "esbuild": "^0.28.2",
     "jest": "^30.4.2",

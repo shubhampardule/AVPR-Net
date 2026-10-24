@@ -5,6 +5,7 @@ import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { BrandLockup } from "../components/ui/BrandLogo";
 import PatchRescanPanel from "../components/ui/PatchRescanPanel";
 import ProjectTestsPanel from "../components/ui/ProjectTestsPanel";
+import PatchComparison from "../components/ui/PatchComparison";
 
 const box = "rounded-xl border border-text-primary/10 bg-bg-secondary p-5 shadow-card sm:p-6";
 const field = "w-full rounded-md border border-text-primary/15 bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-security focus:ring-1 focus:ring-accent-security/40";
@@ -66,7 +67,7 @@ export default function Assistant({ demo = false }) {
   const organizationId = context?.selectedOrg?._id || context?.selectedOrg?.id;
   const canCreatePullRequest = ["owner", "admin"].includes(context?.selectedOrg?.role);
   const base = demo ? `${API_BASE_URL}/ai/demo` : organizationId ? `${API_BASE_URL}/organizations/${organizationId}/ai` : null;
-  const [tab, setTab] = useState("investigate");
+  const [tab, setTab] = useState(params.get("mode") === "review" ? "code" : "investigate");
   const [health, setHealth] = useState(null);
   const [policy, setPolicy] = useState(null);
   const [consentFor, setConsentFor] = useState(null);
@@ -82,6 +83,7 @@ export default function Assistant({ demo = false }) {
   const [originalCode, setOriginalCode] = useState("");
   const [query, setQuery] = useState("Repeated SSH authentication failures");
   const [result, setResult] = useState(null);
+  const [proposalSource, setProposalSource] = useState(null);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [loadBusy, setLoadBusy] = useState(false);
@@ -89,6 +91,9 @@ export default function Assistant({ demo = false }) {
   const [previewRevision, setPreviewRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [draftContext, setDraftContext] = useState(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState("");
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [patchCheck, setPatchCheck] = useState(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [pullRequest, setPullRequest] = useState(null);
@@ -97,6 +102,10 @@ export default function Assistant({ demo = false }) {
   const [verificationRevision, setVerificationRevision] = useState(0);
   const [verifiedRescanId, setVerifiedRescanId] = useState(null);
   const [verifiedTestId, setVerifiedTestId] = useState(null);
+  useEffect(() => {
+    setFindingId(params.get("findingId") || "");
+    if (params.get("mode") === "review") setTab("code");
+  }, [params]);
   useEffect(() => { setVerifiedTestId(null); }, [verifiedRescanId,result?.proposal?.code,draftContext?.scanId,draftContext?.findingId]);
   useEffect(() => { setVerifiedRescanId(null); }, [result?.proposal?.code, draftContext?.scanId, draftContext?.findingId]);
   const activeBase = useRef(base);
@@ -129,6 +138,8 @@ export default function Assistant({ demo = false }) {
   const findingIdFormatInvalid = !demo && Boolean(findingId.trim()) && !/^[a-f0-9]{24}$/i.test(findingId.trim());
   const findingPreviewPending = !demo && tab === "investigate" && Boolean(findingId.trim()) && !findingIdFormatInvalid && !findingPreview;
   const hostedAiBlocked = !demo && policy?.hostedAiEnabled !== true;
+  const findingSourceBlocked = !demo && tab === "code" && Boolean(findingId.trim()) &&
+    (sourceLoading || Boolean(sourceError) || draftContext?.findingId !== findingId.trim());
   const providerStatus = health?.status
     ? providerStatuses[health.status] || health.status.replaceAll("_", " ")
     : "Checking";
@@ -150,7 +161,7 @@ export default function Assistant({ demo = false }) {
     setBusy(false); setPatchCheck(null); setPullRequest(null); setAcknowledged(false); setConsentFor(null);
     setLoadBusy(false); setFindingPreview(null); setFindingPreviewError(""); setDraftContext(null);
     setVerificationHistory([]); setVerificationError("");
-    setEventText(""); setRequest("");
+    setEventText(""); setRequest(""); setOriginalCode(""); setSourceError("");
   }, [base]);
 
   useEffect(() => {
@@ -163,20 +174,28 @@ export default function Assistant({ demo = false }) {
       if (!live) return;
       setHealth(h); setPolicy(p); setKnowledge(k); setFixtures(f); setLoadError("");
       if (!eventTextEdited.current) setEventText(JSON.stringify(f.events.suspicious, null, 2));
-      if (!requestEdited.current) setRequest(f.code.javascript.request);
-      if (!demo && params.get("mode") === "review" && params.get("findingId")) {
-        const source = await api(`finding/${params.get("findingId")}`, undefined, controller.signal);
-        if (!live) return;
-        setDraftContext(source); setTab("code"); setLanguage(source.language); setMode("review");
-        setOriginalCode(source.originalCode);
-        if (!requestEdited.current) setRequest(source.request);
-      }
+      if (!requestEdited.current && (demo || !findingId.trim())) setRequest(f.code.javascript.request);
     }).catch((e) => { if (live) {
       const message = demo ? `${e.message}. Start the backend with npm run demo.` : e.message;
       setLoadError(message); setError("");
     } }).finally(() => { if (live) setLoadBusy(false); });
     return () => { live = false; controller.abort(); pendingRequest.current?.abort(); };
   }, [base, loadRevision]);
+
+  useEffect(() => {
+    if (demo || !base || tab !== "code" || !/^[a-f0-9]{24}$/i.test(findingId.trim())) return;
+    const controller = new AbortController();
+    let live = true;
+    setSourceLoading(true); setSourceError(""); setDraftContext(null);
+    setOriginalCode(""); setRequest(""); setMode("review"); setResult(null); setConsentFor(null);
+    api(`finding/${findingId.trim()}`, undefined, controller.signal).then(source => {
+      if (!live) return;
+      setDraftContext(source); setLanguage(source.language); setOriginalCode(source.originalCode);
+      setRequest(source.request); requestEdited.current = true;
+    }).catch(e => { if (live && e.name !== "AbortError") setSourceError(e.message); })
+      .finally(() => { if (live) setSourceLoading(false); });
+    return () => { live = false; controller.abort(); };
+  }, [base, demo, tab, findingId, sourceRevision]);
 
   useEffect(() => {
     if (demo || !draftContext?.scanId || !draftContext?.findingId) return;
@@ -228,10 +247,13 @@ export default function Assistant({ demo = false }) {
 
   async function run(event) {
     event.preventDefault(); setError("");
+    if (findingSourceBlocked) { setError("Load the scanned source before drafting a fix."); return; }
     if (consentFor !== requestFingerprint) { setError("Review the data preview and confirm sharing it for this request."); return; }
-    setConsentFor(null);
     setBusy(true); setResult(null); setPatchCheck(null); setPullRequest(null); setAcknowledged(false);
     const startedFor = base;
+    const submittedSource = tab === "code" && mode === "review" ? {
+      originalCode: sanitizePreview(originalCode), filename: draftContext?.filePath || "source", commitSha: draftContext?.commitSha,
+    } : null;
     const controller = new AbortController();
     pendingRequest.current = controller;
     try {
@@ -244,6 +266,7 @@ export default function Assistant({ demo = false }) {
         setHealth(current => current ? { ...current, reachable: true, status: "configured" } : current);
       }
       setResult(response);
+      setProposalSource(submittedSource);
       if (response.status === "unavailable") setError(response.error?.message || "AI assistance unavailable; original evidence is retained.");
     } catch (e) { if (activeBase.current === startedFor && e.name !== "AbortError") setError(e instanceof SyntaxError ? "Event must contain valid JSON." : e.message); }
     finally { if (activeBase.current === startedFor) setBusy(false); }
@@ -327,7 +350,7 @@ export default function Assistant({ demo = false }) {
       </div>}
       {!demo && !organizationId && <p className="text-sm text-severity-medium">Select an organization to use the assistant.</p>}
       {!demo && organizationId && policy && hostedAiBlocked && <p className="rounded-xl border border-severity-medium/20 bg-severity-medium/5 p-4 text-sm text-severity-medium">Hosted AI is disabled for this organization. An owner or admin can enable it in <Link className="underline" to="/settings">Workspace settings</Link>.</p>}
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      <div className="grid grid-cols-1 items-start gap-5">
         <form onSubmit={run} className={`${box} space-y-4`}>
           {tab === "investigate" && <>
             <h2 className="font-semibold">Structured evidence</h2>
@@ -350,16 +373,22 @@ export default function Assistant({ demo = false }) {
           {tab === "code" && <>
             <h2 className="font-semibold">Defensive code proposal</h2>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-text-muted">Language<select className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
+              <label className="text-xs text-text-muted">Language<select disabled={!demo && Boolean(findingId.trim())} className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l] || l.toUpperCase()}</option>)}</select></label>
-              <label className="text-xs text-text-muted">Mode<select className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <label className="text-xs text-text-muted">Mode<select disabled={!demo && Boolean(findingId.trim())} className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="generate">Generate</option><option value="review">Review as diff</option></select></label>
             </div>
-            <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-accent-security underline underline-offset-2">Load review example</button>
+            {(!findingId.trim() || demo) && <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-accent-security underline underline-offset-2">Load review example</button>}
+            {sourceLoading && <p role="status" className="text-xs text-text-muted">Loading the affected file from the scanned commit…</p>}
+            {sourceError && <div role="alert" className="text-xs text-severity-critical">Could not load the affected source: {sourceError}
+              <button type="button" className="ml-2 underline" onClick={() => setSourceRevision(value => value + 1)}>Retry source</button></div>}
+            {draftContext && <p className="break-all text-xs text-text-secondary">Source loaded automatically: {draftContext.filePath} · commit {draftContext.commitSha.slice(0, 7)}</p>}
+            {!demo && !findingId.trim() && <p className="text-xs text-text-secondary">To fill this from a scan, <Link to="/findings" className="text-accent-security underline">open a finding and choose Draft a fix</Link>. You can also paste code for a manual review.</p>}
             <label className="block text-xs text-text-muted">Request<textarea aria-label="Code request" className={`${field} mt-2`} rows={8}
               value={request} onChange={(e) => { requestEdited.current = true; setRequest(e.target.value); }} required maxLength={3000} /></label>
             {mode === "review" && <label className="block text-xs text-text-muted">Source for review<textarea aria-label="Source for review"
-              className={`${field} mt-2 font-mono`} rows={7} value={originalCode} onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
+              className={`${field} mt-2 font-mono`} rows={7} value={originalCode} disabled={findingSourceBlocked} placeholder="The affected file loads here when you open a finding. For a manual review, paste the code to check."
+              onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
           </>}
           {tab === "sources" && <>
             <h2 className="font-semibold">Inspect shared knowledge</h2>
@@ -374,14 +403,14 @@ export default function Assistant({ demo = false }) {
             <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
             {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-text-muted">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{embeddingQuery}</pre></div>}
             <label className="flex items-start gap-2 text-xs leading-5 text-text-primary"><input type="checkbox" className="mt-0.5 accent-accent-security" checked={consentFor === requestFingerprint}
-              disabled={busy || !health || hostedAiBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
+              disabled={busy || !health || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
               onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
               <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
           </details>
-          <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+          <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
           <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged. Project tests require separate approval after static checks pass." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
-        <section className={`${box} min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
+        <section className={`${box} min-w-0 min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
           {!result && <div className="flex min-h-[18rem] flex-col justify-center border-l-2 border-text-primary/10 pl-5"><p className="text-base font-semibold text-text-primary">Your review will appear here.</p>
             <p className="mt-2 max-w-sm text-sm leading-6 text-text-muted">Submit evidence or a request to see its sources, limitations, and suggested next steps.</p></div>}
           {result?.original && <details open className="space-y-3"><summary className="font-semibold cursor-pointer">Original evidence · {result.kind}</summary>
@@ -396,7 +425,9 @@ export default function Assistant({ demo = false }) {
             <p className="text-sm leading-6 text-text-primary">{result.proposal.explanation}</p>
             <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
             {result.validation?.message && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
-            <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>
+            {result.proposal.format === "diff" ? <PatchComparison originalCode={proposalSource?.originalCode}
+              filename={proposalSource?.filename || "source"} commitSha={proposalSource?.commitSha} patch={result.proposal.code} />
+              : <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>}
             <div className="flex gap-4"><button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
               <button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={() => navigator.clipboard.writeText(result.proposal.code).catch(() => setError("Clipboard unavailable. Download the proposal instead."))}>Copy proposal</button></div>
             {draftContext && result.proposal.format === "diff" && <div className="space-y-3 rounded-lg border border-text-primary/15 p-4 text-sm">

@@ -3670,9 +3670,12 @@ var require_github_service = __commonJS({
     var { getInstallationOctokit } = require_github();
     var { bad, repository } = require_input();
     var cache = /* @__PURE__ */ new Map();
-    async function getRepositories(installationId) {
+    async function getRepositories(installationId, { forceRefresh = false } = {}) {
       const key = String(installationId), cached = cache.get(key);
-      if (cached?.until > Date.now()) return cached.data;
+      if (!forceRefresh && cached?.until > Date.now()) return cached.data;
+      const request = { until: 0 };
+      if (cache.size > 100) cache.clear();
+      cache.set(key, request);
       const client = await getInstallationOctokit(installationId);
       const records = await client.paginate("GET /installation/repositories", { per_page: 100 });
       const data = records.map((repo) => ({
@@ -3683,8 +3686,7 @@ var require_github_service = __commonJS({
         private: repo.private,
         defaultBranch: repo.default_branch
       }));
-      if (cache.size > 100) cache.clear();
-      cache.set(key, { until: Date.now() + 3e4, data });
+      if (cache.get(key) === request) cache.set(key, { until: Date.now() + 3e4, data });
       return data;
     }
     async function resolveCommit(installationId, owner, repo, ref) {
@@ -6078,7 +6080,33 @@ var require_githubAuth_controller = __commonJS({
       const age = Date.now() - access?.checkedAt;
       return { verified: Boolean(req.user?.id && access?.userId === req.user.id && Number.isFinite(age) && age >= 0 && age < 60 * 60 * 1e3), username: req.user?.githubUsername || null };
     }
-    module2.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization };
+    async function refreshPersonalInstallation(req) {
+      const existing = authorizedInstallations(req);
+      if (!githubAuthorization(req).verified || !req.user.githubId || !req.user.githubUsername) return existing;
+      let installation;
+      try {
+        ({ data: installation } = await require_github().githubApp.octokit.request(
+          "GET /users/{username}/installation",
+          { username: req.user.githubUsername }
+        ));
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+      if (installation && (installation.account?.type !== "User" || String(installation.account?.id) !== String(req.user.githubId))) {
+        throw Object.assign(new Error("GitHub installation owner could not be verified."), { statusCode: 502 });
+      }
+      const installations = existing.filter((item) => item.accountType !== "User");
+      if (installation && !installation.suspended_at) installations.push({
+        id: installation.id,
+        account: installation.account.login,
+        accountType: "User",
+        htmlUrl: installation.html_url
+      });
+      req.session.githubAccess.installations = installations;
+      await saveSession(req);
+      return installations;
+    }
+    module2.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization, refreshPersonalInstallation };
   }
 });
 
@@ -7663,7 +7691,7 @@ var require_github_routes = __commonJS({
     var Organization = require_Organization();
     var { optionalCommitSha } = require_input();
     var router = express2.Router();
-    var { authorizedInstallations, finishGitHubLogin, githubAuthorization } = require_githubAuth_controller();
+    var { refreshPersonalInstallation, finishGitHubLogin, githubAuthorization } = require_githubAuth_controller();
     router.get("/callback", finishGitHubLogin);
     router.get("/test", requireAuth, async (req, res, next) => {
       try {
@@ -7685,7 +7713,7 @@ var require_github_routes = __commonJS({
       try {
         return res.status(200).json({
           success: true,
-          data: authorizedInstallations(req),
+          data: await refreshPersonalInstallation(req),
           authorization: githubAuthorization(req),
           message: "GitHub App installations fetched successfully"
         });
@@ -7724,7 +7752,8 @@ var require_github_routes = __commonJS({
               }
             });
           }
-          const repositories = await getRepositories(organization.githubInstallationId);
+          const repositories = await getRepositories(organization.githubInstallationId, { forceRefresh: req.query.refresh === "true" });
+          res.set("Cache-Control", "no-store");
           return res.status(200).json({
             success: true,
             data: {

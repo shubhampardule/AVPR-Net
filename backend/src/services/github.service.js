@@ -1,15 +1,18 @@
 const { getInstallationOctokit } = require("../config/github");
 const { bad, repository } = require("../utils/input");
 const cache = new Map();
-async function getRepositories(installationId) {
+async function getRepositories(installationId, { forceRefresh = false } = {}) {
   const key = String(installationId), cached = cache.get(key);
-  if (cached?.until > Date.now()) return cached.data;
+  if (!forceRefresh && cached?.until > Date.now()) return cached.data;
+  const request = { until: 0 };
+  if (cache.size > 100) cache.clear();
+  cache.set(key, request);
   const client = await getInstallationOctokit(installationId);
   const records = await client.paginate("GET /installation/repositories", { per_page: 100 });
   const data = records.map(repo => ({ id: repo.id, name: repo.name, fullName: repo.full_name,
     owner: repo.owner.login, private: repo.private, defaultBranch: repo.default_branch }));
-  if (cache.size > 100) cache.clear();
-  cache.set(key, { until: Date.now() + 30000, data });
+  // A slower request must not replace a newer access refresh.
+  if (cache.get(key) === request) cache.set(key, { until: Date.now() + 30000, data });
   return data;
 }
 async function resolveCommit(installationId, owner, repo, ref) {

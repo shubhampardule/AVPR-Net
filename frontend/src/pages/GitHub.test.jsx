@@ -21,6 +21,41 @@ const status = { connected: true, installation: { account: "shubhampardule", acc
 const repositories = [{ id: 1, name: "AVPR", fullName: "shubhampardule/AVPR", owner: "shubhampardule", defaultBranch: "main", private: true }];
 const response = data => ({ ok: true, json: async () => ({ data }) });
 
+test("returning from GitHub automatically loads newly authorized repos without signing out", async () => {
+  let updated = false;
+  const fetchMock = vi.fn(url => Promise.resolve(String(url).endsWith("/status") ? response(status)
+    : response({ repositories: updated ? [...repositories, { ...repositories[0], id: 2, name: "new-repo", fullName: "shubhampardule/new-repo" }] : repositories })));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<Harness />);
+  await screen.findByRole("button", { name: /AVPR shubhampardule\/AVPR mainPrivate/i });
+  updated = true;
+  window.dispatchEvent(new Event("focus"));
+  expect(await screen.findByRole("button", { name: /new-repo shubhampardule\/new-repo/i })).toBeTruthy();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/repositories?refresh=true"))).toBe(true);
+  const count = fetchMock.mock.calls.length;
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(fetchMock).toHaveBeenCalledTimes(count);
+});
+
+test("an unmounted page cannot replace the new page’s repository list with a late response", async () => {
+  let completeInitial;
+  let calls = 0;
+  vi.stubGlobal("fetch", vi.fn(url => {
+    if (String(url).endsWith("/status")) return Promise.resolve(response(status));
+    if (++calls === 1) return new Promise(resolve => { completeInitial = () => resolve(response({ repositories })); });
+    return Promise.resolve(response({ repositories: [{ ...repositories[0], id: 2, name: "latest-repo", fullName: "shubhampardule/latest-repo" }] }));
+  }));
+  render(<Harness />);
+  await screen.findByText("shubhampardule", { exact: true });
+  // Refresh is disabled during initial loading. Remounting/unmounting must abort
+  // the pending request rather than leave a late state update behind.
+  cleanup();
+  render(<Harness />);
+  await screen.findByRole("button", { name: /latest-repo shubhampardule\/latest-repo/i });
+  completeInitial();
+  await waitFor(() => expect(screen.queryByRole("button", { name: /AVPR shubhampardule\/AVPR mainPrivate/i })).toBeNull());
+});
+
 test("shows the connected installation and refreshes repository access from the add dialog", async () => {
   const fetchMock = vi.fn(url => Promise.resolve(String(url).endsWith("/status") ? response(status) : response({ repositories })));
   vi.stubGlobal("fetch", fetchMock);
@@ -137,6 +172,7 @@ test("verified accounts without installations are guided to install the app", as
   expect(screen.getByRole("link",{name:"Install GitHub App"})).toBeTruthy();
   expect(screen.queryByRole("link",{name:"Sign in with GitHub"})).toBeNull();
   expect(screen.queryByRole("button",{name:"Connect installation"})).toBeNull();
+  expect(screen.getByRole("link", { name: "Refresh verified installations" }).getAttribute("href")).toMatch(/\/auth\/github\?returnTo=%2Fgithub$/);
 });
 test("expired or absent grants for a linked account offer verification instead of sign-in", async () => {
   disconnectedApi({verified:false,username:"developer"});

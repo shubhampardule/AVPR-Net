@@ -488,7 +488,7 @@ test("landing workflow is concise and playground tabs remain interactive", async
   await expect(page.getByText(/Run them in your trusted CI before merging/)).toBeVisible();
 });
 
-test("assistant rejects malformed finding IDs and consumes approval after one request", async ({ page }) => {
+test("assistant rejects malformed finding IDs and retains approval for unchanged evidence", async ({ page }) => {
   let analyses = 0;
   await page.route("**/api/v1/organizations/test-org/ai/analyze", async route => {
     analyses += 1;
@@ -507,6 +507,9 @@ test("assistant rejects malformed finding IDs and consumes approval after one re
   await consent.check();
   await submit.click();
   await expect(page.getByText("Synthetic evidence reviewed.")).toBeVisible();
+  await expect(consent).toBeChecked();
+  await expect(submit).toBeEnabled();
+  await page.getByLabel("Event JSON").fill('{"category":"changed","synthetic":true}');
   await expect(consent).not.toBeChecked();
   await expect(submit).toBeDisabled();
   expect(analyses).toBe(1);
@@ -538,7 +541,7 @@ test("assistant language selection and knowledge search submit the reviewed payl
   await expect(page.getByText("Checks the value before use.")).toBeVisible();
   expect(JSON.parse(submittedCode.postData()).language).toBe("typescript");
   expect(submittedCode.headers()["x-securepatch-ai-consent"]).toBe("1");
-  await expect(consent).not.toBeChecked();
+  await expect(consent).toBeChecked();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download proposal" }).click();
   expect((await download).suggestedFilename()).toBe("securepatch-proposal.txt");

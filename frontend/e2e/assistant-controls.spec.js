@@ -1,9 +1,11 @@
 import { test, expect } from "@playwright/test";
+import { createTwoFilesPatch } from "diff";
 
 const scanId = "scan-assistant-1";
 const findingId = "64b64c0f8bd4f4f86f39b123";
 const originalCode = "export function parsePort(value) { return parseInt(value, 10); }\n";
-const proposalCode = "export function parsePort(value) {\n  if (!/^\\d+$/.test(value)) throw new Error('invalid port');\n  return Number(value);\n}\n";
+const proposalCode = createTwoFilesPatch("a/src/ports.js", "b/src/ports.js", originalCode,
+  "export function parsePort(value) {\n  if (!/^\\d+$/.test(value)) throw new Error('invalid port');\n  return Number(value);\n}\n");
 
 function verificationFixture(action, syntaxStatus = "passed") {
   return { _id: `verification-${action}`, action, createdAt: "2026-10-22T09:00:00.000Z", repository: "example/project",
@@ -12,9 +14,10 @@ function verificationFixture(action, syntaxStatus = "passed") {
       { name: "allowed_tests", status: "unavailable" }, { name: "security_rescan", status: "unavailable" }] };
 }
 
-async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0, patchSyntaxStatus = "valid", verificationRecords = [], rescanOutcome = "target_alert_absent" } = {}) {
+async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0, sourceFailures = 0, patchSyntaxStatus = "valid", verificationRecords = [], rescanOutcome = "target_alert_absent" } = {}) {
   let healthFailureCount = 0;
   let previewFailureCount = 0;
+  let sourceFailureCount = 0;
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -60,6 +63,10 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     else if (path.endsWith(`/ai/preview/finding/${findingId}`)) data = {
       findingId, original: { title: "Unsafe port parsing", scanner: "semgrep", filePath: "src/ports.js", startLine: 4 },
     };
+    else if (path.endsWith(`/ai/finding/${findingId}`) && (typeof sourceFailures === "function" ? sourceFailures() : sourceFailureCount++ < sourceFailures)) {
+      await route.fulfill({ status: 503, json: { success: false, error: { message: "GitHub source temporarily unavailable." } } });
+      return;
+    }
     else if (path.endsWith(`/ai/finding/${findingId}`)) data = {
       scanId, findingId, filePath: "src/ports.js", commitSha: "a".repeat(40), language: "javascript", mode: "review",
       originalCode, request: "Review this port parser for unsafe input handling.",
@@ -166,7 +173,7 @@ test("assistant investigation fixtures, tabs, evidence details, consent and subm
   await consent.check();
   await analyze.click();
   await expect(page.getByText("Synthetic evidence reviewed.")).toBeVisible();
-  await expect(consent).not.toBeChecked();
+  await expect(consent).toBeChecked();
   expect(submittedBodies).toHaveLength(1);
   expect(submittedBodies[0].body.event.category).toBe("changed-after-approval");
   expect(submittedBodies[0].headers["x-securepatch-ai-consent"]).toBe("1");
@@ -182,6 +189,22 @@ test("assistant investigation fixtures, tabs, evidence details, consent and subm
   expect(pageErrors).toEqual([]);
 });
 
+test("assistant results sit below the form on desktop and mobile for every workflow", async ({ page }) => {
+  await mockAssistant(page);
+  await page.goto("/assistant");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const workflow of ["Investigate", "Code & review", "Knowledge"]) {
+      await page.getByRole("button", { name: workflow, exact: true }).click();
+      const form = await page.locator("form").boundingBox();
+      const result = await page.getByRole("region", { name: "Assistant result" }).boundingBox();
+      expect(result.y).toBeGreaterThanOrEqual(form.y + form.height);
+      expect(Math.abs(result.x - form.x)).toBeLessThan(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+  }
+});
+
 test("assistant rejects malformed JSON and shows a recoverable validation error", async ({ page }) => {
   let analyzeCount = 0;
   await mockAssistant(page, { onAnalyze: () => { analyzeCount += 1; } });
@@ -192,7 +215,13 @@ test("assistant rejects malformed JSON and shows a recoverable validation error"
   await page.getByRole("button", { name: "Analyze evidence" }).click();
   await expect(page.getByRole("alert")).toHaveText("Event must contain valid JSON.");
   expect(analyzeCount).toBe(0);
+  await expect(page.getByRole("checkbox", { name: /I approve sending the data shown above/ })).toBeChecked();
+  await page.getByLabel("Event JSON").fill('{"category":"authentication","synthetic":true}');
   await expect(page.getByRole("button", { name: "Analyze evidence" })).toBeDisabled();
+  await approve(page);
+  await page.getByRole("button", { name: "Analyze evidence" }).click();
+  await expect(page.getByText("Synthetic evidence reviewed.")).toBeVisible();
+  expect(analyzeCount).toBe(1);
 });
 
 test("assistant preserves event JSON entered before examples finish loading", async ({ page }) => {
@@ -279,7 +308,7 @@ test("assistant code controls submit the selected review, copy and download the 
     language: "python", mode: "review", request: "Reject non-decimal strings before parsing.",
     originalCode: "def parse_port(value):\n    return int(value)\n",
   });
-  await expect(consent).not.toBeChecked();
+  await expect(consent).toBeChecked();
 
   await page.getByRole("button", { name: "Copy proposal" }).click();
   await expect.poll(() => page.evaluate(() => window.__assistantClipboard)).toBe(proposalCode);
@@ -303,7 +332,10 @@ test("assistant knowledge search submits the approved query and source disclosur
   await expect(page.getByText("approved-security-guide.md:7–11")).toBeVisible();
   expect(JSON.parse(retrieveRequest.postData()).query).toBe("strict port validation");
   expect(retrieveRequest.headers()["x-securepatch-ai-consent"]).toBe("1");
+  await expect(consent).toBeChecked();
+  await page.getByLabel("Knowledge query").fill("a different query");
   await expect(consent).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Retrieve sources" })).toBeDisabled();
   await page.getByText(/approved-security-guide\.md:7–11/).click();
   await expect(page.getByText("Reject malformed values before parsing.")).toBeVisible();
 });
@@ -321,6 +353,20 @@ test("review deep link validates the proposed patch and creates an acknowledged 
   await page.getByRole("button", { name: "Draft proposal" }).click();
   await expect(page.getByText("Validates the value before parsing.")).toBeVisible();
   await expect(page.getByText(/Target: src\/ports\.js at aaaaaaa/)).toBeVisible();
+  const comparison = page.getByRole("region", { name: "Before and after code comparison" });
+  await expect(comparison.getByRole("heading", { name: "Before Scanned source" })).toBeVisible();
+  await expect(comparison.getByRole("heading", { name: "After Proposed source" })).toBeVisible();
+  await page.getByLabel("Source for review").fill("Edited after generation");
+  await expect(comparison).toContainText("return parseInt(value, 10)");
+  await comparison.getByRole("button", { name: "Unified diff" }).click();
+  await expect(comparison.locator("code")).toHaveText(proposalCode);
+  await comparison.getByRole("button", { name: "Side by side" }).click();
+  await comparison.screenshot({ path: "test-results/assistant-side-by-side-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(comparison.getByRole("button", { name: "Unified diff" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await comparison.screenshot({ path: "test-results/assistant-side-by-side-mobile.png" });
+  await page.setViewportSize({ width: 1280, height: 720 });
   const validate = page.getByRole("button", { name: "Check patch against scanned source" });
   await validate.click();
   await expect(page.getByText("Patch applies. Syntax: valid. Tests were not executed.")).toBeVisible();
@@ -350,6 +396,32 @@ test("scanner-rejected proposals offer feedback and require fresh model consent"
  await expect(page.getByRole("button",{name:"Create draft pull request"})).toHaveCount(0);
  await approve(page);await expect(page.getByRole("button",{name:"Draft proposal"})).toBeEnabled();
 });
+test("switching from a finding explanation auto-fills the scanned source and fix request", async ({ page }) => {
+  await mockAssistant(page, { fixturesDelayMs: 400 });
+  await page.goto(`/assistant?findingId=${findingId}`);
+  await page.getByRole("button", { name: "Code & review" }).click();
+  await expect(page.getByLabel("Source for review")).toHaveValue(originalCode);
+  await expect(page.getByLabel("Code request")).toHaveValue("Review this port parser for unsafe input handling.");
+  await expect(page.getByText(/Source loaded automatically: src\/ports.js/)).toBeVisible();
+  await expect(page.getByLabel("Language")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Load review example" })).toHaveCount(0);
+  await expect(page.getByLabel("Code request")).toHaveValue("Review this port parser for unsafe input handling.");
+});
+
+test("source loading failures block proposals and offer a working retry", async ({ page }) => {
+  let sourceUnavailable = true;
+  await mockAssistant(page, { sourceFailures: () => sourceUnavailable });
+  await page.goto(`/assistant?mode=review&findingId=${findingId}`);
+  await expect(page.getByText(/Could not load the affected source/)).toContainText("GitHub source temporarily unavailable.");
+  await expect(page.getByRole("button", { name: "Draft proposal" })).toBeDisabled();
+  sourceUnavailable = false;
+  await page.getByRole("button", { name: "Retry source" }).click();
+  await expect(page.getByLabel("Source for review")).toHaveValue(originalCode);
+  await expect(page.getByText(/Could not load the affected source/)).toHaveCount(0);
+  await approve(page);
+  await expect(page.getByRole("button", { name: "Draft proposal" })).toBeEnabled();
+});
+
 test("a syntax failure is recorded and blocks draft pull request creation", async ({ page }) => {
   await mockAssistant(page, { patchSyntaxStatus: "failed" });
   await page.goto(`/assistant?mode=review&findingId=${findingId}`);

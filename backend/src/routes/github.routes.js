@@ -13,7 +13,7 @@ const Organization = require("../models/Organization");
 const { optionalCommitSha } = require("../utils/input");
 
 const router = express.Router();
-const { authorizedInstallations, finishGitHubLogin, githubAuthorization } = require("../controllers/githubAuth.controller");
+const { refreshPersonalInstallation, finishGitHubLogin, githubAuthorization } = require("../controllers/githubAuth.controller");
 
 // Keep the registered GitHub App callback URL compatible with existing settings.
 router.get("/callback", finishGitHubLogin);
@@ -42,7 +42,7 @@ router.get("/installations", requireAuth, async (req, res, next) => {
     try {
         return res.status(200).json({
             success: true,
-            data: authorizedInstallations(req),
+            data: await refreshPersonalInstallation(req),
             authorization: githubAuthorization(req),
             message: "GitHub App installations fetched successfully",
         });
@@ -88,7 +88,8 @@ router.get(
                 });
             }
 
-            const repositories = await getRepositories(organization.githubInstallationId);
+            const repositories = await getRepositories(organization.githubInstallationId, { forceRefresh: req.query.refresh === "true" });
+            res.set("Cache-Control", "no-store");
 
             return res.status(200).json({
                 success: true,

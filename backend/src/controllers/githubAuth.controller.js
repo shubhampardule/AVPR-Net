@@ -117,4 +117,31 @@ function githubAuthorization(req) {
     Number.isFinite(age) && age >= 0 && age < 60 * 60 * 1000), username: req.user?.githubUsername || null };
 }
 
-module.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization };
+async function refreshPersonalInstallation(req) {
+  const existing = authorizedInstallations(req);
+  if (!githubAuthorization(req).verified || !req.user.githubId || !req.user.githubUsername) return existing;
+  // Discover a personal installation created after sign-in without retaining an
+  // OAuth token or enumerating installations belonging to other app users.
+  let installation;
+  try {
+    ({ data: installation } = await require("../config/github").githubApp.octokit.request(
+      "GET /users/{username}/installation", { username: req.user.githubUsername }
+    ));
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  if (installation && (installation.account?.type !== "User" ||
+      String(installation.account?.id) !== String(req.user.githubId))) {
+    throw Object.assign(new Error("GitHub installation owner could not be verified."), { statusCode: 502 });
+  }
+  const installations = existing.filter(item => item.accountType !== "User");
+  if (installation && !installation.suspended_at) installations.push({ id: installation.id,
+    account: installation.account.login, accountType: "User", htmlUrl: installation.html_url });
+  // Preserve checkedAt: refreshing repository metadata must not extend the
+  // original verification window or authorize new organization installations.
+  req.session.githubAccess.installations = installations;
+  await saveSession(req);
+  return installations;
+}
+
+module.exports = { startGitHubLogin, finishGitHubLogin, authorizedInstallations, githubAuthorization, refreshPersonalInstallation };

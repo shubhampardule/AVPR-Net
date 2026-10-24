@@ -13,6 +13,7 @@ const { connectGitHubInstallation } = (() => {
   return require("../src/controllers/github.controller");
 })();
 const { githubApp } = require("../src/config/github");
+const { refreshPersonalInstallation } = require("../src/controllers/githubAuth.controller");
 const originalFetch = global.fetch;
 const state = "secure-state";
 const buildRequest = () => ({
@@ -26,6 +27,41 @@ const user = () => ({ id: "user-1", status: "active", email: "verified@example.t
 
 beforeEach(() => { jest.clearAllMocks(); global.fetch = jest.fn(); });
 afterAll(() => { global.fetch = originalFetch; });
+
+test("discovers a personal installation added after login without extending identity verification", async () => {
+  const checkedAt = Date.now() - 10000;
+  const req = { user: { id: "user-1", githubId: "123", githubUsername: "developer" },
+    session: { githubAccess: { userId: "user-1", checkedAt, installations: [] }, save: jest.fn(done => done()) } };
+  githubApp.octokit.request.mockResolvedValue({ data: { id: 42, account: { id: 123, login: "developer", type: "User" }, html_url: "https://github.com/settings/installations/42" } });
+  expect(await refreshPersonalInstallation(req)).toEqual([{ id: 42, account: "developer", accountType: "User", htmlUrl: "https://github.com/settings/installations/42" }]);
+  expect(req.session.githubAccess.checkedAt).toBe(checkedAt);
+  expect(global.fetch).not.toHaveBeenCalled();
+});
+
+test("installation discovery does not grant access to a different account or an expired identity", async () => {
+  const req = { user: { id: "user-1", githubId: "123", githubUsername: "developer" },
+    session: { githubAccess: { userId: "user-1", checkedAt: Date.now(), installations: [] }, save: jest.fn(done => done()) } };
+  githubApp.octokit.request.mockResolvedValue({ data: { id: 42, account: { id: 999, login: "other", type: "User" } } });
+  await expect(refreshPersonalInstallation(req)).rejects.toThrow("owner could not be verified");
+  expect(req.session.githubAccess.installations).toEqual([]);
+  req.session.githubAccess.checkedAt = Date.now() - 3600001;
+  githubApp.octokit.request.mockClear();
+  expect(await refreshPersonalInstallation(req)).toEqual([]);
+  expect(githubApp.octokit.request).not.toHaveBeenCalled();
+});
+
+test("a removed personal installation is dropped while previously verified organization access stays", async () => {
+  const org = { id: 50, account: "team", accountType: "Organization" };
+  const req = { user: { id: "user-1", githubId: "123", githubUsername: "developer" }, session: {
+    githubAccess: { userId: "user-1", checkedAt: Date.now(), installations: [org, { id: 42, account: "developer", accountType: "User" }] },
+    save: jest.fn(done => done()),
+  } };
+  githubApp.octokit.request.mockRejectedValue(Object.assign(new Error("Not found"), { status: 404 }));
+  expect(await refreshPersonalInstallation(req)).toEqual([org]);
+  githubApp.octokit.request.mockRejectedValue(Object.assign(new Error("Unavailable"), { status: 503 }));
+  await expect(refreshPersonalInstallation(req)).rejects.toThrow("Unavailable");
+  expect(req.session.githubAccess.installations).toEqual([org]);
+});
 
 test("sign-in saves unpredictable state and a PKCE challenge before redirecting", async () => {
   const req = buildRequest(), res = buildResponse(), next = jest.fn();

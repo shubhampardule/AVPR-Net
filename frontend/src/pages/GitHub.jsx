@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { GitBranch, FolderGit2, RefreshCw, ShieldCheck, Lock, Globe, ChevronRight, AlertCircle, Plus, X, ExternalLink } from "lucide-react";
 import { useNavigate, useOutletContext } from "react-router-dom";
@@ -25,6 +25,8 @@ export default function GitHub() {
   const [connecting, setConnecting] = useState(false);
   const [installAppUrl, setInstallAppUrl] = useState(null);
   const [githubAuthorization, setGitHubAuthorization] = useState({ verified: false, username: null });
+  const activeRequest = useRef(null);
+  const lastReturnRefresh = useRef(0);
 
   const organizationId =
     selectedOrg?._id ||
@@ -37,15 +39,23 @@ export default function GitHub() {
     selectedOrg?.organization?.name ||
     "Selected workspace";
 
-const fetchGitHubStatus = async (isRefresh = false) => {
+const fetchGitHubStatus = useCallback(async (isRefresh = false) => {
   if (!organizationId) return null;
+  activeRequest.current?.abort();
+  const controller = new AbortController();
+  activeRequest.current = controller;
+  const accessFetch = async url => {
+    const response = await fetch(url, { credentials: "include", cache: "no-store", signal: controller.signal });
+    const body = await response.json();
+    if (controller.signal.aborted) throw new DOMException("Superseded access request", "AbortError");
+    return [response, body];
+  };
   let statusChecked = false;
   if (isRefresh) setRefreshing(true);
   else setLoading(true);
   setError(null);
   try {
-    const response = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/status`, { credentials: "include" });
-    const body = await response.json();
+    const [response, body] = await accessFetch(`${API_BASE_URL}/github/organizations/${organizationId}/status`);
     if (!response.ok) throw new Error(body.error?.message || "Failed to load GitHub status");
     statusChecked = true;
     setStatusUnavailable(false);
@@ -57,8 +67,7 @@ const fetchGitHubStatus = async (isRefresh = false) => {
     setInstallation(connectedInstallation);
     setInstallationUrl(connectedInstallation?.htmlUrl || null);
     if (isConnected) {
-      const reposResponse = await fetch(`${API_BASE_URL}/github/organizations/${organizationId}/repositories`, { credentials: "include" });
-      const reposBody = await reposResponse.json();
+      const [reposResponse, reposBody] = await accessFetch(`${API_BASE_URL}/github/organizations/${organizationId}/repositories${isRefresh ? "?refresh=true" : ""}`);
       if (!reposResponse.ok) throw new Error(reposBody.error?.message || "GitHub is connected, but its repository list could not be loaded.");
       const nextRepositories = reposBody.data?.repositories || [];
       setRepositories(nextRepositories);
@@ -70,11 +79,11 @@ const fetchGitHubStatus = async (isRefresh = false) => {
     setInstallation(null);
     setInstallationUrl(null);
     setRepositories([]);
-    const [installResponse, appResponse] = await Promise.all([
-      fetch(`${API_BASE_URL}/github/installations`, { credentials: "include" }),
-      fetch(`${API_BASE_URL}/github/test`, { credentials: "include" }),
+    const [[installResponse, installData], [appResponse, appData]] = await Promise.all([
+      accessFetch(`${API_BASE_URL}/github/installations`),
+      accessFetch(`${API_BASE_URL}/github/test`),
     ]);
-    const [installData, appData] = await Promise.all([installResponse.json(), appResponse.json()]);
+    if (controller.signal.aborted) return null;
     if (!installResponse.ok || !appResponse.ok) throw new Error("Unable to load GitHub App access.");
     const revokedId = body.data?.revokedInstallationId;
     const availableInstallations = (installData.data || []).filter((item) =>
@@ -86,6 +95,7 @@ const fetchGitHubStatus = async (isRefresh = false) => {
     setInstallAppUrl(appData.data?.slug ? `https://github.com/apps/${encodeURIComponent(appData.data.slug)}/installations/new` : null);
     return { connected: false, account: null, repositories: [] };
   } catch (err) {
+    if (controller.signal.aborted || err.name === "AbortError") return null;
     console.error("Failed to load GitHub status:", err);
     setError(err.message || "Failed to load GitHub status");
     if (!statusChecked) setStatusUnavailable(true);
@@ -100,10 +110,13 @@ const fetchGitHubStatus = async (isRefresh = false) => {
     }
     return { error: err.message || "Failed to load GitHub status" };
   } finally {
-    setLoading(false);
-    setRefreshing(false);
+    if (activeRequest.current === controller) {
+      activeRequest.current = null;
+      setLoading(false);
+      setRefreshing(false);
+    }
   }
-};
+}, [organizationId]);
 
 useEffect(() => {
   if (!contextLoading && organizationId) {
@@ -118,7 +131,24 @@ useEffect(() => {
     setGitHubAuthorization({ verified: false, username: null });
     fetchGitHubStatus();
   }
-}, [contextLoading, organizationId]);
+  return () => { activeRequest.current?.abort(); activeRequest.current = null; };
+}, [contextLoading, organizationId, fetchGitHubStatus]);
+
+useEffect(() => {
+  const refreshOnReturn = () => {
+    if (contextLoading || !organizationId || document.visibilityState === "hidden" || activeRequest.current || Date.now() - lastReturnRefresh.current < 2000) return;
+    lastReturnRefresh.current = Date.now();
+    fetchGitHubStatus(true);
+  };
+  window.addEventListener("focus", refreshOnReturn);
+  document.addEventListener("visibilitychange", refreshOnReturn);
+  window.addEventListener("pageshow", refreshOnReturn);
+  return () => {
+    window.removeEventListener("focus", refreshOnReturn);
+    document.removeEventListener("visibilitychange", refreshOnReturn);
+    window.removeEventListener("pageshow", refreshOnReturn);
+  };
+}, [contextLoading, organizationId, fetchGitHubStatus]);
 
 const connectInstallation = async () => {
   setConnecting(true);
@@ -230,6 +260,7 @@ const connectInstallation = async () => {
             {installationRevoked && <p role="status" className="mt-3 rounded-lg border border-severity-medium/20 bg-severity-medium/5 p-3 text-sm text-severity-medium">GitHub reports that AVPR-Net was removed from this organization. Reinstall the app, then connect its new installation here.</p>}
             {!githubAuthorization.verified && <a href={`${API_BASE_URL}/auth/github`} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent-security px-4 py-2 text-sm font-medium text-on-accent"><GithubIcon className="h-4 w-4" /> {githubAuthorization.username ? "Verify GitHub access" : "Sign in with GitHub"}</a>}
             {installAppUrl && <a href={installAppUrl} className={`${githubAuthorization.verified ? "mt-4" : "ml-4"} inline-flex items-center gap-2 text-sm text-accent-blue`}>Install GitHub App <ExternalLink className="h-3 w-3" /></a>}
+            {githubAuthorization.verified && <p className="mt-3 text-xs text-text-muted">Installed on a new GitHub organization? <a href={`${API_BASE_URL}/auth/github?returnTo=%2Fgithub`} className="text-accent-blue underline underline-offset-2">Refresh verified installations</a> to check your administrator access. You stay signed in to AVPR-Net.</p>}
             {githubAuthorization.verified && installations.length > 0 && ["owner", "admin"].includes(selectedOrg?.role) && <div className="mt-5 flex flex-wrap items-center gap-3">
               <label htmlFor="github-installation" className="text-sm">GitHub installation</label>
               <select id="github-installation" value={selectedInstallation} onChange={(event) => setSelectedInstallation(event.target.value)} className="rounded-lg border border-text-primary/10 bg-bg-elevated px-3 py-2 text-sm">

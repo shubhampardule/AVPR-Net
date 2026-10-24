@@ -455,6 +455,23 @@ test.describe("workspace controls, with mocked APIs", () => {
     await expect(dialog).toBeHidden();
   });
 
+  test("newly authorized repositories appear on return from GitHub without signing out", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    let forcedRefresh = false;
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith("/repositories") && url.searchParams.get("refresh") === "true") forcedRefresh = true;
+    });
+    await page.goto("/github");
+    await expect(page.getByRole("button", { name: /project team\/project/i })).toBeVisible();
+    state.repositories.push({ id: 99, owner: "team", name: "newly-authorized", fullName: "team/newly-authorized", defaultBranch: "main", private: true });
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByRole("button", { name: /newly-authorized team\/newly-authorized/i })).toBeVisible();
+    expect(forcedRefresh).toBe(true);
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    expect(state.calls.some(call => call.pathname.endsWith("/auth/logout"))).toBe(false);
+  });
+
   test("a revoked installation is clearly explained and can be replaced", async ({ page }) => {
     const state = installWorkspaceApi(page, { connected: false, revoked: true, revokedInstallationId: 10 });
     await page.goto("/github");
