@@ -49,9 +49,9 @@ function TextList({ title, items }) {
       : <pre className="whitespace-pre-wrap text-sm leading-6 text-text-secondary">{items}</pre>}</div>;
 }
 
-function Sources({ sources = [] }) {
+function Sources({ sources = [], emptyMessage = "No relevant sources retrieved. Context is insufficient." }) {
   return <div className="space-y-3"><h3 className="text-sm font-semibold text-text-primary">Retrieved evidence</h3>
-    {!sources.length && <p className="text-sm text-severity-medium">No relevant sources retrieved. Context is insufficient.</p>}
+    {!sources.length && <p className="text-sm text-severity-medium">{emptyMessage}</p>}
     {sources.map((s) => <details key={s.id} className="rounded-md border border-text-primary/10 bg-bg-primary p-3">
       <summary className="cursor-pointer break-all text-sm text-text-primary">{s.source}:{s.startLine}–{s.endLine}
         {typeof s.score === "number" && <span className="ml-2 text-text-muted">similarity {s.score.toFixed(3)}</span>}</summary>
@@ -517,7 +517,9 @@ export default function Assistant({ demo = false }) {
             <p className="mt-2 text-sm leading-6 text-text-secondary">{result.reviewRequired.explanation}</p>
             <p className="mt-2 text-xs text-text-muted">Review the source and scanner evidence. No patch was created or rescanned.</p>
           </div>}
-          {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.sources || result.retrieved_sources} /></div></details> : <Sources sources={result.sources || result.retrieved_sources} />)}
+          {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.proposal?.sources || result.reviewRequired?.sources || result.sources || []}
+            emptyMessage={result.proposal && !result.citations_verified ? "No verified source citation was returned. Retrieved passages are not presented as supporting evidence." : "No supporting sources were cited."} /></div></details>
+            : <Sources sources={result.proposal?.sources || result.sources || []} emptyMessage="No supporting sources were cited." />)}
           <TextList title="Application limitations" items={result?.limitations} />
           {result?.requestId && <p className="break-all font-mono text-[11px] text-text-muted">Request {result.requestId}</p>}
         </section>}

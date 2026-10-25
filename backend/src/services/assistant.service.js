@@ -198,16 +198,29 @@ Before returning, verify all ten required top-level keys exist, especially "sour
         require("../utils/remediation-patch-policy").validateRemediationPatch(remediationContext.finding, fullContent);
       }
       stage = "citations";
-      const sources = resolveSources(proposal.sources, retrieval.sources);
+      // A citation mismatch should remove the citation, not discard an otherwise
+      // valid reviewable patch. Keep the patch gates strict and expose the lack
+      // of verified sources to the caller rather than treating model IDs as facts.
+      let sources;
+      let citationsVerified = true;
+      try { sources = resolveSources(proposal.sources, retrieval.sources); }
+      catch (error) {
+        if (error.code !== "AI_INVALID_OUTPUT") throw error;
+        sources = [];
+        citationsVerified = false;
+      }
       stage = "syntax_validation";
       const validation = await this.validator(input.language, proposal.code, proposal.format);
       return { status: "complete", advisory: true, language: input.language, mode: input.mode,
         proposal: { ...proposal, sources }, validation, requestId: response.requestId,
         retrieved_sources: retrieval.sources, retrieval_status: retrieval.status,
+        citations_verified: citationsVerified && sources.length > 0,
         tests_status: "suggested_not_executed", applied: false,
         limitations: ["Syntax validation does not establish correctness or security.",
           "Generated code and tests require independent review; no changes were applied.",
-          ...(!retrieval.sources.length ? ["Retrieved context is insufficient; proposal is not source-grounded."] : [])] };
+          ...(!retrieval.sources.length ? ["Retrieved context is insufficient; proposal is not source-grounded."] : []),
+          ...(!citationsVerified ? ["The model returned an unverified source citation; it was omitted. Review the proposal without relying on cited guidance."] : []),
+          ...(citationsVerified && !sources.length && retrieval.sources.length ? ["No supporting source was cited. Review the proposal without source attribution."] : [])] };
     } catch (error) {
       // Fixed categories only: exception messages may contain source code or secrets.
       this.logger?.warn(JSON.stringify({ service: "assistant", operation: "code", stage,

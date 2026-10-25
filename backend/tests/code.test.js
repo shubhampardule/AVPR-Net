@@ -179,11 +179,15 @@ test.each([
   expect(validator).not.toHaveBeenCalled();
 });
 
-test("malformed and hallucinated code citations fail safely", async () => {
+test("unverified code citations are omitted without discarding a validated proposal", async () => {
   const { service, provider } = setup();
   const input = { language: "javascript", mode: "generate", request: "Validate a port" };
   provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), sources: ["made-up"] }) });
-  expect((await service.generateCode(input)).error.code).toBe("AI_INVALID_OUTPUT");
+  const result = await service.generateCode(input);
+  expect(result.status).toBe("complete");
+  expect(result.proposal.sources).toEqual([]);
+  expect(result.citations_verified).toBe(false);
+  expect(result.limitations.join(" ")).toMatch(/unverified source citation/i);
   provider.chat.mockRejectedValue(new Error("sensitive-body"));
   expect(JSON.stringify(await service.generateCode(input))).not.toContain("sensitive-body");
 });
