@@ -46,7 +46,7 @@ async function getRepositoryFiles(installationId, owner, repo) {
   if (data.truncated) throw bad("Repository tree exceeds GitHub's recursive limit. Use a smaller repository or direct file path.", 413, "TREE_TRUNCATED");
   return data.tree.filter(item => item.type === "blob").map(item => ({ path: item.path, size: item.size, commitSha: commit.sha }));
 }
-async function getFileContent(installationId, owner, repo, filePath, ref) {
+async function getFileContent(installationId, owner, repo, filePath, ref, { preview = false } = {}) {
   repository(owner, repo);
   if (typeof filePath !== "string" || filePath.length > 1000 || filePath.includes("\\") || filePath.split("/").some(p => p === ".." || p === ".") || filePath.startsWith("/")) throw bad("Invalid file path");
   const client = await getInstallationOctokit(installationId);
@@ -54,6 +54,17 @@ async function getFileContent(installationId, owner, repo, filePath, ref) {
   if (Array.isArray(data) || data.type !== "file" || data.target || data.submodule_git_url) throw bad("Only regular files can be viewed");
   if (data.size > 256 * 1024 || data.encoding !== "base64" || typeof data.content !== "string") throw bad("File is too large or not available as inline text", 413, "FILE_UNSUPPORTED");
   const buffer = Buffer.from(data.content, "base64");
+  if (buffer.length > 256 * 1024) throw bad("File exceeds the 256 KB preview limit. Open it on GitHub.", 413, "FILE_UNSUPPORTED");
+  if (preview && /\.(?:png|jpe?g|gif|webp|ico)$/i.test(filePath)) {
+    const signature = buffer.subarray(0, 12);
+    const mimeType = signature.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? "image/png"
+      : signature.subarray(0, 3).equals(Buffer.from([255,216,255])) ? "image/jpeg"
+      : /^(?:GIF87a|GIF89a)$/.test(signature.subarray(0, 6).toString("ascii")) ? "image/gif"
+      : signature.subarray(0, 4).toString("ascii") === "RIFF" && signature.subarray(8, 12).toString("ascii") === "WEBP" ? "image/webp"
+      : signature.subarray(0, 4).equals(Buffer.from([0,0,1,0])) ? "image/x-icon" : null;
+    if (!mimeType) throw bad("This image format could not be verified. Open it on GitHub.", 415, "FILE_UNSUPPORTED");
+    return { path: data.path, name: data.name, size: data.size, sha: data.sha, kind: "image", encoding: "base64", mimeType, content: buffer.toString("base64") };
+  }
   if (buffer.includes(0)) throw bad("Binary files are not supported", 415, "BINARY_FILE");
   return { path: data.path, name: data.name, size: data.size, sha: data.sha, content: buffer.toString("utf8") };
 }

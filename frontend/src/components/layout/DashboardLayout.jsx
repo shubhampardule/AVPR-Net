@@ -167,7 +167,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="review-workspace min-h-screen bg-bg-primary text-text-primary">
-      <NotificationCenter organizationId={selectedOrg?._id || selectedOrg?.id} />
+      <NotificationCenter key={selectedOrg?._id || selectedOrg?.id || "no-workspace"} organizationId={selectedOrg?._id || selectedOrg?.id} />
 
       {/* ---------------------------------------------------------------- */}
       {/* Background                                                      */}

@@ -6,6 +6,25 @@ const ALL_LANGUAGES = ["python", "javascript", "typescript", "c", "cpp", "bash"]
 const CODE_FIELDS = ["language", "format", "code", "explanation", "assumptions", "dependencies",
   "security_considerations", "validation_instructions", "tests", "sources"];
 
+function applyReviewEdits(original, edits) {
+  if (Buffer.byteLength(JSON.stringify(edits) || "") > 16000) throw invalid();
+  if (!Array.isArray(edits) || !edits.length || edits.length > 5) throw invalid();
+  const ranges = edits.map(edit => {
+    if (!edit || typeof edit !== "object" || Array.isArray(edit) || Object.keys(edit).sort().join(",") !== "after,before" ||
+      !isText(edit.before, 8000) || typeof edit.after !== "string" || edit.after.length > 16000 || edit.before === edit.after) throw invalid();
+    const start = original.indexOf(edit.before);
+    if (start < 0 || original.indexOf(edit.before, start + 1) >= 0) throw invalid();
+    return { start, end: start + edit.before.length, after: edit.after };
+  }).sort((a, b) => b.start - a.start);
+  let changed = original, boundary = original.length;
+  for (const edit of ranges) {
+    if (edit.end > boundary) throw invalid();
+    changed = changed.slice(0, edit.start) + edit.after + changed.slice(edit.end);
+    boundary = edit.start;
+  }
+  return changed;
+}
+
 const badInput = (message) => Object.assign(new Error(message), { code: "AI_INVALID_INPUT", statusCode: 400 });
 function safeTargetPath(value) {
   return isText(value, 500) && !value.includes("\\") && !value.includes("\0") &&
@@ -72,11 +91,12 @@ class AssistantService {
   async generateCode(input, retryInvalid = true) {
     bounded(input);
     if (!input || typeof input !== "object" || Array.isArray(input) ||
-      Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath"].includes(key)) ||
+      Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath", "targetStartLine"].includes(key)) ||
       !isText(input.request, 3000) || !this.languages().includes(input.language) ||
       !["generate", "review"].includes(input.mode) ||
       (input.originalCode !== undefined && !isText(input.originalCode, 8000)) ||
       (input.targetPath !== undefined && !safeTargetPath(input.targetPath)) ||
+      (input.targetStartLine !== undefined && (input.mode !== "review" || !Number.isSafeInteger(input.targetStartLine) || input.targetStartLine < 1 || input.targetStartLine > 1000000)) ||
       (input.mode === "review" && !input.originalCode)) {
       throw badInput("Provide a bounded defensive request, supported language, mode and source for reviews");
     }
@@ -93,25 +113,34 @@ class AssistantService {
         { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
 Keep the entire response concise, preferably under 1000 tokens; suggest at most five tests.
 Return one JSON object, without markdown fences or surrounding text, with exactly these keys: ${CODE_FIELDS.join(", ")}.
-language must match the request. For review mode return format code:
-return the complete corrected source file, preserving unrelated lines and public names.
+language must match the request. ${input.targetStartLine ? `For this excerpt review return format edits. code MUST be a JSON array of 1–5 objects with exactly before and after string keys, for example ${JSON.stringify([{ before: "return eval(value);", after: "return JSON.parse(value);" }])}. Do not encode this array as a string.
+Each before string must match exactly once in originalCode; include enough unchanged surrounding text to make it unique. Preserve indentation. Edits must not overlap. Do not repeat the complete excerpt or calculate diff hunks. The application will preserve all other source and map edits to the full file's line numbers.` : `For review mode return format code:
+return the complete corrected supplied source, preserving unrelated lines and public names.`}
 The application will compute the unified diff deterministically from originalCode.
 If returning format diff, use exactly ${JSON.stringify(`a/${targetPath}`)} and ${JSON.stringify(`b/${targetPath}`)},
 with exact hunk counts and unchanged context. The patch must apply without fuzzy matching.
-For generate mode return standalone source code. code and tests
-are plain strings (no markdown fences). explanation is a short string. assumptions,
+For generate mode return standalone source code. code is a plain string for formats code and diff; it is an array only for format edits. Never use markdown fences. explanation is a short string. assumptions,
 dependencies, security_considerations, validation_instructions are arrays of short
 strings, or one short string when there is only one item. tests is a plain string or array of short strings containing a focused suggested test or regression test procedure, never a
 claim of test execution. Include expected inputs/outputs and compatibility limits.
+The sources key is REQUIRED even when no source applies: return "sources": [] in that case.
 sources is an array of IDs found in retrieved_context. Do not invent sources or
-dependencies. ${retryInvalid ? "" : "A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs. For reviews use format code with complete corrected source; do not calculate diff hunks yourself."}
+dependencies. ${retryInvalid ? "" : `A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs. ${input.targetStartLine ? "Use format edits with code as an actual JSON array of exact unique before/after replacements, not an encoded string." : "For reviews use format code with complete corrected source; do not calculate diff hunks yourself."}`}
 UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
-            retrieval_status: retrieval.status, retrieved_context: retrieval.sources })}` },
+            retrieval_status: retrieval.status, retrieved_context: retrieval.sources })}
+Before returning, verify all ten required top-level keys exist, especially "sources". An empty sources array is valid; omitting it is invalid.` },
       ], { json: true });
       stage = "structured_output";
       const proposal = parseObject(response.text, CODE_FIELDS);
+      if (input.mode === "review" && input.targetStartLine && proposal.format === "edits") {
+        stage = "diff_creation";
+        proposal.code = applyReviewEdits(clean.originalCode, proposal.code);
+        proposal.format = "code";
+      }
       if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16000)) {
         stage = "diff_creation";
+        // An excerpt's trailing newline separates it from source outside the window.
+        if (input.targetStartLine && clean.originalCode.endsWith("\n") && !proposal.code.endsWith("\n")) proposal.code += "\n";
         proposal.code = require("diff").createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
         proposal.format = "diff";
       }
@@ -137,6 +166,12 @@ UNTRUSTED_DATA_JSON:\n${JSON.stringify({ request: clean,
             patches[0].oldFileName !== `a/${targetPath}` || patches[0].newFileName !== `b/${targetPath}`) throw invalid();
           const changed = applyPatch(clean.originalCode, patches[0], { fuzzFactor: 0 });
           if (changed === false || changed === clean.originalCode || changed.length > 16000) throw invalid();
+          if (input.targetStartLine) {
+            const offset = input.targetStartLine - 1;
+            for (const hunk of patches[0].hunks) { hunk.oldStart += offset; hunk.newStart += offset; }
+            proposal.code = require("diff").formatPatch(patches[0]);
+            if (proposal.code.length > 18000) throw invalid();
+          }
         } catch { throw invalid(); }
       }
       stage = "citations";

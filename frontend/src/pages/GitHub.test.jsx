@@ -21,6 +21,18 @@ const status = { connected: true, installation: { account: "shubhampardule", acc
 const repositories = [{ id: 1, name: "AVPR", fullName: "shubhampardule/AVPR", owner: "shubhampardule", defaultBranch: "main", private: true }];
 const response = data => ({ ok: true, json: async () => ({ data }) });
 
+test("connection state remains unknown until GitHub status has loaded", async () => {
+  let finish;
+  vi.stubGlobal("fetch", vi.fn(url => String(url).endsWith("/status")
+    ? new Promise(resolve => { finish = () => resolve(response(status)); })
+    : Promise.resolve(response({ repositories }))));
+  render(<Harness />);
+  expect(screen.getByText("Checking connection…", { exact: true })).toBeTruthy();
+  expect(screen.queryByText("Not connected", { exact: true })).toBeNull();
+  finish();
+  expect(await screen.findByText("Connected", { exact: true })).toBeTruthy();
+});
+
 test("returning from GitHub automatically loads newly authorized repos without signing out", async () => {
   let updated = false;
   const fetchMock = vi.fn(url => Promise.resolve(String(url).endsWith("/status") ? response(status)
@@ -104,6 +116,8 @@ test("does not offer a new GitHub connection when installation status could not 
   render(<Harness />);
 
   expect((await screen.findByRole("alert")).textContent).toMatch(/GitHub status unavailable/i);
+  expect(screen.getByText("Connection unavailable", { exact: true })).toBeTruthy();
+  expect(screen.queryByText("Not connected", { exact: true })).toBeNull();
   expect(screen.queryByRole("heading", { name: "Connect your GitHub account" })).toBeNull();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });

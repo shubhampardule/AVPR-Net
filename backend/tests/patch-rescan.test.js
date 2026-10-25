@@ -53,3 +53,13 @@ test.each(["source","patch","cancel","syntax","coverage","suppression"])("%s fai
  await expect(rescanPatch(s.args,s.runtime)).rejects.toThrow();
  expect(s.cleanup).toHaveBeenCalledTimes(1);await expect(fs.stat(s.root)).rejects.toMatchObject({code:"ENOENT"});
 });
+
+test("large source files are rescanned in full rather than rejected by the former 32 KB limit",async()=>{
+ const suffix="// preserved source outside the reviewed excerpt\n".repeat(1400);
+ const original="// fixture\nconst value = eval(input);\n"+suffix;
+ const content=original.replace("eval(input)","JSON.parse(input)");
+ const s=await setup({original,content});
+ const result=await rescanPatch(s.args,s.runtime);
+ expect(result).toMatchObject({status:"passed",sourceHash:digest(original),proposedHash:digest(content)});
+ expect(s.run).toHaveBeenCalledTimes(2);expect(s.cleanup).toHaveBeenCalledTimes(1);
+});

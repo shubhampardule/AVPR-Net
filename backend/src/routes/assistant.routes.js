@@ -91,9 +91,11 @@ function createAssistantRouter(options = {}) {
       res.status(result.status === "unavailable" ? 503 : 200).json({ success: result.status !== "unavailable", data: result });
     } catch (error) {
       const inputError = error.code === "AI_INVALID_INPUT" || error.code === "RAG_INVALID_QUERY";
+      const sourceRequest = req.method === "GET" && req.path.startsWith("/finding/");
+      const sourceError = sourceRequest && ["INVALID_INPUT", "FILE_UNSUPPORTED", "BINARY_FILE", "SOURCE_LINE_UNAVAILABLE", "SOURCE_NOT_FOUND", "SOURCE_ACCESS_DENIED", "SOURCE_RATE_LIMITED"].includes(error.code);
       res.status(error.statusCode || (inputError ? 400 : 503)).json({ success: false,
-        error: { code: inputError ? error.code : "AI_UNAVAILABLE",
-          message: inputError ? error.message : "Assistant unavailable; check configuration and knowledge index" } });
+        error: { code: inputError || sourceError ? error.code : sourceRequest ? "SOURCE_UNAVAILABLE" : "AI_UNAVAILABLE",
+          message: inputError || sourceError ? error.message : sourceRequest ? "GitHub source could not be loaded. Retry or check repository access." : "Assistant unavailable; check configuration and knowledge index" } });
     } finally {
       clearTimeout(deadline); res.off("close", disconnected);
       if (release) await release().catch(() => {});
@@ -120,10 +122,12 @@ function createAssistantRouter(options = {}) {
   if (!demo) router.get("/finding/:findingId", handle(async req => {
     const { objectId, bad } = require("../utils/input");
     objectId(req.params.findingId);
-    const finding = await require("../models/Finding").findOne({ _id: req.params.findingId, organization: req.params.organizationId }).lean();
+    const findFinding = options.findFinding || ((filter) => require("../models/Finding").findOne(filter).lean());
+    const finding = await findFinding({ _id: req.params.findingId, organization: req.params.organizationId });
     if (!finding) throw bad("Finding not found", 404);
-    const scan = await require("../models/Scan").findById(finding.scan).lean();
-    return require("../services/remediation.service").source(scan, finding);
+    const findScan = options.findScan || ((id) => require("../models/Scan").findById(id).lean());
+    const scan = await findScan(finding.scan);
+    return (options.remediation || require("../services/remediation.service")).source(scan, finding);
   }));
   router.get("/fixtures", handle(async () => ({
     events: { suspicious: require("../../fixtures/events/suspicious.json"), benign: require("../../fixtures/events/benign.json") },

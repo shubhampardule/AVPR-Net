@@ -285,7 +285,7 @@ export default function Repository() {
 
       <div className="app-page">
 
-        <p className="mb-6 flex items-center gap-2 text-sm text-text-secondary"><GitBranch className="h-4 w-4" aria-hidden="true" />Default branch: <span className="font-mono-code">{repositoryDetails?.defaultBranch || "Unavailable"}</span></p>
+        <p className="mb-6 flex items-center gap-2 text-sm text-text-secondary"><GitBranch className="h-4 w-4" aria-hidden="true" />Default branch: <span className="font-mono-code">{repositoryDetails?.defaultBranch || (loading || contextLoading ? "Loading…" : "Unavailable")}</span></p>
 
         <RepositoryAutomation organization={selectedOrg} owner={decodedOwner} repo={decodedRepo} />
         {/* Explorer */}

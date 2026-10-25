@@ -18,6 +18,55 @@ function setup(language = "javascript", overrides = {}) {
   return { provider, rag, validator, service: new AssistantService({ provider, rag, validator, ...overrides }) };
 }
 
+test("excerpt proposals map to real file lines and apply without changing surrounding source", async () => {
+  const { service, provider } = setup();
+  const before = "function parse(value) {\n  return eval(value);\n}\n";
+  const after = before.replace("eval(value)", "JSON.parse(value)");
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), code: after.trimEnd() }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Replace eval with JSON parsing",
+    originalCode: before, targetPath: "large.js", targetStartLine: 701 });
+  expect(result.status).toBe("complete");
+  const { parsePatch, applyPatch } = require("diff");
+  expect(parsePatch(result.proposal.code)[0].hunks[0].oldStart).toBe(701);
+  const prefix = "// unchanged preceding code\n".repeat(700);
+  const suffix = "// unchanged following code\n".repeat(700);
+  expect(applyPatch(prefix + before + suffix, result.proposal.code, { fuzzFactor: 0 })).toBe(prefix + after + suffix);
+  expect(provider.chat.mock.calls[0][0][1].content).toContain("excerpt review");
+});
+
+test.each([0, -1, 1.5, "700", 1000001])("rejects invalid excerpt offsets %s before calling the model", async targetStartLine => {
+  const { service, provider } = setup();
+  await expect(service.generateCode({ language: "javascript", mode: "review", request: "Validate", originalCode: "const a = 1;", targetStartLine }))
+    .rejects.toMatchObject({ code: "AI_INVALID_INPUT" });
+  expect(provider.chat).not.toHaveBeenCalled();
+});
+
+test("short exact edits produce a source-bound diff without repeating the supplied excerpt", async () => {
+  const { service, provider } = setup();
+  const originalCode = "// context\nfunction parse(value) {\n  return eval(value);\n}\n// preserved\n";
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "edits",
+    code: [{ before: "return eval(value);", after: "return JSON.parse(value);" }] }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Use JSON parsing",
+    originalCode, targetPath: "large.js", targetStartLine: 701 });
+  expect(result.status).toBe("complete");
+  const prefix = "// preceding\n".repeat(700);
+  expect(require("diff").applyPatch(prefix + originalCode + "// following\n", result.proposal.code, { fuzzFactor: 0 }))
+    .toBe(prefix + originalCode.replace("eval(value)", "JSON.parse(value)") + "// following\n");
+});
+
+test.each([
+  [], [{ before: "missing", after: "value" }], [{ before: "value", after: "safe" }],
+  [{ before: "return value;", after: "safe", extra: "not allowed" }],
+  [{ before: "return value;", after: "return value;" }],
+  [{ before: "return value;", after: "safe" }, { before: "value;", after: "safe" }],
+].map(edits => ({ edits })))("invalid, ambiguous or overlapping model edits are rejected (%#)", async ({ edits }) => {
+  const { service, provider } = setup();
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "edits", code: edits }) });
+  const result = await service.generateCode({ language: "javascript", mode: "review", request: "Use safe parsing",
+    originalCode: "function parse(value) { return value; }\n", targetPath: "large.js", targetStartLine: 701 });
+  expect(result).toMatchObject({ status: "unavailable", proposal: null, error: { code: "AI_INVALID_OUTPUT" } });
+});
+
 test("runtime diagnostics name the failed stage without logging customer or exception text", async () => {
   const logger = { warn: jest.fn() };
   const { service, validator } = setup("javascript", { logger });
@@ -158,5 +207,5 @@ test.each(["c", "cpp", "bash"])("%s has honest unavailable parser status", async
 
 test("diff validation and oversize input do not execute or apply code", async () => {
   expect(await validateCode("javascript", "bad", "diff")).toMatchObject({ status: "unavailable", executed: false });
-  expect(await validateCode("javascript", "x".repeat(32001))).toMatchObject({ status: "failed", executed: false });
+  expect(await validateCode("javascript", "x".repeat(256 * 1024 + 1))).toMatchObject({ status: "failed", executed: false });
 });

@@ -206,7 +206,7 @@ const connectInstallation = async () => {
 
                   <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${connected ? "border-severity-low/20 bg-severity-low/10 text-severity-low" : "border-text-primary/10 bg-text-primary/5 text-text-muted"}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-severity-low" : "bg-text-muted"}`} />
-                    {connected ? "Connected" : "Not connected"}
+                    {contextLoading ? "Checking connection…" : !organizationId ? "No workspace selected" : loading && !connected ? "Checking connection…" : statusUnavailable ? "Connection unavailable" : connected ? "Connected" : "Not connected"}
                   </span>
                 </div>
 

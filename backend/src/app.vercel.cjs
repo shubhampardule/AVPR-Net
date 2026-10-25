@@ -661,6 +661,70 @@ var require_ai_output = __commonJS({
   }
 });
 
+// src/utils/input.js
+var require_input = __commonJS({
+  "src/utils/input.js"(exports2, module2) {
+    var mongoose = require("mongoose");
+    var bad = (message, statusCode = 400, code = "INVALID_INPUT") => Object.assign(new Error(message), { statusCode, code });
+    function integer(value, fallback, max) {
+      if (value === void 0) return fallback;
+      if (typeof value !== "string" || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > max) throw bad(`Expected an integer between 1 and ${max}`);
+      return Number(value);
+    }
+    function repository(owner, repo) {
+      if (typeof owner !== "string" || typeof repo !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || [".", ".."].includes(repo)) throw bad("Invalid GitHub repository identifier");
+    }
+    function objectId(value) {
+      if (typeof value !== "string" || !mongoose.isValidObjectId(value)) throw bad("Invalid identifier");
+      return value;
+    }
+    function optionalCommitSha(value) {
+      if (value === void 0) return void 0;
+      if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) throw bad("Invalid commit SHA");
+      return value;
+    }
+    module2.exports = { bad, integer, repository, objectId, optionalCommitSha };
+  }
+});
+
+// src/utils/review-source.js
+var require_review_source = __commonJS({
+  "src/utils/review-source.js"(exports2, module2) {
+    var { bad } = require_input();
+    var MAX_SOURCE_BYTES = 256 * 1024;
+    function reviewSource(content, finding) {
+      if (Buffer.byteLength(content) > MAX_SOURCE_BYTES) throw bad("Source exceeds the 256 KB review limit", 413, "FILE_UNSUPPORTED");
+      const requestBytes = (text) => Buffer.byteLength(JSON.stringify(text)) - 2;
+      if (content.length <= 8e3 && requestBytes(content) <= 8e3) return { originalCode: content };
+      const lines = content.match(/[^\n]*\n|[^\n]+$/g) || [];
+      const target = finding.startLine - 1;
+      if (!Number.isSafeInteger(target) || target < 0 || target >= lines.length) {
+        throw bad("This finding has no valid source line. Rescan the repository before drafting a fix.", 409, "SOURCE_LINE_UNAVAILABLE");
+      }
+      const limit = 4e3;
+      let start = target, end = target + 1, length = requestBytes(lines[target]);
+      if (length > limit) throw bad("The affected line exceeds the review limit. Review this generated or minified file manually.", 413, "SOURCE_LINE_UNAVAILABLE");
+      while (true) {
+        let expanded = false;
+        if (start > 0 && length + requestBytes(lines[start - 1]) <= limit) {
+          length += requestBytes(lines[--start]);
+          expanded = true;
+        }
+        if (end < lines.length && length + requestBytes(lines[end]) <= limit) {
+          length += requestBytes(lines[end++]);
+          expanded = true;
+        }
+        if (!expanded) break;
+      }
+      return {
+        originalCode: lines.slice(start, end).join(""),
+        sourceWindow: { startLine: start + 1, endLine: end, totalLines: lines.length }
+      };
+    }
+    module2.exports = { MAX_SOURCE_BYTES, reviewSource };
+  }
+});
+
 // src/services/code-validation.js
 var require_code_validation = __commonJS({
   "src/services/code-validation.js"(exports2, module2) {
@@ -668,12 +732,13 @@ var require_code_validation = __commonJS({
     var { execFile } = require("node:child_process");
     var fs = require("node:fs");
     var path = require("node:path");
+    var { MAX_SOURCE_BYTES } = require_review_source();
     function syntaxWorkerPath() {
       const candidates = [path.join(__dirname, "syntax-worker.js"), path.join(__dirname, "services", "syntax-worker.js")];
       return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
     }
     async function validateCode(language, code, format = "code") {
-      if (typeof code !== "string" || Buffer.byteLength(code) > 32e3) {
+      if (typeof code !== "string" || Buffer.byteLength(code) > MAX_SOURCE_BYTES) {
         return { status: "failed", executed: false, message: "Proposal exceeds parser input limit" };
       }
       if (format === "diff" || !["python", "javascript", "typescript"].includes(language)) {
@@ -681,7 +746,7 @@ var require_code_validation = __commonJS({
       }
       if (language === "python") {
         return new Promise((resolve) => {
-          const parser = "import ast,sys; ast.parse(sys.stdin.read(32001)); print('VALID')";
+          const parser = `import ast,sys; ast.parse(sys.stdin.read(${MAX_SOURCE_BYTES + 1})); print('VALID')`;
           const child = execFile("python", ["-I", "-c", parser], {
             timeout: 3e3,
             maxBuffer: 4096,
@@ -2691,6 +2756,23 @@ var require_assistant_service = __commonJS({
       "tests",
       "sources"
     ];
+    function applyReviewEdits(original, edits) {
+      if (Buffer.byteLength(JSON.stringify(edits) || "") > 16e3) throw invalid();
+      if (!Array.isArray(edits) || !edits.length || edits.length > 5) throw invalid();
+      const ranges = edits.map((edit) => {
+        if (!edit || typeof edit !== "object" || Array.isArray(edit) || Object.keys(edit).sort().join(",") !== "after,before" || !isText(edit.before, 8e3) || typeof edit.after !== "string" || edit.after.length > 16e3 || edit.before === edit.after) throw invalid();
+        const start = original.indexOf(edit.before);
+        if (start < 0 || original.indexOf(edit.before, start + 1) >= 0) throw invalid();
+        return { start, end: start + edit.before.length, after: edit.after };
+      }).sort((a, b) => b.start - a.start);
+      let changed = original, boundary = original.length;
+      for (const edit of ranges) {
+        if (edit.end > boundary) throw invalid();
+        changed = changed.slice(0, edit.start) + edit.after + changed.slice(edit.end);
+        boundary = edit.start;
+      }
+      return changed;
+    }
     var badInput = (message) => Object.assign(new Error(message), { code: "AI_INVALID_INPUT", statusCode: 400 });
     function safeTargetPath(value) {
       return isText(value, 500) && !value.includes("\\") && !value.includes("\0") && !path.posix.isAbsolute(value) && !path.win32.isAbsolute(value) && value.split("/").every((part) => part && part !== "." && part !== "..");
@@ -2787,7 +2869,7 @@ var require_assistant_service = __commonJS({
       }
       async generateCode(input, retryInvalid = true) {
         bounded(input);
-        if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath"].includes(key)) || !isText(input.request, 3e3) || !this.languages().includes(input.language) || !["generate", "review"].includes(input.mode) || input.originalCode !== void 0 && !isText(input.originalCode, 8e3) || input.targetPath !== void 0 && !safeTargetPath(input.targetPath) || input.mode === "review" && !input.originalCode) {
+        if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["request", "language", "mode", "originalCode", "targetPath", "targetStartLine"].includes(key)) || !isText(input.request, 3e3) || !this.languages().includes(input.language) || !["generate", "review"].includes(input.mode) || input.originalCode !== void 0 && !isText(input.originalCode, 8e3) || input.targetPath !== void 0 && !safeTargetPath(input.targetPath) || input.targetStartLine !== void 0 && (input.mode !== "review" || !Number.isSafeInteger(input.targetStartLine) || input.targetStartLine < 1 || input.targetStartLine > 1e6) || input.mode === "review" && !input.originalCode) {
           throw badInput("Provide a bounded defensive request, supported language, mode and source for reviews");
         }
         const clean = sanitize(input);
@@ -2805,29 +2887,37 @@ var require_assistant_service = __commonJS({
             { role: "user", content: `Produce a defensive implementation or remediation review in the requested language.
 Keep the entire response concise, preferably under 1000 tokens; suggest at most five tests.
 Return one JSON object, without markdown fences or surrounding text, with exactly these keys: ${CODE_FIELDS.join(", ")}.
-language must match the request. For review mode return format code:
-return the complete corrected source file, preserving unrelated lines and public names.
+language must match the request. ${input.targetStartLine ? `For this excerpt review return format edits. code MUST be a JSON array of 1\u20135 objects with exactly before and after string keys, for example ${JSON.stringify([{ before: "return eval(value);", after: "return JSON.parse(value);" }])}. Do not encode this array as a string.
+Each before string must match exactly once in originalCode; include enough unchanged surrounding text to make it unique. Preserve indentation. Edits must not overlap. Do not repeat the complete excerpt or calculate diff hunks. The application will preserve all other source and map edits to the full file's line numbers.` : `For review mode return format code:
+return the complete corrected supplied source, preserving unrelated lines and public names.`}
 The application will compute the unified diff deterministically from originalCode.
 If returning format diff, use exactly ${JSON.stringify(`a/${targetPath}`)} and ${JSON.stringify(`b/${targetPath}`)},
 with exact hunk counts and unchanged context. The patch must apply without fuzzy matching.
-For generate mode return standalone source code. code and tests
-are plain strings (no markdown fences). explanation is a short string. assumptions,
+For generate mode return standalone source code. code is a plain string for formats code and diff; it is an array only for format edits. Never use markdown fences. explanation is a short string. assumptions,
 dependencies, security_considerations, validation_instructions are arrays of short
 strings, or one short string when there is only one item. tests is a plain string or array of short strings containing a focused suggested test or regression test procedure, never a
 claim of test execution. Include expected inputs/outputs and compatibility limits.
+The sources key is REQUIRED even when no source applies: return "sources": [] in that case.
 sources is an array of IDs found in retrieved_context. Do not invent sources or
-dependencies. ${retryInvalid ? "" : "A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs. For reviews use format code with complete corrected source; do not calculate diff hunks yourself."}
+dependencies. ${retryInvalid ? "" : `A previous response failed validation. Check JSON syntax, include every required key, use only supplied source IDs. ${input.targetStartLine ? "Use format edits with code as an actual JSON array of exact unique before/after replacements, not an encoded string." : "For reviews use format code with complete corrected source; do not calculate diff hunks yourself."}`}
 UNTRUSTED_DATA_JSON:
 ${JSON.stringify({
               request: clean,
               retrieval_status: retrieval.status,
               retrieved_context: retrieval.sources
-            })}` }
+            })}
+Before returning, verify all ten required top-level keys exist, especially "sources". An empty sources array is valid; omitting it is invalid.` }
           ], { json: true });
           stage = "structured_output";
           const proposal = parseObject(response.text, CODE_FIELDS);
+          if (input.mode === "review" && input.targetStartLine && proposal.format === "edits") {
+            stage = "diff_creation";
+            proposal.code = applyReviewEdits(clean.originalCode, proposal.code);
+            proposal.format = "code";
+          }
           if (input.mode === "review" && proposal.format === "code" && isText(proposal.code, 16e3)) {
             stage = "diff_creation";
+            if (input.targetStartLine && clean.originalCode.endsWith("\n") && !proposal.code.endsWith("\n")) proposal.code += "\n";
             proposal.code = require_libcjs().createTwoFilesPatch(`a/${targetPath}`, `b/${targetPath}`, clean.originalCode, proposal.code, "", "");
             proposal.format = "diff";
           }
@@ -2847,6 +2937,15 @@ ${JSON.stringify({
               if (patches.length !== 1 || !patches[0].hunks.length || patches[0].oldFileName !== `a/${targetPath}` || patches[0].newFileName !== `b/${targetPath}`) throw invalid();
               const changed = applyPatch(clean.originalCode, patches[0], { fuzzFactor: 0 });
               if (changed === false || changed === clean.originalCode || changed.length > 16e3) throw invalid();
+              if (input.targetStartLine) {
+                const offset = input.targetStartLine - 1;
+                for (const hunk of patches[0].hunks) {
+                  hunk.oldStart += offset;
+                  hunk.newStart += offset;
+                }
+                proposal.code = require_libcjs().formatPatch(patches[0]);
+                if (proposal.code.length > 18e3) throw invalid();
+              }
             } catch {
               throw invalid();
             }
@@ -3161,32 +3260,6 @@ var require_UsageBucket = __commonJS({
     });
     schema.index({ expires: 1 }, { expireAfterSeconds: 0 });
     module2.exports = mongoose.models.UsageBucket || mongoose.model("UsageBucket", schema);
-  }
-});
-
-// src/utils/input.js
-var require_input = __commonJS({
-  "src/utils/input.js"(exports2, module2) {
-    var mongoose = require("mongoose");
-    var bad = (message, statusCode = 400, code = "INVALID_INPUT") => Object.assign(new Error(message), { statusCode, code });
-    function integer(value, fallback, max) {
-      if (value === void 0) return fallback;
-      if (typeof value !== "string" || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > max) throw bad(`Expected an integer between 1 and ${max}`);
-      return Number(value);
-    }
-    function repository(owner, repo) {
-      if (typeof owner !== "string" || typeof repo !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || [".", ".."].includes(repo)) throw bad("Invalid GitHub repository identifier");
-    }
-    function objectId(value) {
-      if (typeof value !== "string" || !mongoose.isValidObjectId(value)) throw bad("Invalid identifier");
-      return value;
-    }
-    function optionalCommitSha(value) {
-      if (value === void 0) return void 0;
-      if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) throw bad("Invalid commit SHA");
-      return value;
-    }
-    module2.exports = { bad, integer, repository, objectId, optionalCommitSha };
   }
 });
 
@@ -3574,7 +3647,9 @@ var require_exact_patch = __commonJS({
   "src/utils/exact-patch.js"(exports2, module2) {
     var { parsePatch, applyPatch } = require_libcjs();
     var { bad } = require_input();
+    var { MAX_SOURCE_BYTES } = require_review_source();
     function applyExactDiff(original, patch, filePath) {
+      if (typeof original !== "string" || Buffer.byteLength(original) > MAX_SOURCE_BYTES) throw bad("Source exceeds the patch input limit", 413, "PATCH_INTEGRITY_FAILED");
       if (typeof patch !== "string" || patch.length > 18e3) throw bad("Provide a bounded unified diff", 400, "PATCH_INTEGRITY_FAILED");
       let entries;
       try {
@@ -3589,7 +3664,7 @@ var require_exact_patch = __commonJS({
       } catch {
         throw bad("Diff does not apply to the scanned source", 409, "PATCH_INTEGRITY_FAILED");
       }
-      if (content === false || content === original || content.length > 16e3) throw bad("Diff is empty, too large, or does not match the scanned source", 409, "PATCH_INTEGRITY_FAILED");
+      if (content === false || content === original || Buffer.byteLength(content) > MAX_SOURCE_BYTES) throw bad("Diff is empty, too large, or does not match the scanned source", 409, "PATCH_INTEGRITY_FAILED");
       return content;
     }
     module2.exports = { applyExactDiff };
@@ -3723,7 +3798,7 @@ var require_github_service = __commonJS({
       if (data.truncated) throw bad("Repository tree exceeds GitHub's recursive limit. Use a smaller repository or direct file path.", 413, "TREE_TRUNCATED");
       return data.tree.filter((item) => item.type === "blob").map((item) => ({ path: item.path, size: item.size, commitSha: commit.sha }));
     }
-    async function getFileContent(installationId, owner, repo, filePath, ref) {
+    async function getFileContent(installationId, owner, repo, filePath, ref, { preview = false } = {}) {
       repository(owner, repo);
       if (typeof filePath !== "string" || filePath.length > 1e3 || filePath.includes("\\") || filePath.split("/").some((p) => p === ".." || p === ".") || filePath.startsWith("/")) throw bad("Invalid file path");
       const client = await getInstallationOctokit(installationId);
@@ -3731,6 +3806,13 @@ var require_github_service = __commonJS({
       if (Array.isArray(data) || data.type !== "file" || data.target || data.submodule_git_url) throw bad("Only regular files can be viewed");
       if (data.size > 256 * 1024 || data.encoding !== "base64" || typeof data.content !== "string") throw bad("File is too large or not available as inline text", 413, "FILE_UNSUPPORTED");
       const buffer = Buffer.from(data.content, "base64");
+      if (buffer.length > 256 * 1024) throw bad("File exceeds the 256 KB preview limit. Open it on GitHub.", 413, "FILE_UNSUPPORTED");
+      if (preview && /\.(?:png|jpe?g|gif|webp|ico)$/i.test(filePath)) {
+        const signature = buffer.subarray(0, 12);
+        const mimeType = signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : signature.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? "image/jpeg" : /^(?:GIF87a|GIF89a)$/.test(signature.subarray(0, 6).toString("ascii")) ? "image/gif" : signature.subarray(0, 4).toString("ascii") === "RIFF" && signature.subarray(8, 12).toString("ascii") === "WEBP" ? "image/webp" : signature.subarray(0, 4).equals(Buffer.from([0, 0, 1, 0])) ? "image/x-icon" : null;
+        if (!mimeType) throw bad("This image format could not be verified. Open it on GitHub.", 415, "FILE_UNSUPPORTED");
+        return { path: data.path, name: data.name, size: data.size, sha: data.sha, kind: "image", encoding: "base64", mimeType, content: buffer.toString("base64") };
+      }
       if (buffer.includes(0)) throw bad("Binary files are not supported", 415, "BINARY_FILE");
       return { path: data.path, name: data.name, size: data.size, sha: data.sha, content: buffer.toString("utf8") };
     }
@@ -4445,6 +4527,8 @@ var require_patch_policy = __commonJS({
         "scanners/rules.yml",
         "utils/scanner-rule.js",
         "utils/exact-patch.js",
+        "utils/review-source.js",
+        "services/code-validation.js",
         "utils/patch-policy.js"
       ]) {
         hash.update(file).update("\0").update(fs.readFileSync(path.join(sourceRoot, file), "utf8").replace(/\r\n/g, "\n")).update("\0");
@@ -4651,7 +4735,7 @@ var require_patch_rescan_service = __commonJS({
     var fail = (code) => Object.assign(new Error(code), { code });
     var sourceRoot = [path.join(__dirname, ".."), __dirname].find((root) => require("node:fs").existsSync(path.join(root, "scanners/rules.yml")));
     function policyHash() {
-      if (true) return "5b795a44841177a8f9796c6087950a85636eafe2e6dac388cd5525c3c59cfb70";
+      if (true) return "4cdb281d54b802488d64c965ee5e13c544cb88ef7042aa70c5014d88253810a2";
       return computePolicyHash(sourceRoot);
     }
     function summarize(before, after, finding) {
@@ -4710,7 +4794,7 @@ var require_patch_rescan_service = __commonJS({
           current = path.join(current, component);
           if ((await fs.lstat(current)).isSymbolicLink()) throw fail("RESCAN_SOURCE_MISMATCH");
         }
-        if ((await fs.stat(destination)).size > 32e3) throw fail("RESCAN_SOURCE_MISMATCH");
+        if ((await fs.stat(destination)).size > require_review_source().MAX_SOURCE_BYTES) throw fail("RESCAN_SOURCE_MISMATCH");
         const original = await fs.readFile(destination, "utf8");
         if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
         const content = remediation.applyExactDiff(original, patch, finding.filePath);
@@ -5170,14 +5254,24 @@ var require_remediation_service = __commonJS({
     var { getFileContent, resolveCommit } = require_github_service();
     var { validateCode } = require_code_validation();
     var { bad } = require_input();
+    var { reviewSource } = require_review_source();
     function language(file) {
       return { js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python", c: "c", h: "c", cpp: "cpp", sh: "bash" }[file.split(".").pop()];
     }
-    async function source(scan, finding) {
+    async function source(scan, finding, { fullFile = false } = {}) {
+      if (!scan) throw bad("The scan for this finding is unavailable. Rescan the repository.", 404, "SOURCE_NOT_FOUND");
       if (!scan.commitSha) throw bad("Rescan this repository to pin the source commit", 409);
       if (!language(finding.filePath) || finding.filePath.split("/").some((part) => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) throw bad("This source path is not supported for remediation");
-      const file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha);
-      if (file.content.length > 8e3) throw bad("File exceeds the 8000-character review limit; draft a smaller manual change", 413);
+      let file;
+      try {
+        file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha);
+      } catch (error) {
+        if (error.status === 403 || error.status === 401) throw bad("GitHub denied source access. Check the app's repository access and retry.", 403, "SOURCE_ACCESS_DENIED");
+        if (error.status === 404) throw bad("This file or scanned commit is no longer accessible. Check repository access or rescan.", 404, "SOURCE_NOT_FOUND");
+        if (error.status === 429) throw bad("GitHub is rate limiting source requests. Wait and retry.", 429, "SOURCE_RATE_LIMITED");
+        throw error;
+      }
+      const review = fullFile ? { originalCode: file.content } : reviewSource(file.content, finding);
       const ruleId = require_scanner_rule().canonicalRule(finding.ruleId);
       const guidance = require_remediation_guidance_service().forFinding(finding);
       return {
@@ -5186,12 +5280,12 @@ var require_remediation_service = __commonJS({
         commitSha: scan.commitSha,
         filePath: finding.filePath,
         language: language(finding.filePath),
-        originalCode: file.content,
-        request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance ? guidance.steps.join(" ") : ""} Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3e3)
+        ...review,
+        request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance ? guidance.steps.join(" ") : ""} ${review.sourceWindow ? `The supplied source is an exact excerpt at lines ${review.sourceWindow.startLine}\u2013${review.sourceWindow.endLine}; the finding is at line ${finding.startLine}. Change only the affected code, preserving boundary lines and indentation.` : "Return the complete corrected source."} The application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3e3)
       };
     }
     async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {}) {
-      const context = await source(scan, finding);
+      const context = await source(scan, finding, { fullFile: true });
       let content;
       try {
         content = applyExactDiff(context.originalCode, patch, context.filePath);
@@ -5420,11 +5514,13 @@ var require_assistant_routes = __commonJS({
           res.status(result.status === "unavailable" ? 503 : 200).json({ success: result.status !== "unavailable", data: result });
         } catch (error) {
           const inputError = error.code === "AI_INVALID_INPUT" || error.code === "RAG_INVALID_QUERY";
+          const sourceRequest = req.method === "GET" && req.path.startsWith("/finding/");
+          const sourceError = sourceRequest && ["INVALID_INPUT", "FILE_UNSUPPORTED", "BINARY_FILE", "SOURCE_LINE_UNAVAILABLE", "SOURCE_NOT_FOUND", "SOURCE_ACCESS_DENIED", "SOURCE_RATE_LIMITED"].includes(error.code);
           res.status(error.statusCode || (inputError ? 400 : 503)).json({
             success: false,
             error: {
-              code: inputError ? error.code : "AI_UNAVAILABLE",
-              message: inputError ? error.message : "Assistant unavailable; check configuration and knowledge index"
+              code: inputError || sourceError ? error.code : sourceRequest ? "SOURCE_UNAVAILABLE" : "AI_UNAVAILABLE",
+              message: inputError || sourceError ? error.message : sourceRequest ? "GitHub source could not be loaded. Retry or check repository access." : "Assistant unavailable; check configuration and knowledge index"
             }
           });
         } finally {
@@ -5462,10 +5558,12 @@ var require_assistant_routes = __commonJS({
       if (!demo) router.get("/finding/:findingId", handle(async (req) => {
         const { objectId, bad } = require_input();
         objectId(req.params.findingId);
-        const finding = await require_Finding().findOne({ _id: req.params.findingId, organization: req.params.organizationId }).lean();
+        const findFinding = options.findFinding || ((filter) => require_Finding().findOne(filter).lean());
+        const finding = await findFinding({ _id: req.params.findingId, organization: req.params.organizationId });
         if (!finding) throw bad("Finding not found", 404);
-        const scan = await require_Scan().findById(finding.scan).lean();
-        return require_remediation_service().source(scan, finding);
+        const findScan = options.findScan || ((id) => require_Scan().findById(id).lean());
+        const scan = await findScan(finding.scan);
+        return (options.remediation || require_remediation_service()).source(scan, finding);
       }));
       router.get("/fixtures", handle(async () => ({
         events: { suspicious: require_suspicious(), benign: require_benign() },
@@ -7869,7 +7967,8 @@ var require_github_routes = __commonJS({
             owner,
             repo,
             filePath,
-            ref
+            ref,
+            { preview: true }
           );
           return res.status(200).json({
             success: true,

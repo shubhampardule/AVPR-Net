@@ -67,7 +67,7 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
       current = path.join(current, component);
       if ((await fs.lstat(current)).isSymbolicLink()) throw fail("RESCAN_SOURCE_MISMATCH");
     }
-    if ((await fs.stat(destination)).size > 32000) throw fail("RESCAN_SOURCE_MISMATCH");
+    if ((await fs.stat(destination)).size > require("../utils/review-source").MAX_SOURCE_BYTES) throw fail("RESCAN_SOURCE_MISMATCH");
     const original = await fs.readFile(destination, "utf8");
     if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
     const content = remediation.applyExactDiff(original, patch, finding.filePath);

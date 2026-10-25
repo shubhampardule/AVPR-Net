@@ -221,7 +221,8 @@ router.get(
                 owner,
                 repo,
                 filePath,
-                ref
+                ref,
+                { preview: true }
             );
 
             return res.status(200).json({

@@ -22,6 +22,30 @@ function app(options = {}) {
 const auth = (req, res, next) => { req.user = { _id: "user-1", status: "active" }; next(); };
 const member = (req, res, next) => next();
 
+test.each([
+  [413, "FILE_UNSUPPORTED", "The affected line exceeds the review limit."],
+  [409, "SOURCE_LINE_UNAVAILABLE", "Rescan this repository to pin the source commit"],
+  [403, "SOURCE_ACCESS_DENIED", "Check the app's repository access and retry."],
+])("source loading reports an actionable error without blaming NVIDIA (%s)", async (statusCode, code, message) => {
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findFinding: async () => ({ scan: "scan-1" }), findScan: async () => ({ commitSha: "a".repeat(40) }),
+    remediation: { source: async () => { throw Object.assign(new Error(message), { statusCode, code }); } } });
+  const response = await request(instance).get("/org/org-1/ai/finding/64b64c0f8bd4f4f86f39b123");
+  expect(response.status).toBe(statusCode);
+  expect(response.body.error).toEqual({ code, message });
+});
+
+test("unexpected source errors do not expose exception text or claim the knowledge index failed", async () => {
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findFinding: async () => ({ scan: "scan-1" }), findScan: async () => ({}),
+    remediation: { source: async () => { throw new Error("private response and credentials"); } } });
+  const response = await request(instance).get("/org/org-1/ai/finding/64b64c0f8bd4f4f86f39b123");
+  expect(response.status).toBe(503);
+  expect(response.body.error.code).toBe("SOURCE_UNAVAILABLE");
+  expect(response.body.error.message).toContain("GitHub source");
+  expect(JSON.stringify(response.body)).not.toMatch(/private|credentials|knowledge index/);
+});
+
 test("production accepts the configured site origin while rejecting other origins", async () => {
   const saved = process.env.FRONTEND_URL;
   process.env.FRONTEND_URL = "https://avpr-psi.vercel.app";

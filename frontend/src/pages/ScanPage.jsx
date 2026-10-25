@@ -23,6 +23,9 @@ export default function ScanPage() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [risk, setRisk] = useState("all"), [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [comparison, setComparison] = useState(null);
+  const [comparing, setComparing] = useState(false), [cancelling, setCancelling] = useState(false);
+  const selectedScan = useRef(""); selectedScan.current = `${scope}/${scanId}`;
+  const comparisonRequest = useRef(0);
   const [refresh, setRefresh] = useState(0), [historyRevision, setHistoryRevision] = useState(0), [supplyChain, setSupplyChain] = useState(false);
   const endpoint = `${API_BASE_URL}/scans`;
   async function json(path, options = {}) {
@@ -31,6 +34,10 @@ export default function ScanPage() {
     if (!r.ok) throw new Error(b.error?.message || b.message || "Scan request failed");
     return b.data;
   }
+  useEffect(() => {
+    comparisonRequest.current++;
+    setComparing(false); setCancelling(false); setComparison(null);
+  }, [scope, scanId]);
   useEffect(() => {
     const controller = new AbortController();
     setHistory([]); setScanId(""); setScan(null); setFindings([]); setPagination(null);
@@ -78,13 +85,21 @@ export default function ScanPage() {
     finally { if (current.current === startedFor) setBusy(false); }
   }
   async function cancel() {
-    try { await json(`/${scanId}/cancel`, { method: "POST" }); setRefresh(n => n + 1); }
-    catch (e) { setError(e.message); }
+    if (!scanId || cancelling) return;
+    const startedFor = selectedScan.current;
+    setCancelling(true); setError("");
+    try { await json(`/${scanId}/cancel`, { method: "POST" }); if (selectedScan.current === startedFor) setRefresh(n => n + 1); }
+    catch (e) { if (selectedScan.current === startedFor) setError(e.message); }
+    finally { if (selectedScan.current === startedFor) setCancelling(false); }
   }
   async function compare() {
-    const startedFor = scope;
-    try { const data = await json(`/${scanId}/comparison`); if (current.current === startedFor) setComparison(data); }
-    catch (e) { setError(e.message); }
+    if (!scanId || comparing) return;
+    const startedFor = selectedScan.current, revision = ++comparisonRequest.current;
+    const isCurrent = () => selectedScan.current === startedFor && comparisonRequest.current === revision;
+    setComparing(true); setError("");
+    try { const data = await json(`/${scanId}/comparison`); if (isCurrent()) setComparison(data); }
+    catch (e) { if (isCurrent()) setError(e.message); }
+    finally { if (isCurrent()) setComparing(false); }
   }
   const active = ["queued", "running"].includes(scan?.status);
   const scanOutcome = scan?.status === "completed"
@@ -95,7 +110,7 @@ export default function ScanPage() {
     <header className="flex flex-wrap items-center justify-between gap-4"><div>
       <p className="text-sm text-text-muted">{owner}/{repo}</p><h1 className="text-2xl font-semibold">Security scans</h1>
     </div><div className="flex gap-2"><button className={button} disabled={busy || active || !org} onClick={start}>{busy ? "Queuing…" : "New scan"}</button>
-      {active && <button className={button} onClick={cancel}>Cancel scan</button>}</div></header>
+      {active && <button className={button} disabled={cancelling} onClick={cancel}>{cancelling ? "Cancelling…" : "Cancel scan"}</button>}</div></header>
     <label className="text-sm text-text-muted block"><input type="checkbox" checked={supplyChain} onChange={e => setSupplyChain(e.target.checked)} /> Include dependency advisories (package names/versions are sent to OSV). Credential pattern checks run locally.</label>
     {error && <p role="alert" className="rounded-lg border border-severity-critical/40 p-4 text-severity-critical">{error} <button className="ml-2 underline" onClick={() => scanId ? setRefresh(n => n + 1) : setHistoryRevision(n => n + 1)}>Retry</button>{scan && <span className="mt-2 block text-xs text-severity-medium">Existing scan details remain from the last successful load.</span>}</p>}
     <label className="block text-sm">Scan history<select aria-label="Scan history" disabled={historyLoading} className="ml-3 bg-bg-subtle border border-text-primary/20 p-2 rounded max-w-full disabled:opacity-60" value={scanId} onChange={e => { setScanId(e.target.value); setPage(1); setScan(null); setFindings([]); setPagination(null); setComparison(null); }}>
@@ -122,7 +137,7 @@ export default function ScanPage() {
       {scan.scannerErrors?.length > 0 && <div className="text-severity-medium text-sm"><strong>Incomplete scanner coverage</strong>{scan.scannerErrors.map((e, i) => <p key={i}>{e.scanner}: {e.message}</p>)}</div>}
       <details><summary className="text-sm cursor-pointer">Technical scan record</summary><pre className="text-xs whitespace-pre-wrap mt-2 text-text-muted">{JSON.stringify({ scanId: scan._id, rulesHash: scan.rulesHash, scannerPolicyHash: scan.scannerPolicyHash, normalizerHash: scan.normalizerHash }, null, 2)}</pre></details>
       <div className="flex flex-wrap gap-2"><a className={button} href={`${endpoint}/${scanId}/export?format=json`}>Export JSON</a><a className={button} href={`${endpoint}/${scanId}/export?format=sarif`}>Export SARIF</a>
-        <button className={button} disabled={scan.status !== "completed"} onClick={compare}>Compare with previous scan</button></div>
+        <button className={button} disabled={scan.status !== "completed" || comparing} onClick={compare}>{comparing ? "Loading comparison…" : "Compare with previous scan"}</button></div>
     </section>}
     {comparison && <section className={`${panel} text-sm space-y-3`} aria-live="polite">
       <h2 className="font-semibold">Scan comparison</h2>

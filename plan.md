@@ -152,6 +152,22 @@ The project is ready to move beyond a demo when Phases 0–6 pass their exit che
 
 ## Latest local verification
 
+**25 October update:** the local usability follow-up passes **612 backend tests**,
+**42 frontend unit tests**, **102 mocked browser journeys**, the frontend build and
+the deployment bundle check. **44 disposable Atlas database/HTTP/process checks**
+passed with cleanup. Live NVIDIA chat/embeddings and separate synthetic JavaScript
+and Python large-file excerpt proposals passed; all 82 findings in the previously
+failing scan loaded source locally. Source-window fixes, stale response protection,
+real raster previews and assistant feedback are implemented locally. Production is
+still `6cf4512`; these fixes have not been pushed. GitHub event subscriptions are
+still absent, and fresh independent-account OAuth acceptance remains open. Edge
+reconnected and scoped owner-account production checks passed for access refresh,
+source navigation, scan/finding details, pagination, notifications and settings;
+the unpublished fixes still require production verification after release.
+See [the detailed audit](docs/USABILITY_AUDIT_2026-10-25.md).
+This update supersedes the older test counts and release status below; it does not
+close the broader roadmap packages.
+
 The 23 October follow-up passes **465 backend tests across 64 suites**, **19 frontend unit tests**, **89 mocked browser journeys**, and both builds. **35 combined live database/HTTP/process checks** passed against disposable Atlas data with successful cleanup: six lifecycle, seven automation, five completion, two expiry, four cancellation HTTP, six team HTTP, two worker-process drills, and three signed email callback checks. OAuth identities, downloads/scanner output and scan enqueue are substituted where documented; no application-account records were deleted and no real invitation email was sent. See [the acceptance record](docs/ACCEPTANCE_2026-10-23.md). The preceding release c1137ff passed CI and production health/protected-route checks. The GitHub settings UI and a fresh API read on 23 October confirmed Contents read-only, Pull requests no access, and no event subscriptions; the UI showed a blank webhook URL. The owner has been asked to update permissions directly; no permission change has been verified. The local real API and Vite proxy return healthy database responses and protected routes return 401 when signed out. New work remains local; pushing is disabled by user instruction.
 
 ## Submission runner follow-up (23 October)

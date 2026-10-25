@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createTwoFilesPatch } from "diff";
+import { createTwoFilesPatch, parsePatch, formatPatch } from "diff";
 
 const scanId = "scan-assistant-1";
 const findingId = "64b64c0f8bd4f4f86f39b123";
@@ -14,7 +14,7 @@ function verificationFixture(action, syntaxStatus = "passed") {
       { name: "allowed_tests", status: "unavailable" }, { name: "security_rescan", status: "unavailable" }] };
 }
 
-async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0, sourceFailures = 0, patchSyntaxStatus = "valid", verificationRecords = [], rescanOutcome = "target_alert_absent" } = {}) {
+async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatchValidate, onPullRequest, fixturesDelayMs = 0, healthStatus = "configured", healthFailures = 0, previewFailures = 0, sourceFailures = 0, sourceWindow, patchSyntaxStatus = "valid", verificationRecords = [], rescanOutcome = "target_alert_absent" } = {}) {
   let healthFailureCount = 0;
   let previewFailureCount = 0;
   let sourceFailureCount = 0;
@@ -69,7 +69,7 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     }
     else if (path.endsWith(`/ai/finding/${findingId}`)) data = {
       scanId, findingId, filePath: "src/ports.js", commitSha: "a".repeat(40), language: "javascript", mode: "review",
-      originalCode, request: "Review this port parser for unsafe input handling.",
+      originalCode, request: "Review this port parser for unsafe input handling.", ...(sourceWindow ? { sourceWindow } : {}),
     };
     else if (path.endsWith(`/scans/${scanId}/findings/${findingId}/verifications`)) data = { verifications: verificationRecords };
     else if (path.endsWith("/ai/analyze") && request.method() === "POST") {
@@ -78,9 +78,15 @@ async function mockAssistant(page, { codeResponse, onAnalyze, onRetrieve, onPatc
     }
     else if (path.endsWith("/ai/code") && request.method() === "POST") {
       await codeResponse?.(request);
+      let responsePatch = proposalCode;
+      if (sourceWindow) {
+        const entry = parsePatch(proposalCode)[0];
+        for (const hunk of entry.hunks) { hunk.oldStart += sourceWindow.startLine - 1; hunk.newStart += sourceWindow.startLine - 1; }
+        responsePatch = formatPatch(entry);
+      }
       data = {
         status: "complete", language: JSON.parse(request.postData()).language,
-        proposal: { explanation: "Validates the value before parsing.", code: proposalCode, format: "diff", assumptions: ["Input is a string."], dependencies: [], security_considerations: ["Rejects non-decimal input."], validation_instructions: ["Run the unit tests."], tests: ["Reject letters."] },
+        proposal: { explanation: "Validates the value before parsing.", code: responsePatch, format: "diff", assumptions: ["Input is a string."], dependencies: [], security_considerations: ["Rejects non-decimal input."], validation_instructions: ["Run the unit tests."], tests: ["Reject letters."] },
         validation: { status: "not_executed", message: "Syntax checks are not execution." }, sources: [],
       };
     }
@@ -114,6 +120,27 @@ async function approve(page) {
   await consent.check();
   return consent;
 }
+
+test("submitted proposal inputs stay fixed while its model request is pending", async ({ page }) => {
+  let release, entered;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  await mockAssistant(page, { codeResponse: async () => { entered(); await waiting; } });
+  await page.goto("/assistant");
+  await page.getByRole("button", { name: "Code & review", exact: true }).click();
+  await page.getByRole("button", { name: "Load review example", exact: true }).click();
+  await approve(page);
+  await page.getByRole("button", { name: "Draft proposal", exact: true }).click();
+  await started;
+  try {
+    await expect(page.getByRole("combobox", { name: /^Language/ })).toBeDisabled();
+    await expect(page.getByRole("combobox", { name: /^Mode/ })).toBeDisabled();
+    await expect(page.getByRole("textbox", { name: "Code request" })).toBeDisabled();
+    await expect(page.getByRole("textbox", { name: "Source for review" })).toBeDisabled();
+  } finally { release(); }
+  await expect(page.getByRole("button", { name: "Download proposal" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Code request" })).toBeEnabled();
+});
 
 test("signed-in assistant exposes one working theme toggle at desktop and mobile widths", async ({ page }) => {
   await mockAssistant(page);
@@ -243,6 +270,18 @@ test("assistant reports the provider connected after a successful request", asyn
   await expect(page.getByText("NVIDIA: Connected")).toBeVisible();
 });
 
+test("missing hosted-provider configuration disables requests with useful guidance", async ({ page }) => {
+  await mockAssistant(page, { healthStatus: "missing_key" });
+  await page.goto("/assistant");
+  await expect(page.getByText(/Hosted AI is not configured on this deployment/)).toBeVisible();
+  const consent = page.getByRole("checkbox", { name: /I approve sending the data shown above/ });
+  for (const [workflow, submit] of [["Investigate", "Analyze evidence"], ["Code & review", "Draft proposal"], ["Knowledge", "Retrieve sources"]]) {
+    await page.getByRole("button", { name: workflow, exact: true }).click();
+    await expect(consent).toBeDisabled();
+    await expect(page.getByRole("button", { name: submit, exact: true })).toBeDisabled();
+  }
+});
+
 test("assistant setup failures offer a working retry", async ({ page }) => {
   let retryEnabled = false;
   await mockAssistant(page, { healthFailures: () => !retryEnabled });
@@ -312,6 +351,7 @@ test("assistant code controls submit the selected review, copy and download the 
 
   await page.getByRole("button", { name: "Copy proposal" }).click();
   await expect.poll(() => page.evaluate(() => window.__assistantClipboard)).toBe(proposalCode);
+  await expect(page.getByRole("button", { name: "Copy proposal" })).toHaveText("Copied");
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download proposal" }).click();
   const downloaded = await download;
@@ -406,6 +446,24 @@ test("switching from a finding explanation auto-fills the scanned source and fix
   await expect(page.getByLabel("Language")).toBeDisabled();
   await expect(page.getByRole("button", { name: "Load review example" })).toHaveCount(0);
   await expect(page.getByLabel("Code request")).toHaveValue("Review this port parser for unsafe input handling.");
+});
+
+test("large-file findings submit their exact excerpt offset and show before/after at real file lines", async ({ page }) => {
+  let submitted;
+  await mockAssistant(page, { sourceWindow: { startLine: 701, endLine: 701, totalLines: 1468 },
+    codeResponse: request => { submitted = JSON.parse(request.postData()); } });
+  await page.goto(`/assistant?mode=review&findingId=${findingId}`);
+  await expect(page.getByLabel("Source for review")).toHaveValue(originalCode);
+  await expect(page.getByText(/Showing lines 701–701 of 1468/)).toBeVisible();
+  await approve(page);
+  await page.getByRole("button", { name: "Draft proposal", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "After Proposed source" })).toBeVisible();
+  expect(submitted).toMatchObject({ originalCode, targetPath: "src/ports.js", targetStartLine: 701 });
+  await expect(page.getByText(/Excerpt from line 701/)).toBeVisible();
+  const comparison = page.getByRole("region", { name: "Before and after code comparison" });
+  await comparison.getByRole("button", { name: "Unified diff", exact: true }).click();
+  await expect(comparison.locator("code")).toContainText("@@ -701");
+  await expect(page.getByRole("checkbox", { name: /I approve sending the data shown above/ })).toBeChecked();
 });
 
 test("source loading failures block proposals and offer a working retry", async ({ page }) => {

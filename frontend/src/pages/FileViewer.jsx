@@ -100,7 +100,7 @@ export default function FileViewer() {
     ref,
   ]);
 
-  const isImage = isImageFile(filePath);
+  const isImage = file?.kind === "image";
 
   return (
     <main className="app-document min-h-screen">
@@ -137,6 +137,8 @@ export default function FileViewer() {
               <p className="mt-1 font-mono-code text-xs text-text-muted">
                 {decodedOwner}/{decodedRepo}
               </p>
+              {filePath && <a href={`https://github.com/${encodeURIComponent(decodedOwner)}/${encodeURIComponent(decodedRepo)}/blob/${encodeURIComponent(ref || "HEAD")}/${filePath.split("/").map(encodeURIComponent).join("/")}`}
+                target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs text-accent-security underline underline-offset-2">Open file on GitHub</a>}
             </div>
 
           </div>
@@ -191,7 +193,6 @@ export default function FileViewer() {
     </main>
   );
 }
-
 /* ---------------- Code Viewer ---------------- */
 
 function CodeViewer({ file, filePath }) {
@@ -269,14 +270,8 @@ function CodeViewer({ file, filePath }) {
 /* ---------------- Image Preview ---------------- */
 
 function ImagePreview({ file, filePath }) {
-  /*
-   * Important:
-   * The current backend converts GitHub content to UTF-8 text.
-   * That works for source files but NOT for binary images.
-   *
-   * Therefore image rendering will be enabled after the backend
-   * returns binary content/base64 correctly.
-   */
+  const [failed, setFailed] = useState(false);
+  const supported = file.encoding === "base64" && ["image/png", "image/jpeg", "image/gif", "image/webp", "image/x-icon"].includes(file.mimeType);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary">
@@ -291,28 +286,11 @@ function ImagePreview({ file, filePath }) {
 
       <div className="flex min-h-[400px] items-center justify-center p-10">
 
-        <div className="text-center">
-
-          <FileImage className="mx-auto h-10 w-10 text-text-muted" />
-
-          <p className="mt-4 text-sm font-medium text-text-secondary">
-            Image preview
-          </p>
-
-          <p className="mt-1 text-xs text-text-muted">
-            Binary preview support will be enabled with the
-            repository content API.
-          </p>
-
-        </div>
+        {supported && !failed ? <img src={`data:${file.mimeType};base64,${file.content}`} alt={filePath}
+          className="max-h-[36rem] max-w-full object-contain" onError={() => setFailed(true)} />
+          : <p role="status" className="text-center text-sm text-text-secondary">This image could not be displayed. Open the file on GitHub.</p>}
 
       </div>
     </div>
-  );
-}
-
-function isImageFile(path = "") {
-  return /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(
-    path
   );
 }

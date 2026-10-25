@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 const orgs = [
   { id: "org-a", name: "Demo Team", role: "owner" },
@@ -251,6 +252,68 @@ function installWorkspaceApi(page, overrides = {}) {
 }
 
 test.describe("workspace controls, with mocked APIs", () => {
+  test("repository files show real raster previews, inert SVG source, and a useful fallback", async ({ page }) => {
+    const state = installWorkspaceApi(page);
+    const ref = "a".repeat(40);
+    state.file = { path: "icon.png", kind: "image", encoding: "base64", mimeType: "image/png",
+      content: readFileSync(new URL("../public/securepatch-favicon.png", import.meta.url)).toString("base64") };
+    await page.goto(`/github/team/project/file?path=icon.png&ref=${ref}`);
+    const image = page.getByRole("img", { name: "icon.png", exact: true });
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate(element => element.naturalWidth)).toBeGreaterThan(0);
+    await expect(page.getByRole("link", { name: "Open file on GitHub" })).toHaveAttribute("href", `https://github.com/team/project/blob/${ref}/icon.png`);
+    const svg = '<svg><script>window.__untrustedSvgRan = true</script></svg>';
+    state.file = { path: "icon.svg", content: svg };
+    await page.goto(`/github/team/project/file?path=icon.svg&ref=${ref}`);
+    await expect(page.getByText(svg, { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => window.__untrustedSvgRan)).toBeUndefined();
+    state.file = { path: "broken.png", kind: "image", encoding: "base64", mimeType: "image/png", content: "iVBORw0KGgo=" };
+    await page.goto(`/github/team/project/file?path=broken.png&ref=${ref}`);
+    await expect(page.getByText("This image could not be displayed. Open the file on GitHub.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open file on GitHub" })).toHaveAttribute("href", `https://github.com/team/project/blob/${ref}/broken.png`);
+  });
+
+  test("a late comparison cannot appear under a different selected scan", async ({ page }) => {
+    installWorkspaceApi(page);
+    let release, entered;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { entered = resolve; });
+    await page.route("**/scans/scan-1/comparison", async route => {
+      entered(); await waiting;
+      await route.fulfill({ json: { success: true, data: { canCompare: false, limitation: "Comparison from the previously selected scan" } } });
+    });
+    await page.goto("/github/team/project/scan");
+    await page.getByRole("button", { name: "Compare with previous scan" }).click();
+    await started;
+    await page.getByLabel("Scan history").selectOption("scan-0");
+    await expect(page.getByRole("link", { name: "View scanned commit def987654321" })).toBeVisible();
+    release(); await page.waitForLoadState("networkidle");
+    await expect(page.getByText("Comparison from the previously selected scan")).toHaveCount(0);
+  });
+
+  test("a late notification refresh cannot replace the selected workspace's notifications", async ({ page }) => {
+    installWorkspaceApi(page);
+    let release, entered, pauseOld = false;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { entered = resolve; });
+    await page.route("**/organizations/*/notifications?*", async route => {
+      const isOther = route.request().url().includes("/org-b/");
+      const delayed = !isOther && pauseOld;
+      if (delayed) { entered(); await waiting; }
+      await route.fulfill({ json: { success: true, data: { notifications: [], unreadCount: isOther ? 2 : delayed ? 99 : 1,
+        preferences: { scanResults: true } } } });
+    });
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: "Notifications, 1 unread", exact: true })).toBeVisible();
+    pauseOld = true;
+    await page.getByRole("button", { name: "Notifications, 1 unread", exact: true }).click();
+    await started;
+    await page.getByRole("combobox").first().selectOption("org-b");
+    await expect(page.getByRole("button", { name: "Notifications, 2 unread", exact: true })).toBeVisible();
+    release(); await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("button", { name: "Notifications, 2 unread", exact: true })).toBeVisible();
+  });
+
   test("dashboard refresh, workspace selector, organization form, retry, and mobile navigation", async ({ page }) => {
     const state = installWorkspaceApi(page, { failNext: { createOrganization: "Organization create failed" } });
     await page.goto("/dashboard");
@@ -963,6 +1026,36 @@ test("invitation delivery labels distinguish server acceptance from delay and fa
     await expect(page.getByText(label, { exact: false })).toBeVisible();
   }
 });
+
+for (const change of ["read", "preference"]) {
+  test(`a delayed notification refresh cannot undo a saved ${change} change`, async ({ page }) => {
+    installWorkspaceApi(page);
+    let release, entered, pauseOld = false;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { entered = resolve; });
+    await page.route("**/organizations/org-a/notifications?*", async route => {
+      if (pauseOld) { entered(); await waiting; }
+      await route.fulfill({ json: { success: true, data: { notifications: [], unreadCount: 1,
+        preferences: { scanResults: true } } } });
+    });
+    await page.goto("/dashboard");
+    const button = page.getByRole("button", { name: "Notifications, 1 unread", exact: true });
+    await expect(button).toBeVisible();
+    pauseOld = true;
+    await button.click(); await started;
+    const panel = page.getByRole("dialog", { name: "Notifications" });
+    if (change === "read") {
+      await panel.getByRole("button", { name: "Mark all read" }).click();
+      await expect(page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible();
+    } else {
+      const preference = panel.getByRole("checkbox", { name: "Notify me about scan results" });
+      await preference.uncheck(); await expect(preference).toBeEnabled();
+    }
+    release(); await page.waitForLoadState("networkidle");
+    if (change === "read") await expect(page.getByRole("button", { name: "Notifications", exact: true })).toBeVisible();
+    else await expect(panel.getByRole("checkbox", { name: "Notify me about scan results" })).not.toBeChecked();
+  });
+}
 
 for (const emailStatus of ["accepted", "failed", "unknown"]) {
   test(`optional invitation email ${emailStatus} preserves manual sharing`, async ({ page }) => {

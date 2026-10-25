@@ -3,22 +3,31 @@ const { getInstallationOctokit } = require("../config/github");
 const { getFileContent, resolveCommit } = require("./github.service");
 const { validateCode } = require("./code-validation");
 const { bad } = require("../utils/input");
+const { reviewSource } = require("../utils/review-source");
 function language(file) {
   return ({ js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python", c: "c", h: "c", cpp: "cpp", sh: "bash" })[file.split(".").pop()];
 }
-async function source(scan, finding) {
+async function source(scan, finding, { fullFile = false } = {}) {
+  if (!scan) throw bad("The scan for this finding is unavailable. Rescan the repository.", 404, "SOURCE_NOT_FOUND");
   if (!scan.commitSha) throw bad("Rescan this repository to pin the source commit", 409);
   if (!language(finding.filePath) || finding.filePath.split("/").some(part => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) throw bad("This source path is not supported for remediation");
-  const file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha);
-  if (file.content.length > 8000) throw bad("File exceeds the 8000-character review limit; draft a smaller manual change", 413);
+  let file;
+  try { file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha); }
+  catch (error) {
+    if (error.status === 403 || error.status === 401) throw bad("GitHub denied source access. Check the app's repository access and retry.", 403, "SOURCE_ACCESS_DENIED");
+    if (error.status === 404) throw bad("This file or scanned commit is no longer accessible. Check repository access or rescan.", 404, "SOURCE_NOT_FOUND");
+    if (error.status === 429) throw bad("GitHub is rate limiting source requests. Wait and retry.", 429, "SOURCE_RATE_LIMITED");
+    throw error;
+  }
+  const review = fullFile ? { originalCode: file.content } : reviewSource(file.content, finding);
   const ruleId=require("../utils/scanner-rule").canonicalRule(finding.ruleId);
   const guidance=require("./remediation-guidance.service").forFinding(finding);
   return { findingId: String(finding._id), scanId: String(scan._id), commitSha: scan.commitSha, filePath: finding.filePath,
-    language: language(finding.filePath), originalCode: file.content,
-    request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance?guidance.steps.join(" "):""} Return the complete corrected source; the application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3000) };
+    language: language(finding.filePath), ...review,
+    request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance?guidance.steps.join(" "):""} ${review.sourceWindow ? `The supplied source is an exact excerpt at lines ${review.sourceWindow.startLine}–${review.sourceWindow.endLine}; the finding is at line ${finding.startLine}. Change only the affected code, preserving boundary lines and indentation.` : "Return the complete corrected source."} The application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3000) };
 }
 async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {}) {
-  const context = await source(scan, finding);
+  const context = await source(scan, finding, { fullFile: true });
   let content;
   try { content = applyExactDiff(context.originalCode, patch, context.filePath); }
   catch (error) { error.validationContext = context; throw error; }

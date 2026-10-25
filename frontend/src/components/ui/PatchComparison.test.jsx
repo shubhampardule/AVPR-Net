@@ -2,13 +2,25 @@ import React from "react";
 import { afterEach, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createTwoFilesPatch } from "diff";
+import { createTwoFilesPatch, parsePatch, formatPatch } from "diff";
 import PatchComparison from "./PatchComparison";
 
 afterEach(cleanup);
 const before = "function parse(value) {\n  return eval(value);\n}\n";
 const after = "function parse(value) {\n  return JSON.parse(value);\n}\n";
 const patch = createTwoFilesPatch("a/index.js", "b/index.js", before, after);
+
+test("excerpt comparisons retain actual file line numbers and the full-file unified patch", async () => {
+  const parsed = parsePatch(patch)[0];
+  for (const hunk of parsed.hunks) { hunk.oldStart += 700; hunk.newStart += 700; }
+  const actualPatch = formatPatch(parsed);
+  render(<PatchComparison filename="index.js" originalCode={before} patch={actualPatch} startLine={701} />);
+  expect(screen.getByText("return JSON.parse(value);")).toBeTruthy();
+  expect(screen.getByText(/Excerpt from line 701/)).toBeTruthy();
+  expect(screen.getAllByText("702")).toHaveLength(2);
+  await userEvent.click(screen.getByRole("button", { name: "Unified diff" }));
+  expect(screen.getByRole("region", { name: "Before and after code comparison" }).querySelector("pre code").textContent).toBe(actualPatch);
+});
 
 test("shows exact before/after source and preserves the original patch in unified view", async () => {
   render(<PatchComparison filename="index.js" commitSha="abcdef1234" originalCode={before} patch={patch} />);

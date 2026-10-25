@@ -19,22 +19,25 @@ export default function NotificationCenter({ organizationId }) {
   const [error, setError] = useState("");
   const root = useRef(null);
   const preferenceBusyRef = useRef(false);
+  const readRevision = useRef(0);
 
   const load = useCallback(async (signal) => {
     if (!organizationId) return;
+    const revision = ++readRevision.current;
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/notifications?limit=10`, { credentials: "include", signal });
       const body = await response.json();
+      if (signal?.aborted || revision !== readRevision.current) return;
       if (!response.ok) throw new Error(body.error?.message || "Notifications could not be loaded.");
       setItems(Array.isArray(body.data?.notifications) ? body.data.notifications : []);
       setUnreadCount(Number.isSafeInteger(body.data?.unreadCount) ? body.data.unreadCount : 0);
       if (!preferenceBusyRef.current) setScanResults(body.data?.preferences?.scanResults !== false);
       setError("");
     } catch (requestError) {
-      if (requestError.name !== "AbortError") setError(requestError.message || "Notifications could not be loaded.");
+      if (!signal?.aborted && revision === readRevision.current && requestError.name !== "AbortError") setError(requestError.message || "Notifications could not be loaded.");
     } finally {
-      if (signal?.aborted !== true) setLoading(false);
+      if (!signal?.aborted && revision === readRevision.current) setLoading(false);
     }
   }, [organizationId]);
 
@@ -60,12 +63,14 @@ export default function NotificationCenter({ organizationId }) {
 
   async function markRead(notificationId) {
     if (!organizationId) return;
+    readRevision.current++; setLoading(false);
     try {
       const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/notifications/${notificationId}/read`,
         { method: "PATCH", credentials: "include" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "This notification could not be marked read.");
       const readAt = body.data?.notification?.readAt || new Date().toISOString();
+      readRevision.current++; setLoading(false);
       setItems(current => current.map(item => String(item._id) === String(notificationId) ? { ...item, readAt } : item));
       setUnreadCount(count => Math.max(0, count - 1));
       setError("");
@@ -75,12 +80,14 @@ export default function NotificationCenter({ organizationId }) {
   async function markAllRead() {
     if (!organizationId || busy || unreadCount === 0) return;
     setBusy(true);
+    readRevision.current++; setLoading(false);
     try {
       const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/notifications/read-all`,
         { method: "PATCH", credentials: "include" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "Notifications could not be marked read.");
       const readAt = new Date().toISOString();
+      readRevision.current++; setLoading(false);
       setItems(current => current.map(item => item.readAt ? item : { ...item, readAt }));
       setUnreadCount(0); setError("");
     } catch (requestError) { setError(requestError.message); }
@@ -91,6 +98,7 @@ export default function NotificationCenter({ organizationId }) {
     if (!organizationId || preferenceBusy) return;
     const previous = scanResults;
     preferenceBusyRef.current = true;
+    readRevision.current++; setLoading(false);
     setScanResults(enabled);
     setPreferenceBusy(true);
     try {
@@ -100,6 +108,7 @@ export default function NotificationCenter({ organizationId }) {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "Your scan notification preference could not be saved.");
+      readRevision.current++; setLoading(false);
       setScanResults(body.data?.preferences?.scanResults === true); setError("");
     } catch (requestError) { setScanResults(previous); setError(requestError.message); }
     finally { preferenceBusyRef.current = false; setPreferenceBusy(false); }

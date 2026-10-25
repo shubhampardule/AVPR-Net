@@ -3,18 +3,20 @@ import { applyPatch, diffLines, parsePatch } from "diff";
 
 const lines = text => text.replace(/\r\n/g, "\n").split("\n").slice(0, text.endsWith("\n") ? -1 : undefined);
 
-export default function PatchComparison({ originalCode, patch, filename = "source", commitSha }) {
+export default function PatchComparison({ originalCode, patch, filename = "source", commitSha, startLine = 1 }) {
   const [view, setView] = useState("split");
   const comparison = useMemo(() => {
     try {
       if (typeof originalCode !== "string") return null;
       const parsed = parsePatch(patch, { strict: true });
       if (parsed.length !== 1 || parsed[0].oldFileName !== `a/${filename}` || parsed[0].newFileName !== `b/${filename}`) return null;
+      if (!Number.isSafeInteger(startLine) || startLine < 1) return null;
+      for (const hunk of parsed[0].hunks) { hunk.oldStart -= startLine - 1; hunk.newStart -= startLine - 1; }
       const after = applyPatch(originalCode, parsed[0], { fuzzFactor: 0 });
       if (after === false) return null;
       const changes = diffLines(originalCode, after);
       const rows = [];
-      let beforeLine = 1, afterLine = 1;
+      let beforeLine = startLine, afterLine = startLine;
       for (let index = 0; index < changes.length; index++) {
         const change = changes[index];
         if (!change.added && !change.removed) {
@@ -31,12 +33,12 @@ export default function PatchComparison({ originalCode, patch, filename = "sourc
       }
       return { rows };
     } catch { return null; }
-  }, [originalCode, patch, filename]);
+  }, [originalCode, patch, filename, startLine]);
 
   return <section aria-label="Before and after code comparison" className="min-w-0 overflow-hidden rounded-lg border border-text-primary/15 bg-bg-primary">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-text-primary/10 bg-bg-elevated px-4 py-3">
       <div className="min-w-0"><p className="break-all font-mono text-xs text-text-primary">{filename}</p>
-        <p className="mt-1 text-xs text-text-muted">{commitSha ? `Scanned commit ${commitSha.slice(0, 7)} · ` : ""}Proposed change · not applied</p></div>
+        <p className="mt-1 text-xs text-text-muted">{commitSha ? `Scanned commit ${commitSha.slice(0, 7)} · ` : ""}{startLine > 1 ? `Excerpt from line ${startLine} · ` : ""}Proposed change · not applied</p></div>
       <div role="group" aria-label="Code comparison view" className="flex gap-1 rounded-md border border-text-primary/15 p-1">
         {[["split", "Side by side"], ["unified", "Unified diff"]].map(([value, label]) => <button type="button" key={value}
           aria-pressed={view === value} disabled={value === "split" && !comparison} onClick={() => setView(value)}

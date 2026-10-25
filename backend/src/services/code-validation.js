@@ -2,6 +2,7 @@ const { Worker } = require("node:worker_threads");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { MAX_SOURCE_BYTES } = require("../utils/review-source");
 
 function syntaxWorkerPath() {
   const candidates = [path.join(__dirname, "syntax-worker.js"), path.join(__dirname, "services", "syntax-worker.js")];
@@ -9,7 +10,7 @@ function syntaxWorkerPath() {
 }
 
 async function validateCode(language, code, format = "code") {
-  if (typeof code !== "string" || Buffer.byteLength(code) > 32000) {
+  if (typeof code !== "string" || Buffer.byteLength(code) > MAX_SOURCE_BYTES) {
     return { status: "failed", executed: false, message: "Proposal exceeds parser input limit" };
   }
   if (format === "diff" || !["python", "javascript", "typescript"].includes(language)) {
@@ -20,7 +21,7 @@ async function validateCode(language, code, format = "code") {
   if (language === "python") {
     return new Promise((resolve) => {
       // This is trusted parser code. The generated proposal is only stdin data.
-      const parser = "import ast,sys; ast.parse(sys.stdin.read(32001)); print('VALID')";
+      const parser = `import ast,sys; ast.parse(sys.stdin.read(${MAX_SOURCE_BYTES + 1})); print('VALID')`;
       const child = execFile("python", ["-I", "-c", parser], { timeout: 3000, maxBuffer: 4096,
         windowsHide: true, env: { PATH: process.env.PATH || process.env.Path || "",
           SystemRoot: process.env.SystemRoot || "", TEMP: process.env.TEMP || "", PYTHONNOUSERSITE: "1" } }, (error, stdout, stderr) => {

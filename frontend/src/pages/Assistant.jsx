@@ -84,6 +84,10 @@ export default function Assistant({ demo = false }) {
   const [query, setQuery] = useState("Repeated SSH authentication failures");
   const [result, setResult] = useState(null);
   const [proposalSource, setProposalSource] = useState(null);
+  const [proposalCopied, setProposalCopied] = useState(false);
+  const activeProposal = useRef(null); activeProposal.current = result?.proposal?.code;
+  const copyFeedbackTimer = useRef(null);
+  useEffect(() => { setProposalCopied(false); return () => clearTimeout(copyFeedbackTimer.current); }, [result?.proposal?.code]);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [loadBusy, setLoadBusy] = useState(false);
@@ -116,7 +120,8 @@ export default function Assistant({ demo = false }) {
   const requestFingerprint = JSON.stringify({ organizationId, tab, findingId: demo ? "" : findingId,
     eventText: tab === "investigate" ? eventText : "", language: tab === "code" ? language : "",
     mode: tab === "code" ? mode : "", request: tab === "code" ? request : "",
-    originalCode: tab === "code" && mode === "review" ? originalCode : "", query: tab === "sources" ? query : "" });
+    originalCode: tab === "code" && mode === "review" ? originalCode : "", targetPath: tab === "code" ? draftContext?.filePath : undefined,
+    targetStartLine: tab === "code" ? draftContext?.sourceWindow?.startLine : undefined, query: tab === "sources" ? query : "" });
   let previewValue, embeddingQuery;
   if (tab === "investigate") {
     if (findingId.trim() && !demo) {
@@ -132,12 +137,14 @@ export default function Assistant({ demo = false }) {
       } catch { previewValue = sanitizePreview(eventText); }
     }
   } else if (tab === "code") {
-    previewValue = sanitizePreview({ language, mode, request, ...(mode === "review" ? { originalCode } : {}) });
+    previewValue = sanitizePreview({ language, mode, request, ...(mode === "review" ? { originalCode,
+      ...(draftContext?.sourceWindow ? { targetStartLine: draftContext.sourceWindow.startLine } : {}) } : {}) });
     embeddingQuery = sanitizePreview(`${language} secure coding guidance ${sanitizePreview(request)}`.slice(0, 1500));
   } else { previewValue = sanitizePreview({ query }); embeddingQuery = sanitizePreview(query).slice(0, 1500); }
   const findingIdFormatInvalid = !demo && Boolean(findingId.trim()) && !/^[a-f0-9]{24}$/i.test(findingId.trim());
   const findingPreviewPending = !demo && tab === "investigate" && Boolean(findingId.trim()) && !findingIdFormatInvalid && !findingPreview;
   const hostedAiBlocked = !demo && policy?.hostedAiEnabled !== true;
+  const providerUnavailable = health?.status === "missing_key";
   const findingSourceBlocked = !demo && tab === "code" && Boolean(findingId.trim()) &&
     (sourceLoading || Boolean(sourceError) || draftContext?.findingId !== findingId.trim());
   const providerStatus = health?.status
@@ -247,19 +254,22 @@ export default function Assistant({ demo = false }) {
 
   async function run(event) {
     event.preventDefault(); setError("");
+    if (busy) return;
     if (findingSourceBlocked) { setError("Load the scanned source before drafting a fix."); return; }
     if (consentFor !== requestFingerprint) { setError("Review the data preview and confirm sharing it for this request."); return; }
     setBusy(true); setResult(null); setPatchCheck(null); setPullRequest(null); setAcknowledged(false);
     const startedFor = base;
     const submittedSource = tab === "code" && mode === "review" ? {
       originalCode: sanitizePreview(originalCode), filename: draftContext?.filePath || "source", commitSha: draftContext?.commitSha,
+      startLine: draftContext?.sourceWindow?.startLine || 1,
     } : null;
     const controller = new AbortController();
     pendingRequest.current = controller;
     try {
       const response = tab === "investigate" ? await api("analyze", findingId.trim() && !demo
         ? { findingId: findingId.trim() } : { event: JSON.parse(eventText) }, controller.signal)
-        : tab === "code" ? await api("code", { language, mode, request, ...(mode === "review" ? { originalCode, targetPath: draftContext?.filePath || "source" } : {}) }, controller.signal)
+        : tab === "code" ? await api("code", { language, mode, request, ...(mode === "review" ? { originalCode, targetPath: draftContext?.filePath || "source",
+          ...(draftContext?.sourceWindow ? { targetStartLine: draftContext.sourceWindow.startLine } : {}) } : {}) }, controller.signal)
           : await api("retrieve", { query }, controller.signal);
       if (activeBase.current !== startedFor) return;
       if (response.status !== "unavailable") {
@@ -329,14 +339,14 @@ export default function Assistant({ demo = false }) {
         <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-xs text-text-secondary">
           <span>NVIDIA: <strong className="font-medium text-text-primary">{providerStatus}</strong></span>
           <span>Knowledge index: <strong className="font-medium text-text-primary">{knowledge?.chunks ?? "—"} passages</strong></span>
-          <span>Code execution disabled</span>
+          <span>Repository tests require separate approval</span>
         </div>
       </header>
       <details className="border-l-2 border-severity-medium bg-bg-secondary px-4 py-3 text-sm leading-6 text-text-secondary">
         <summary className="font-medium text-text-primary">How your data is used</summary>
         <p className="mt-1">After approval, AVPR-Net sends redacted evidence and up to four excerpts from the approved security index to NVIDIA for search and inference. Redaction is best effort.
         {demo && " This demo uses sample events and does not monitor network traffic."}
-        {" "}Review all advice, code, and suggested tests. Nothing is executed.</p>
+        {" "}Review all advice, code, and suggested tests. Generated code is only executed if you separately approve isolated repository tests.</p>
       </details>
       <nav className="flex flex-wrap gap-x-5 border-b border-text-primary/[0.1]" aria-label="Assistant workflows">
         {[["investigate", "Investigate"], ["code", "Code & review"], ["sources", "Knowledge"]].map(([id, label]) =>
@@ -355,7 +365,7 @@ export default function Assistant({ demo = false }) {
           {tab === "investigate" && <>
             <h2 className="font-semibold">Structured evidence</h2>
             {!demo && <label className="block text-sm text-text-primary">Existing finding ID (optional)
-              <input aria-label="Finding ID" className={`${field} mt-2`} value={findingId} onChange={(e) => setFindingId(e.target.value)} maxLength={24} />
+              <input aria-label="Finding ID" className={`${field} mt-2`} value={findingId} disabled={busy} onChange={(e) => setFindingId(e.target.value)} maxLength={24} />
             </label>}
             {findingIdFormatInvalid && tab === "investigate" && <p role="alert" className="text-xs text-severity-critical">Finding ID must contain exactly 24 hexadecimal characters.</p>}
             {findingId.trim() && !demo && findingPreviewPending && !findingPreviewError && <p role="status" className="text-xs text-text-muted">Loading sanitized finding preview…</p>}
@@ -373,9 +383,9 @@ export default function Assistant({ demo = false }) {
           {tab === "code" && <>
             <h2 className="font-semibold">Defensive code proposal</h2>
             <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-text-muted">Language<select disabled={!demo && Boolean(findingId.trim())} className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
+              <label className="text-xs text-text-muted">Language<select disabled={busy || (!demo && Boolean(findingId.trim()))} className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l] || l.toUpperCase()}</option>)}</select></label>
-              <label className="text-xs text-text-muted">Mode<select disabled={!demo && Boolean(findingId.trim())} className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <label className="text-xs text-text-muted">Mode<select disabled={busy || (!demo && Boolean(findingId.trim()))} className={`${field} mt-2`} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="generate">Generate</option><option value="review">Review as diff</option></select></label>
             </div>
             {(!findingId.trim() || demo) && <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-accent-security underline underline-offset-2">Load review example</button>}
@@ -383,18 +393,19 @@ export default function Assistant({ demo = false }) {
             {sourceError && <div role="alert" className="text-xs text-severity-critical">Could not load the affected source: {sourceError}
               <button type="button" className="ml-2 underline" onClick={() => setSourceRevision(value => value + 1)}>Retry source</button></div>}
             {draftContext && <p className="break-all text-xs text-text-secondary">Source loaded automatically: {draftContext.filePath} · commit {draftContext.commitSha.slice(0, 7)}</p>}
+            {draftContext?.sourceWindow && <p className="text-xs leading-5 text-text-secondary">Showing lines {draftContext.sourceWindow.startLine}–{draftContext.sourceWindow.endLine} of {draftContext.sourceWindow.totalLines} around this finding. Only this excerpt is sent for review. The patch is checked against the complete scanned file.</p>}
             {!demo && !findingId.trim() && <p className="text-xs text-text-secondary">To fill this from a scan, <Link to="/findings" className="text-accent-security underline">open a finding and choose Draft a fix</Link>. You can also paste code for a manual review.</p>}
             <label className="block text-xs text-text-muted">Request<textarea aria-label="Code request" className={`${field} mt-2`} rows={8}
-              value={request} onChange={(e) => { requestEdited.current = true; setRequest(e.target.value); }} required maxLength={3000} /></label>
+              value={request} disabled={busy} onChange={(e) => { requestEdited.current = true; setRequest(e.target.value); }} required maxLength={3000} /></label>
             {mode === "review" && <label className="block text-xs text-text-muted">Source for review<textarea aria-label="Source for review"
-              className={`${field} mt-2 font-mono`} rows={7} value={originalCode} disabled={findingSourceBlocked} placeholder="The affected file loads here when you open a finding. For a manual review, paste the code to check."
+              className={`${field} mt-2 font-mono`} rows={7} value={originalCode} disabled={busy || findingSourceBlocked} placeholder="The affected file loads here when you open a finding. For a manual review, paste the code to check."
               onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
           </>}
           {tab === "sources" && <>
             <h2 className="font-semibold">Inspect shared knowledge</h2>
             <p className="text-xs text-text-muted">{fixtures?.provenance}. Only operator-approved files are indexed.</p>
             <label className="block text-xs text-text-muted">Search query<input aria-label="Knowledge query" className={`${field} mt-2`} value={query}
-              onChange={(e) => setQuery(e.target.value)} maxLength={1500} required /></label>
+              onChange={(e) => setQuery(e.target.value)} disabled={busy} maxLength={1500} required /></label>
             <ul className="space-y-2 break-all text-xs text-text-muted">{knowledge?.sources?.map((s) => <li key={s}>{s}</li>)}</ul>
           </>}
           <details open className="space-y-3 rounded-lg border border-text-primary/10 bg-bg-elevated p-4">
@@ -403,11 +414,12 @@ export default function Assistant({ demo = false }) {
             <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
             {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-text-muted">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{embeddingQuery}</pre></div>}
             <label className="flex items-start gap-2 text-xs leading-5 text-text-primary"><input type="checkbox" className="mt-0.5 accent-accent-security" checked={consentFor === requestFingerprint}
-              disabled={busy || !health || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
+              disabled={busy || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
               onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
               <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
           </details>
-          <button className={button} disabled={busy || !base || !health || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+          {providerUnavailable && <p role="status" className="text-xs text-severity-medium">Hosted AI is not configured on this deployment. Ask the deployment administrator to connect NVIDIA. You can still inspect findings and source files.</p>}
+          <button className={button} disabled={busy || !base || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
           <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged. Project tests require separate approval after static checks pass." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
         <section className={`${box} min-w-0 min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
@@ -426,10 +438,19 @@ export default function Assistant({ demo = false }) {
             <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
             {result.validation?.message && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
             {result.proposal.format === "diff" ? <PatchComparison originalCode={proposalSource?.originalCode}
-              filename={proposalSource?.filename || "source"} commitSha={proposalSource?.commitSha} patch={result.proposal.code} />
+              filename={proposalSource?.filename || "source"} commitSha={proposalSource?.commitSha} startLine={proposalSource?.startLine || 1} patch={result.proposal.code} />
               : <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>}
             <div className="flex gap-4"><button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
-              <button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={() => navigator.clipboard.writeText(result.proposal.code).catch(() => setError("Clipboard unavailable. Download the proposal instead."))}>Copy proposal</button></div>
+              <button aria-label="Copy proposal" className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={async () => {
+                const code = result.proposal.code;
+                setError(""); setProposalCopied(false);
+                try {
+                  await navigator.clipboard.writeText(code);
+                  if (activeProposal.current !== code) return;
+                  setProposalCopied(true); clearTimeout(copyFeedbackTimer.current);
+                  copyFeedbackTimer.current = setTimeout(() => setProposalCopied(false), 2000);
+                } catch { if (activeProposal.current === code) setError("Clipboard unavailable. Download the proposal instead."); }
+              }}>{proposalCopied ? "Copied" : "Copy proposal"}</button></div>
             {draftContext && result.proposal.format === "diff" && <div className="space-y-3 rounded-lg border border-text-primary/15 p-4 text-sm">
               <p className="break-all text-text-muted">Target: {draftContext.filePath} at {draftContext.commitSha.slice(0, 7)}</p>
               <button disabled={busy} className="font-medium text-accent-security underline underline-offset-2" onClick={() => patchAction("validate")}>Check patch against scanned source</button>

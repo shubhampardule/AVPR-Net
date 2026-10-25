@@ -30,7 +30,7 @@ Static comparison uses counts by rule and path; it may not distinguish replaceme
 of an old alert with a different alert of the same rule/path. No semantic or
 whole-program safety guarantee is claimed. Dependency findings and languages
 outside JavaScript/JSX, TypeScript/TSX and Python currently cannot use this rescan.
-The initial proposal limit remains one source file of at most 8,000 characters.
+Review targets one source file of at most 256 KB. Files longer than 8,000 characters use an exact excerpt of up to 4,000 characters around the finding. The UI identifies the excerpt's line range; generated diff hunks are mapped back to the full file's line numbers. Patch application, syntax checks, rescans and project-test verification use the complete file at the scanned commit. Oversized or minified individual lines require manual review. The model input remains bounded; the rest of the file is never replaced by the excerpt.
 
 ## Job controls and retained data
 
