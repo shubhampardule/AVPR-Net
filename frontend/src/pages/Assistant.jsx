@@ -106,6 +106,11 @@ export default function Assistant({ demo = false }) {
   const [verificationRevision, setVerificationRevision] = useState(0);
   const [verifiedRescanId, setVerifiedRescanId] = useState(null);
   const [verifiedTestId, setVerifiedTestId] = useState(null);
+  const guidedFix = !demo && Boolean(params.get("findingId")) && params.get("mode") === "review";
+  const resultSection = useRef(null);
+  useEffect(() => {
+    if (guidedFix && result?.proposal) resultSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [guidedFix, result?.proposal]);
   useEffect(() => {
     setFindingId(params.get("findingId") || "");
     if (params.get("mode") === "review") setTab("code");
@@ -334,13 +339,20 @@ export default function Assistant({ demo = false }) {
       </div>
       </>}
       <header className="space-y-4 border-b border-text-primary/[0.08] pb-6 pt-2">
-        <h1 className="text-2xl font-semibold tracking-tight">AI assistant</h1>
-        <p className="max-w-2xl text-sm leading-6 text-text-secondary">Investigate supplied events, explain scanner findings, and draft defensive code with traceable sources.</p>
-        <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-xs text-text-secondary">
+        {guidedFix && <Link to="/findings" className="inline-block text-sm text-accent-security hover:underline">← Back to findings</Link>}
+        <h1 className="text-2xl font-semibold tracking-tight">{guidedFix ? "Fix finding" : "AI assistant"}</h1>
+        <p className="max-w-2xl text-sm leading-6 text-text-secondary">{guidedFix ? "Generate a proposed fix, review the change, then open a draft pull request for your team." : "Investigate supplied events, explain scanner findings, and draft defensive code with traceable sources."}</p>
+        {guidedFix && <ol aria-label="Fix progress" className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+          {["Generate fix", "Review & check", "Draft PR"].map((label, index) => {
+            const current = pullRequest ? 3 : result?.proposal ? 1 : 0;
+            return <li key={label} aria-current={current === index ? "step" : undefined} className={current >= index ? "font-medium text-text-primary" : "text-text-muted"}>{current > index ? "✓" : index + 1} {label}</li>;
+          })}
+        </ol>}
+        {!guidedFix && <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-xs text-text-secondary">
           <span>NVIDIA: <strong className="font-medium text-text-primary">{providerStatus}</strong></span>
           <span>Knowledge index: <strong className="font-medium text-text-primary">{knowledge?.chunks ?? "—"} passages</strong></span>
           <span>Repository tests require separate approval</span>
-        </div>
+        </div>}
       </header>
       <details className="border-l-2 border-severity-medium bg-bg-secondary px-4 py-3 text-sm leading-6 text-text-secondary">
         <summary className="font-medium text-text-primary">How your data is used</summary>
@@ -348,12 +360,12 @@ export default function Assistant({ demo = false }) {
         {demo && " This demo uses sample events and does not monitor network traffic."}
         {" "}Review all advice, code, and suggested tests. Generated code is only executed if you separately approve isolated repository tests.</p>
       </details>
-      <nav className="flex flex-wrap gap-x-5 border-b border-text-primary/[0.1]" aria-label="Assistant workflows">
+      {!guidedFix && <nav className="flex flex-wrap gap-x-5 border-b border-text-primary/[0.1]" aria-label="Assistant workflows">
         {[["investigate", "Investigate"], ["code", "Code & review"], ["sources", "Knowledge"]].map(([id, label]) =>
           <button key={id} type="button" disabled={busy} onClick={() => { setTab(id); setResult(null); setError(""); }}
             aria-current={tab === id ? "page" : undefined}
             className={`-mb-px border-b-2 px-1 py-3 text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-security ${tab === id ? "border-accent-security font-semibold text-text-primary" : "border-transparent text-text-muted hover:text-text-primary disabled:opacity-50"}`}>{label}</button>)}
-      </nav>
+      </nav>}
       {(loadError || error) && <div role="alert" className="rounded-md border border-severity-critical/30 bg-severity-critical/10 p-4 text-sm text-severity-critical">
         <p>{loadError || error}</p>
         {loadError && <button type="button" disabled={loadBusy} className="mt-3 rounded border border-severity-critical/25 px-3 py-1.5 text-xs font-semibold hover:bg-severity-critical/10 disabled:opacity-50" onClick={() => setLoadRevision(value => value + 1)}>{loadBusy ? "Retrying setup…" : "Retry setup"}</button>}
@@ -381,7 +393,12 @@ export default function Assistant({ demo = false }) {
             </label>
           </>}
           {tab === "code" && <>
-            <h2 className="font-semibold">Defensive code proposal</h2>
+            <h2 className="font-semibold">{guidedFix ? "1. Generate a fix" : "Defensive code proposal"}</h2>
+            {guidedFix && findingPreview?.original?.title && <p className="text-base font-medium text-text-primary">{findingPreview.original.title}</p>}
+            {guidedFix && <p className="text-sm leading-6 text-text-secondary">The affected source and fix request are filled in for you. Approve sharing the excerpt with NVIDIA, then generate your fix.</p>}
+            <details open={!guidedFix}>
+            <summary className={guidedFix ? "cursor-pointer text-sm font-medium text-accent-security" : "hidden"}>Edit request and source</summary>
+            <div className="mt-3 space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs text-text-muted">Language<select disabled={busy || (!demo && Boolean(findingId.trim()))} className={`${field} mt-2`} value={language} onChange={(e) => changeLanguage(e.target.value)}>
               {(health?.languages || Object.keys(labels)).map((l) => <option key={l} value={l}>{labels[l] || l.toUpperCase()}</option>)}</select></label>
@@ -389,8 +406,8 @@ export default function Assistant({ demo = false }) {
                 <option value="generate">Generate</option><option value="review">Review as diff</option></select></label>
             </div>
             {(!findingId.trim() || demo) && <button type="button" disabled={!fixtures || busy} onClick={() => loadCode("review")} className="text-xs font-medium text-accent-security underline underline-offset-2">Load review example</button>}
-            {sourceLoading && <p role="status" className="text-xs text-text-muted">Loading the affected file from the scanned commit…</p>}
-            {sourceError && <div role="alert" className="text-xs text-severity-critical">Could not load the affected source: {sourceError}
+            {sourceLoading && !guidedFix && <p role="status" className="text-xs text-text-muted">Loading the affected file from the scanned commit…</p>}
+            {sourceError && !guidedFix && <div role="alert" className="text-xs text-severity-critical">Could not load the affected source: {sourceError}
               <button type="button" className="ml-2 underline" onClick={() => setSourceRevision(value => value + 1)}>Retry source</button></div>}
             {draftContext && <p className="break-all text-xs text-text-secondary">Source loaded automatically: {draftContext.filePath} · commit {draftContext.commitSha.slice(0, 7)}</p>}
             {draftContext?.sourceWindow && <p className="text-xs leading-5 text-text-secondary">Showing lines {draftContext.sourceWindow.startLine}–{draftContext.sourceWindow.endLine} of {draftContext.sourceWindow.totalLines} around this finding. Only this excerpt is sent for review. The patch is checked against the complete scanned file.</p>}
@@ -400,6 +417,10 @@ export default function Assistant({ demo = false }) {
             {mode === "review" && <label className="block text-xs text-text-muted">Source for review<textarea aria-label="Source for review"
               className={`${field} mt-2 font-mono`} rows={7} value={originalCode} disabled={busy || findingSourceBlocked} placeholder="The affected file loads here when you open a finding. For a manual review, paste the code to check."
               onChange={(e) => setOriginalCode(e.target.value)} required maxLength={8000} /></label>}
+            </div></details>
+            {guidedFix && sourceLoading && <p role="status" className="text-sm text-text-muted">Loading the affected source…</p>}
+            {guidedFix && sourceError && <div role="alert" className="text-sm text-severity-critical">Could not load the affected source: {sourceError} <button type="button" className="underline" onClick={() => setSourceRevision(value => value + 1)}>Retry source</button></div>}
+            {guidedFix && draftContext && <p className="break-all text-sm text-text-secondary">{draftContext.filePath} · {labels[draftContext.language] || draftContext.language} · commit {draftContext.commitSha.slice(0, 7)}</p>}
           </>}
           {tab === "sources" && <>
             <h2 className="font-semibold">Inspect shared knowledge</h2>
@@ -408,21 +429,22 @@ export default function Assistant({ demo = false }) {
               onChange={(e) => setQuery(e.target.value)} disabled={busy} maxLength={1500} required /></label>
             <ul className="space-y-2 break-all text-xs text-text-muted">{knowledge?.sources?.map((s) => <li key={s}>{s}</li>)}</ul>
           </>}
-          <details open className="space-y-3 rounded-lg border border-text-primary/10 bg-bg-elevated p-4">
+          <details open={!guidedFix} className="space-y-3 rounded-lg border border-text-primary/10 bg-bg-elevated p-4">
             <summary className="cursor-pointer text-sm font-semibold text-text-primary">Review the data for this request</summary>
             <p className="text-xs leading-5 text-text-secondary">This preview shows the supplied evidence after best-effort redaction. The search text below is sent to NVIDIA embeddings to select up to four excerpts from the approved shared security index. Those excerpts are sent to NVIDIA inference and appear in the result.</p>
             <pre aria-label="Sanitized data preview" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{previewValue === undefined ? "Finding details are not available yet." : JSON.stringify(previewValue, null, 2)}</pre>
             {embeddingQuery !== undefined && <div><p className="mb-1 text-xs font-medium text-text-muted">Search text sent for retrieval</p><pre className="whitespace-pre-wrap break-words rounded-md bg-bg-primary p-3 text-xs text-text-primary">{embeddingQuery}</pre></div>}
-            <label className="flex items-start gap-2 text-xs leading-5 text-text-primary"><input type="checkbox" className="mt-0.5 accent-accent-security" checked={consentFor === requestFingerprint}
+          </details>
+            <label className="flex items-start gap-2 text-sm leading-6 text-text-primary"><input type="checkbox" className="mt-1 accent-accent-security" checked={consentFor === requestFingerprint}
               disabled={busy || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
               onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
-              <span>I approve sending the data shown above and derived search terms to NVIDIA for this request.</span></label>
-          </details>
+              <span>{guidedFix ? "I approve sending this source excerpt and fix request to NVIDIA to generate a proposal. See the data preview above." : "I approve sending the data shown above and derived search terms to NVIDIA for this request."}</span></label>
           {providerUnavailable && <p role="status" className="text-xs text-severity-medium">Hosted AI is not configured on this deployment. Ask the deployment administrator to connect NVIDIA. You can still inspect findings and source files.</p>}
-          <button className={button} disabled={busy || !base || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+          <button className={button} disabled={busy || !base || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : guidedFix ? "Generate fix" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
           <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged. Project tests require separate approval after static checks pass." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
-        <section className={`${box} min-w-0 min-h-[20rem] space-y-6`} aria-live="polite" aria-label="Assistant result">
+        {(!guidedFix || result) && <section ref={resultSection} className={`${box} min-w-0 min-h-[20rem] scroll-mt-6 space-y-6`} aria-live="polite" aria-label="Assistant result">
+          {guidedFix && result?.proposal && <h2 className="font-semibold">2. Review the proposed change</h2>}
           {!result && <div className="flex min-h-[18rem] flex-col justify-center border-l-2 border-text-primary/10 pl-5"><p className="text-base font-semibold text-text-primary">Your review will appear here.</p>
             <p className="mt-2 max-w-sm text-sm leading-6 text-text-muted">Submit evidence or a request to see its sources, limitations, and suggested next steps.</p></div>}
           {result?.original && <details open className="space-y-3"><summary className="font-semibold cursor-pointer">Original evidence · {result.kind}</summary>
@@ -453,21 +475,26 @@ export default function Assistant({ demo = false }) {
               }}>{proposalCopied ? "Copied" : "Copy proposal"}</button></div>
             {draftContext && result.proposal.format === "diff" && <div className="space-y-3 rounded-lg border border-text-primary/15 p-4 text-sm">
               <p className="break-all text-text-muted">Target: {draftContext.filePath} at {draftContext.commitSha.slice(0, 7)}</p>
+              <details><summary className="cursor-pointer text-xs text-text-muted">Additional patch validation</summary><div className="mt-2 space-y-2">
               <button disabled={busy} className="font-medium text-accent-security underline underline-offset-2" onClick={() => patchAction("validate")}>Check patch against scanned source</button>
               {patchCheck && <p className="text-severity-medium">Patch applies. Syntax: {patchCheck.syntax.status}. Tests were not executed.</p>}
+              </div></details>
               {["javascript","typescript","python"].includes(draftContext.language)
                 ? <PatchRescanPanel key={`${draftContext.scanId}:${draftContext.findingId}:${result.proposal.code}`} context={draftContext} patch={result.proposal.code} onVerified={setVerifiedRescanId} autoStart onFeedback={feedback => {
                   setRequest(current => `${current.slice(0,2400)}\n\nScanner feedback: ${feedback}`);setResult(null);setPatchCheck(null);setVerifiedRescanId(null);setConsentFor(null);
                   setError("Scanner feedback added. Review the updated request and approve sharing it before drafting again.");
                 }} />
                 : <p className="text-xs text-severity-medium">Security rescanning is unavailable for this language. Review and verify the proposal in your own CI before applying it.</p>}
-              {verifiedRescanId&&<ProjectTestsPanel key={`${verifiedRescanId}:${result.proposal.code}`} context={draftContext} patch={result.proposal.code} rescanJobId={verifiedRescanId} onVerified={setVerifiedTestId}/>}
+              {verifiedRescanId && ["javascript", "typescript"].includes(draftContext.language) && <details><summary className="cursor-pointer text-sm font-medium">Optional: run repository tests</summary><div className="mt-3"><ProjectTestsPanel key={`${verifiedRescanId}:${result.proposal.code}`} context={draftContext} patch={result.proposal.code} rescanJobId={verifiedRescanId} onVerified={setVerifiedTestId}/></div></details>}
+              {verifiedRescanId && draftContext.language === "python" && <p className="text-xs leading-5 text-text-muted">Security checks cover this Python patch. Python project tests need to run in your repository’s CI; the built-in test runner supports npm projects.</p>}
+              {guidedFix && <h3 className="pt-3 font-semibold">3. Create a draft pull request</h3>}
+              {guidedFix && !verifiedRescanId && <p role="status" className="text-xs text-text-secondary">The automatic security check must pass before you can create a PR. Its progress is shown above.</p>}
               <label className="block text-text-primary"><input type="checkbox" className="mr-2 accent-accent-security" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> {verifiedTestId?"I reviewed this patch and the limits of its passing test results.":"I reviewed this patch and understand that tests were not executed."}</label>
               <button disabled={busy || !acknowledged || !verifiedRescanId || patchCheck?.syntax?.status === "failed" || Boolean(pullRequest) || !canCreatePullRequest} className={`${button} text-xs`} onClick={() => patchAction("pull-request")}>Create draft pull request</button>
               <p className="text-xs leading-5 text-text-muted">Owner/admin role and approved GitHub App write permissions required. The default branch must still match the scanned commit.</p>
               {pullRequest && <a target="_blank" rel="noreferrer" href={pullRequest.url} className="block font-medium text-accent-security underline underline-offset-2">Open draft pull request #{pullRequest.number}</a>}
             </div>}
-            {draftContext && verificationHistory.length > 0 && <section className="space-y-3 rounded-lg border border-text-primary/10 bg-bg-secondary p-4" aria-label="Remediation verification history">
+            {draftContext && verificationHistory.length > 0 && <details><summary className="cursor-pointer text-sm font-medium">Verification history</summary><section className="mt-3 space-y-3 rounded-lg border border-text-primary/10 bg-bg-secondary p-4" aria-label="Remediation verification history">
               <div><h3 className="text-sm font-semibold text-text-primary">Verification history</h3><p className="mt-1 text-xs leading-5 text-text-muted">Each entry is tied to the scanned commit and a hash of the proposed patch. Unavailable checks are not treated as passes.</p></div>
               <ol className="space-y-3">{verificationHistory.slice(0, 5).map((entry, index) => <li key={entry._id || `${entry.action}-${entry.createdAt}-${index}`} className="rounded-md border border-text-primary/10 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium text-text-primary">{entry.action === "draft_pr" ? `Draft PR #${entry.pullRequest?.number || "created"}` : "Patch validation"} · {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "Just now"}</p>
@@ -477,15 +504,16 @@ export default function Assistant({ demo = false }) {
               </li>)}</ol>
               {verificationHistory.length > 5 && <p className="text-xs text-text-muted">Showing the five most recent attempts.</p>}
               {verificationError && <div role="alert" className="text-xs text-severity-medium">{verificationError}<button type="button" className="ml-2 underline" onClick={() => setVerificationRevision(value => value + 1)}>Retry history</button></div>}
-            </section>}
+            </section></details>}
             {draftContext && verificationError && verificationHistory.length === 0 && <div role="alert" className="text-xs text-severity-medium">{verificationError}<button type="button" className="ml-2 underline" onClick={() => setVerificationRevision(value => value + 1)}>Retry history</button></div>}
-            {["assumptions", "dependencies", "security_considerations", "validation_instructions", "tests"].map((key) =>
+            <details open={!guidedFix}><summary className="cursor-pointer text-sm font-medium">Assumptions and suggested tests</summary><div className="mt-3 space-y-4">{["assumptions", "dependencies", "security_considerations", "validation_instructions", "tests"].map((key) =>
               <TextList key={key} title={key === "tests" ? "Suggested tests · unexecuted" : key.replaceAll("_", " ")} items={result.proposal[key]} />)}
+            </div></details>
           </>}
-          {result && <Sources sources={result.sources || result.retrieved_sources} />}
+          {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.sources || result.retrieved_sources} /></div></details> : <Sources sources={result.sources || result.retrieved_sources} />)}
           <TextList title="Application limitations" items={result?.limitations} />
           {result?.requestId && <p className="break-all font-mono text-[11px] text-text-muted">Request {result.requestId}</p>}
-        </section>
+        </section>}
       </div>
     </div>
   </main>;
