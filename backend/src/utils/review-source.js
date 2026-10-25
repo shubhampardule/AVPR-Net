@@ -5,7 +5,7 @@ const MAX_SOURCE_BYTES = 256 * 1024;
 function reviewSource(content, finding) {
   if (Buffer.byteLength(content) > MAX_SOURCE_BYTES) throw bad("Source exceeds the 256 KB review limit", 413, "FILE_UNSUPPORTED");
   const requestBytes = text => Buffer.byteLength(JSON.stringify(text)) - 2;
-  if (content.length <= 8000 && requestBytes(content) <= 8000) return { originalCode: content };
+  if (content.length <= 2500 && requestBytes(content) <= 2500) return { originalCode: content };
   const lines = content.match(/[^\n]*\n|[^\n]+$/g) || [];
   const target = finding.startLine - 1;
   if (!Number.isSafeInteger(target) || target < 0 || target >= lines.length) {

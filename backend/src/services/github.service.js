@@ -48,9 +48,10 @@ async function getRepositoryFiles(installationId, owner, repo) {
 }
 async function getFileContent(installationId, owner, repo, filePath, ref, { preview = false } = {}) {
   repository(owner, repo);
-  if (typeof filePath !== "string" || filePath.length > 1000 || filePath.includes("\\") || filePath.split("/").some(p => p === ".." || p === ".") || filePath.startsWith("/")) throw bad("Invalid file path");
+  const normalizedPath = String(filePath || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\//, "");
+  if (typeof filePath !== "string" || normalizedPath.length > 1000 || normalizedPath.split("/").some(p => p === ".." || p === ".")) throw bad("Invalid file path");
   const client = await getInstallationOctokit(installationId);
-  const { data } = await client.request("GET /repos/{owner}/{repo}/contents/{path}", { owner, repo, path: filePath, ...(ref ? { ref } : {}) });
+  const { data } = await client.request("GET /repos/{owner}/{repo}/contents/{path}", { owner, repo, path: normalizedPath, ...(ref ? { ref } : {}) });
   if (Array.isArray(data) || data.type !== "file" || data.target || data.submodule_git_url) throw bad("Only regular files can be viewed");
   if (data.size > 256 * 1024 || data.encoding !== "base64" || typeof data.content !== "string") throw bad("File is too large or not available as inline text", 413, "FILE_UNSUPPORTED");
   const buffer = Buffer.from(data.content, "base64");

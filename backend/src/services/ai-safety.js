@@ -12,13 +12,15 @@ function redact(text) {
 
 function sanitize(value, depth = 0) {
   if (depth > 8) throw new Error("Input nesting exceeds limit");
+  if (value === undefined || value === null || typeof value === "boolean" || typeof value === "number") return value;
   if (typeof value === "string") return redact(value);
-  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
   if (Array.isArray(value)) return value.map((item) => sanitize(item, depth + 1));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
-      /(?:password|secret|token|api.?key|authorization|cookie|email|user_?name|ip_?address|source_ip|destination_ip)/i.test(key)
-        ? "[REDACTED]" : sanitize(item, depth + 1)]));
+    return Object.fromEntries(Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key,
+        /(?:password|secret|token|api.?key|authorization|cookie|email|user_?name|ip_?address|source_ip|destination_ip)/i.test(key)
+          ? "[REDACTED]" : sanitize(item, depth + 1)]));
   }
   throw new Error("Unsupported input value");
 }

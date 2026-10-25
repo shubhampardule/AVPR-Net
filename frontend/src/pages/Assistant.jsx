@@ -64,7 +64,7 @@ function Sources({ sources = [], emptyMessage = "No relevant sources retrieved. 
 export default function Assistant({ demo = false }) {
   const context = useOutletContext();
   const [params] = useSearchParams();
-  const organizationId = context?.selectedOrg?._id || context?.selectedOrg?.id;
+  const organizationId = context?.selectedOrg?._id || context?.selectedOrg?.id || params.get("org");
   const canCreatePullRequest = ["owner", "admin"].includes(context?.selectedOrg?.role);
   const base = demo ? `${API_BASE_URL}/ai/demo` : organizationId ? `${API_BASE_URL}/organizations/${organizationId}/ai` : null;
   const [tab, setTab] = useState(params.get("mode") === "review" ? "code" : "investigate");

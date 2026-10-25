@@ -101,6 +101,28 @@ export default function ScanPage() {
     catch (e) { if (isCurrent()) setError(e.message); }
     finally { if (isCurrent()) setComparing(false); }
   }
+  const [exporting, setExporting] = useState(false);
+  async function downloadExport(format) {
+    if (!scanId || exporting) return;
+    setExporting(true); setError("");
+    try {
+      const response = await fetch(`${endpoint}/${scanId}/export?format=${format}`, { credentials: "include" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error?.message || payload.message || "Export failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `scan-${scanId}.${format === "sarif" ? "sarif" : "json"}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setError(e.message); }
+    finally { setExporting(false); }
+  }
   const active = ["queued", "running"].includes(scan?.status);
   const scanOutcome = scan?.status === "completed"
     ? (scan.scannerErrors?.length ? "Finished with partial scanner coverage" : "Finished")
@@ -136,7 +158,9 @@ export default function ScanPage() {
       {scan.errorMessage && <div className="rounded-lg border border-severity-critical/20 bg-severity-critical/5 p-3 text-sm text-severity-critical"><p>{scan.errorMessage}</p>{scan.status === "failed" && <button className="mt-2 underline" onClick={start}>Start a new scan</button>}</div>}
       {scan.scannerErrors?.length > 0 && <div className="text-severity-medium text-sm"><strong>Incomplete scanner coverage</strong>{scan.scannerErrors.map((e, i) => <p key={i}>{e.scanner}: {e.message}</p>)}</div>}
       <details><summary className="text-sm cursor-pointer">Technical scan record</summary><pre className="text-xs whitespace-pre-wrap mt-2 text-text-muted">{JSON.stringify({ scanId: scan._id, rulesHash: scan.rulesHash, scannerPolicyHash: scan.scannerPolicyHash, normalizerHash: scan.normalizerHash }, null, 2)}</pre></details>
-      <div className="flex flex-wrap gap-2"><a className={button} href={`${endpoint}/${scanId}/export?format=json`}>Export JSON</a><a className={button} href={`${endpoint}/${scanId}/export?format=sarif`}>Export SARIF</a>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={exporting} onClick={() => downloadExport("json")}>{exporting ? "Exporting…" : "Export JSON"}</button>
+        <button type="button" className={button} disabled={exporting} onClick={() => downloadExport("sarif")}>{exporting ? "Exporting…" : "Export SARIF"}</button>
         <button className={button} disabled={scan.status !== "completed" || comparing} onClick={compare}>{comparing ? "Loading comparison…" : "Compare with previous scan"}</button></div>
     </section>}
     {comparison && <section className={`${panel} text-sm space-y-3`} aria-live="polite">

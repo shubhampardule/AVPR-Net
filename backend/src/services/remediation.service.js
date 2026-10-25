@@ -6,16 +6,25 @@ const { bad } = require("../utils/input");
 const { reviewSource } = require("../utils/review-source");
 const { supportsRemediation } = require("./remediation-capability.service");
 function language(file) {
-  return ({ js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python", c: "c", h: "c", cpp: "cpp", sh: "bash" })[file.split(".").pop().toLowerCase()];
+  const ext = String(file || "").split(".").pop().toLowerCase();
+  return ({
+    js: "javascript", jsx: "javascript", cjs: "javascript", mjs: "javascript",
+    ts: "typescript", tsx: "typescript", cts: "typescript", mts: "typescript",
+    py: "python", pyw: "python",
+    c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp",
+    sh: "bash", bash: "bash",
+  })[ext];
 }
 async function source(scan, finding, { fullFile = false } = {}) {
   if (!scan) throw bad("The scan for this finding is unavailable. Rescan the repository.", 404, "SOURCE_NOT_FOUND");
   if (!scan.commitSha) throw bad("Rescan this repository to pin the source commit", 409);
-  if (!supportsRemediation(finding) || finding.filePath.split("/").some(part => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) {
+  const cleanPath = String(finding.filePath || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\//, "");
+  const segments = cleanPath.split("/").filter(Boolean);
+  if (!supportsRemediation(finding) || segments.some(part => (part.startsWith(".") && part !== "." && part !== "..") || ["node_modules", "vendor"].includes(part))) {
     throw bad("This finding is outside the verified single-file fix workflow. Use its rule-based guidance; dependency upgrades and exposed credentials need coordinated or manual changes.", 422, "REMEDIATION_UNSUPPORTED");
   }
   let file;
-  try { file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha); }
+  try { file = await getFileContent(scan.installationId, scan.owner, scan.repo, cleanPath, scan.commitSha); }
   catch (error) {
     if (error.status === 403 || error.status === 401) throw bad("GitHub denied source access. Check the app's repository access and retry.", 403, "SOURCE_ACCESS_DENIED");
     if (error.status === 404) throw bad("This file or scanned commit is no longer accessible. Check repository access or rescan.", 404, "SOURCE_NOT_FOUND");
@@ -36,7 +45,7 @@ async function validate(scan, finding, patch, { allowSyntaxFailure = false } = {
   try { content = applyExactDiff(context.originalCode, patch, context.filePath); }
   catch (error) { error.validationContext = context; throw error; }
   const syntax = await validateCode(context.language, content);
-  if (syntax.status === "failed" && !allowSyntaxFailure) throw bad("Proposed source failed syntax validation");
+  if (syntax.status === "failed" && !allowSyntaxFailure) throw bad(syntax.message ? `Proposed source failed syntax validation: ${syntax.message}` : "Proposed source failed syntax validation");
   return { context, content, syntax };
 }
 async function createPullRequest(scan, finding, { patch, acknowledged, rescanJobId, projectTestJobId }) {

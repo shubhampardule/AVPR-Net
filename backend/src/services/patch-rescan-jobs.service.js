@@ -14,7 +14,7 @@ const publicJob = job => {
 };
 
 async function enqueue({scan,finding,patch,actorId}) {
-  if (!["semgrep","bandit","secrets"].includes(finding.scanner)||!/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw bad("This finding does not support patch rescanning",400,"RESCAN_FINDING_UNSUPPORTED");
+  if (!["semgrep","bandit","secrets"].includes(finding.scanner)||!/\.(?:js|jsx|cjs|mjs|ts|tsx|cts|mts|py|pyw)$/i.test(finding.filePath)) throw bad("This finding does not support patch rescanning",400,"RESCAN_FINDING_UNSUPPORTED");
   await require("./budget.service").consume(`patch-rescan-requests:${scan.organization}`,60,3600000);
   const validation=await require("./remediation.service").validate(scan,finding,patch);
   if(validation.syntax.status!=="passed") throw bad("A passing syntax check is required before rescanning",409,"RESCAN_SYNTAX_REQUIRED");

@@ -83,7 +83,7 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
   createWorkspace = require("./workspace.service").createEphemeralWorkspace,
   createOrchestrator = () => new Orchestrator(), parser = validateCode,
 } = {}) {
-  if (!["semgrep", "bandit", "secrets"].includes(finding.scanner) || !/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw fail("RESCAN_FINDING_UNSUPPORTED");
+  if (!["semgrep", "bandit", "secrets"].includes(finding.scanner) || !/\.(?:js|jsx|cjs|mjs|ts|tsx|cts|mts|py|pyw)$/i.test(finding.filePath)) throw fail("RESCAN_FINDING_UNSUPPORTED");
   const workspace = await createWorkspace(scan.installationId, scan.owner, scan.repo, scan.commitSha);
   let cleaned = false;
   try {
@@ -106,7 +106,7 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
     await validateRuleSpecificFix(root, finding, content);
     const suppressions = text => (text.match(/\b(?:nosemgrep|nosec)\b/gi)||[]).length;
     if(suppressions(content)>suppressions(original)) throw fail("RESCAN_SUPPRESSION_ADDED");
-    const language = /\.py$/.test(finding.filePath) ? "python" : /\.tsx?$/.test(finding.filePath) ? "typescript" : "javascript";
+    const language = /\.pyw?$/i.test(finding.filePath) ? "python" : /\.(?:tsx?|mts|cts)$/i.test(finding.filePath) ? "typescript" : "javascript";
     const syntax = await parser(language, content);
     if (syntax.status !== "passed") throw fail(syntax.status === "failed" ? "RESCAN_SYNTAX_FAILED" : "RESCAN_SYNTAX_UNAVAILABLE");
     const beforeResult = await createOrchestrator().runAll(root);

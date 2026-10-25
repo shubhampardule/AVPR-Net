@@ -87,6 +87,18 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
         ? "Human reviewed · resolved"
         : "Automated signal · not yet verified by a person";
 
+  const effectiveOrgId = organizationId || (typeof finding.organization === "object" ? finding.organization?._id : finding.organization);
+  const scanner = String(finding?.scanner || "").toLowerCase();
+  const remediationTitle = !supportsFindingRemediation(finding)
+    ? scanner === "secrets"
+      ? "Credential exposed in source. Rotate the key and remove it from repository history."
+      : ["dependency", "trivy"].includes(scanner)
+        ? "Vulnerable package. Upgrade the dependency version in your package manifest."
+        : "This finding needs a coordinated or manual remediation path."
+    : !effectiveOrgId
+      ? "Select a workspace to draft an automated fix."
+      : "This finding needs a coordinated or manual remediation path.";
+
   return (
     <div className="rounded-xl border border-text-primary/[0.08] bg-bg-secondary overflow-hidden transition hover:border-text-primary/[0.16]">
       {/* Header Row */}
@@ -128,12 +140,12 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
             <h3 className="text-sm font-semibold text-text-primary tracking-tight">
               {finding.title}
             </h3>
-            {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId || finding.organization || "")}`}
+            {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(effectiveOrgId || "")}`}
               onClick={(event) => event.stopPropagation()} className="text-xs font-medium text-accent-security hover:underline underline-offset-2">Explain with Nemotron →</Link>}
-            {organizationId && finding._id && supportsFindingRemediation(finding)
-              ? <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId)}&mode=review`}
+            {effectiveOrgId && finding._id && supportsFindingRemediation(finding)
+              ? <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(effectiveOrgId)}&mode=review`}
                 onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-accent-security hover:underline underline-offset-2">Draft a fix →</Link>
-              : <span className="ml-3 text-xs text-text-muted" title="This finding needs a coordinated or manual remediation path">Manual remediation</span>}
+              : <span className="ml-3 text-xs text-text-muted" title={remediationTitle}>Manual remediation</span>}
             <span className="ml-3 text-xs text-text-muted">{reviewLabels[finding.status || "open"] || "Needs human review"}</span>
 
             <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">
