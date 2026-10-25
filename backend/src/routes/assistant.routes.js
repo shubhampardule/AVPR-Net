@@ -92,10 +92,11 @@ function createAssistantRouter(options = {}) {
     } catch (error) {
       const inputError = error.code === "AI_INVALID_INPUT" || error.code === "RAG_INVALID_QUERY";
       const sourceRequest = req.method === "GET" && req.path.startsWith("/finding/");
-      const sourceError = sourceRequest && ["INVALID_INPUT", "FILE_UNSUPPORTED", "BINARY_FILE", "SOURCE_LINE_UNAVAILABLE", "SOURCE_NOT_FOUND", "SOURCE_ACCESS_DENIED", "SOURCE_RATE_LIMITED"].includes(error.code);
+      const sourceError = sourceRequest && ["INVALID_INPUT", "FILE_UNSUPPORTED", "BINARY_FILE", "SOURCE_LINE_UNAVAILABLE", "SOURCE_NOT_FOUND", "SOURCE_ACCESS_DENIED", "SOURCE_RATE_LIMITED", "REMEDIATION_UNSUPPORTED"].includes(error.code);
+      const remediationRequest = req.method === "POST" && req.path.endsWith("/code") && ["REMEDIATION_UNSUPPORTED", "SOURCE_STALE"].includes(error.code);
       res.status(error.statusCode || (inputError ? 400 : 503)).json({ success: false,
-        error: { code: inputError || sourceError ? error.code : sourceRequest ? "SOURCE_UNAVAILABLE" : "AI_UNAVAILABLE",
-          message: inputError || sourceError ? error.message : sourceRequest ? "GitHub source could not be loaded. Retry or check repository access." : "Assistant unavailable; check configuration and knowledge index" } });
+        error: { code: inputError || sourceError || remediationRequest ? error.code : sourceRequest ? "SOURCE_UNAVAILABLE" : "AI_UNAVAILABLE",
+          message: inputError || sourceError || remediationRequest ? error.message : sourceRequest ? "GitHub source could not be loaded. Retry or check repository access." : "Assistant unavailable; check configuration and knowledge index" } });
     } finally {
       clearTimeout(deadline); res.off("close", disconnected);
       if (release) await release().catch(() => {});
@@ -164,7 +165,32 @@ function createAssistantRouter(options = {}) {
     if (result.status === "complete") await Cache.updateOne({ _id: key }, { $set: { organization: req.params.organizationId, result, expires: new Date(Date.now() + 600000) } }, { upsert: true }).catch(() => {});
     return result;
   }, true));
-  router.post("/code", handle(async (req) => service.generateCode(req.body), true));
+  router.post("/code", handle(async (req) => {
+    if (!req.body || !req.body.findingId) return service.generateCode(req.body);
+    if (demo || typeof req.body.findingId !== "string" || !/^[a-f0-9]{24}$/i.test(req.body.findingId)) {
+      throw badInput("Provide a supported scanned finding for a guided fix");
+    }
+    const findFinding = options.findFinding || ((filter) => require("../models/Finding").findOne(filter).lean());
+    const finding = await findFinding({ _id: req.body.findingId, organization: req.params.organizationId });
+    if (!finding) throw Object.assign(badInput("Finding unavailable for this organization"), { statusCode: 404 });
+    const findScan = options.findScan || ((id) => require("../models/Scan").findById(id).lean());
+    const scan = await findScan(finding.scan);
+    const remediation = options.remediation || require("../services/remediation.service");
+    if (!require("../services/remediation-capability.service").supportsRemediation(finding)) {
+      throw Object.assign(badInput("This finding is outside the verified single-file fix workflow. Use its guidance for a coordinated or manual change."), {
+        statusCode: 422, code: "REMEDIATION_UNSUPPORTED",
+      });
+    }
+    const fullSource = await remediation.source(scan, finding, { fullFile: true });
+    const excerpt = require("../utils/review-source").reviewSource(fullSource.originalCode, finding);
+    if (req.body.targetPath !== finding.filePath || req.body.originalCode !== excerpt.originalCode ||
+      (excerpt.sourceWindow && req.body.targetStartLine !== excerpt.sourceWindow.startLine)) {
+      throw Object.assign(badInput("The finding source changed or no longer matches the scan. Reload it before generating a fix"), {
+        statusCode: 409, code: "SOURCE_STALE",
+      });
+    }
+    return service.generateCode(req.body, true, { finding, fullOriginalCode: fullSource.originalCode });
+  }, true));
   return router;
 }
 

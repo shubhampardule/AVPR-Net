@@ -274,6 +274,7 @@ export default function Assistant({ demo = false }) {
       const response = tab === "investigate" ? await api("analyze", findingId.trim() && !demo
         ? { findingId: findingId.trim() } : { event: JSON.parse(eventText) }, controller.signal)
         : tab === "code" ? await api("code", { language, mode, request, ...(mode === "review" ? { originalCode, targetPath: draftContext?.filePath || "source",
+          ...(draftContext?.findingId ? { findingId: draftContext.findingId } : {}),
           ...(draftContext?.sourceWindow ? { targetStartLine: draftContext.sourceWindow.startLine } : {}) } : {}) }, controller.signal)
           : await api("retrieve", { query }, controller.signal);
       if (activeBase.current !== startedFor) return;
@@ -369,6 +370,7 @@ export default function Assistant({ demo = false }) {
       {(loadError || error) && <div role="alert" className="rounded-md border border-severity-critical/30 bg-severity-critical/10 p-4 text-sm text-severity-critical">
         <p>{loadError || error}</p>
         {loadError && <button type="button" disabled={loadBusy} className="mt-3 rounded border border-severity-critical/25 px-3 py-1.5 text-xs font-semibold hover:bg-severity-critical/10 disabled:opacity-50" onClick={() => setLoadRevision(value => value + 1)}>{loadBusy ? "Retrying setup…" : "Retry setup"}</button>}
+        {error && !loadError && <button type="button" disabled={busy} className="mt-3 rounded border border-severity-critical/25 px-3 py-1.5 text-xs font-semibold hover:bg-severity-critical/10 disabled:opacity-50" onClick={() => run({ preventDefault() {} })}>Retry request</button>}
       </div>}
       {!demo && !organizationId && <p className="text-sm text-severity-medium">Select an organization to use the assistant.</p>}
       {!demo && organizationId && policy && hostedAiBlocked && <p className="rounded-xl border border-severity-medium/20 bg-severity-medium/5 p-4 text-sm text-severity-medium">Hosted AI is disabled for this organization. An owner or admin can enable it in <Link className="underline" to="/settings">Workspace settings</Link>.</p>}
@@ -510,6 +512,11 @@ export default function Assistant({ demo = false }) {
               <TextList key={key} title={key === "tests" ? "Suggested tests · unexecuted" : key.replaceAll("_", " ")} items={result.proposal[key]} />)}
             </div></details>
           </>}
+          {guidedFix && result?.reviewRequired && <div role="status" className="rounded-lg border border-severity-medium/25 bg-severity-medium/5 p-4">
+            <h2 className="font-semibold text-text-primary">No automatic change proposed</h2>
+            <p className="mt-2 text-sm leading-6 text-text-secondary">{result.reviewRequired.explanation}</p>
+            <p className="mt-2 text-xs text-text-muted">Review the source and scanner evidence. No patch was created or rescanned.</p>
+          </div>}
           {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.sources || result.retrieved_sources} /></div></details> : <Sources sources={result.sources || result.retrieved_sources} />)}
           <TextList title="Application limitations" items={result?.limitations} />
           {result?.requestId && <p className="break-all font-mono text-[11px] text-text-muted">Request {result.requestId}</p>}

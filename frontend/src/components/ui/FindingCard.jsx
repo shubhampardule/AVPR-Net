@@ -11,6 +11,7 @@ import {
 import { RiskScoreBar } from "./RiskScoreBar";
 import { Link } from "react-router-dom";
 import { API_BASE_URL } from "../../config/api";
+import { supportsFindingRemediation } from "../../utils/remediationSupport";
 
 export function findingGuidance(finding) {
   const scanner = String(finding.scanner || "").toLowerCase();
@@ -129,7 +130,10 @@ export function FindingCard({ finding, organizationId, commitSha, onReviewed }) 
             </h3>
             {finding._id && <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId || finding.organization || "")}`}
               onClick={(event) => event.stopPropagation()} className="text-xs font-medium text-accent-security hover:underline underline-offset-2">Explain with Nemotron →</Link>}
-            {organizationId && <Link to={`/assistant?findingId=${finding._id}&org=${organizationId}&mode=review`} onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-accent-security hover:underline underline-offset-2">Draft a fix →</Link>}
+            {organizationId && finding._id && supportsFindingRemediation(finding)
+              ? <Link to={`/assistant?findingId=${encodeURIComponent(finding._id)}&org=${encodeURIComponent(organizationId)}&mode=review`}
+                onClick={event => event.stopPropagation()} className="ml-3 text-xs font-medium text-accent-security hover:underline underline-offset-2">Draft a fix →</Link>
+              : <span className="ml-3 text-xs text-text-muted" title="This finding needs a coordinated or manual remediation path">Manual remediation</span>}
             <span className="ml-3 text-xs text-text-muted">{reviewLabels[finding.status || "open"] || "Needs human review"}</span>
 
             <div className="mt-1 flex items-center gap-2 text-xs font-mono text-text-muted">

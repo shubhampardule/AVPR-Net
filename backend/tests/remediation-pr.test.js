@@ -22,7 +22,7 @@ const scan = {
   installationId: "42", owner: "team", repo: "project",
 };
 const finding = {
-  _id: "finding-1", filePath: "src/index.js", ruleId: "securepatch.js.dynamic-eval",
+  _id: "finding-1", scanner: "semgrep", filePath: "src/index.js", ruleId: "securepatch.js.dynamic-eval",
   title: "Dynamic evaluation", severity: "high", riskScore: 8,
 };
 const patch = [

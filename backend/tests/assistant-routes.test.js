@@ -70,6 +70,59 @@ test("production routes require authentication before any AI call", async () => 
   const response = await request(app()).post("/org/org-1/ai/code").send({});
   expect(response.status).toBe(401); expect(service.generateCode).not.toHaveBeenCalled();
 });
+test("guided code proposals are bound to the organization finding and exact scanned excerpt", async () => {
+  const id = "0123456789abcdef01234567";
+  const finding = { _id: id, scan: "scan-1", scanner: "bandit", ruleId: "B608", filePath: "src/query.py", startLine: 1 };
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findFinding: async filter => filter.organization === "org-1" ? finding : null,
+    findScan: async () => ({ _id: "scan-1", commitSha: "a".repeat(40) }),
+    remediation: { source: async () => ({ originalCode: 'db.execute("SELECT * FROM users WHERE id = %s", (user_id,))' }) },
+  });
+  const input = { findingId: id, language: "python", mode: "review", request: "Bind SQL values safely.",
+    targetPath: finding.filePath, originalCode: 'db.execute("SELECT * FROM users WHERE id = %s", (user_id,))' };
+  const response = await request(instance).post("/org/org-1/ai/code")
+    .set("X-SecurePatch-AI-Consent", "1").send(input);
+  expect(response.status).toBe(200);
+  expect(service.generateCode).toHaveBeenCalledWith(input, true, {
+    finding, fullOriginalCode: input.originalCode,
+  });
+});
+
+test("guided code proposal rejects a stale or client-edited source before NVIDIA is called", async () => {
+  const id = "0123456789abcdef01234567";
+  const finding = { _id: id, scan: "scan-1", scanner: "semgrep", ruleId: "securepatch.js.dynamic-eval", filePath: "src/app.js", startLine: 1 };
+  const instance = app({ requireAuth: auth, requireMembership: member,
+    findFinding: async () => finding, findScan: async () => ({ _id: "scan-1", commitSha: "a".repeat(40) }),
+    remediation: { source: async () => ({ originalCode: "const result = eval(input);" }) },
+  });
+  const response = await request(instance).post("/org/org-1/ai/code")
+    .set("X-SecurePatch-AI-Consent", "1").send({ findingId: id, language: "javascript", mode: "review",
+      request: "Fix this", targetPath: finding.filePath, originalCode: "return attackerControlled();" });
+  expect(response.status).toBe(409);
+  expect(response.body.error).toMatchObject({ code: "SOURCE_STALE" });
+  expect(service.generateCode).not.toHaveBeenCalled();
+});
+
+test("guided code generation refuses secret and dependency findings without sending their files", async () => {
+  const id = "0123456789abcdef01234567";
+  const cases = [
+    { scanner: "secrets", filePath: "src/config.js" },
+    { scanner: "dependency", filePath: "package-lock.json" },
+  ];
+  for (const [index, extra] of cases.entries()) {
+    const finding = { _id: id, scan: "scan-1", ruleId: "match", startLine: 1, ...extra };
+    const instance = app({ requireAuth: auth, requireMembership: member,
+      findFinding: async () => finding, findScan: async () => ({ _id: "scan-1", commitSha: "a".repeat(40) }),
+      remediation: { source: jest.fn() },
+    });
+    const response = await request(instance).post("/org/org-1/ai/code")
+      .set("X-SecurePatch-AI-Consent", "1").send({ findingId: id, language: "javascript", mode: "review",
+        request: "Fix this", targetPath: extra.filePath, originalCode: "source" });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe("REMEDIATION_UNSUPPORTED");
+    expect(service.generateCode).not.toHaveBeenCalled();
+  }
+});
 test("membership failure denies access", async () => {
   const response = await request(app({ requireAuth: auth, requireMembership: (req, res) => res.sendStatus(403) }))
     .post("/org/org-1/ai/analyze").send({ event });

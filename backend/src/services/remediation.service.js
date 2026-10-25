@@ -4,13 +4,16 @@ const { getFileContent, resolveCommit } = require("./github.service");
 const { validateCode } = require("./code-validation");
 const { bad } = require("../utils/input");
 const { reviewSource } = require("../utils/review-source");
+const { supportsRemediation } = require("./remediation-capability.service");
 function language(file) {
-  return ({ js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python", c: "c", h: "c", cpp: "cpp", sh: "bash" })[file.split(".").pop()];
+  return ({ js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python", c: "c", h: "c", cpp: "cpp", sh: "bash" })[file.split(".").pop().toLowerCase()];
 }
 async function source(scan, finding, { fullFile = false } = {}) {
   if (!scan) throw bad("The scan for this finding is unavailable. Rescan the repository.", 404, "SOURCE_NOT_FOUND");
   if (!scan.commitSha) throw bad("Rescan this repository to pin the source commit", 409);
-  if (!language(finding.filePath) || finding.filePath.split("/").some(part => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) throw bad("This source path is not supported for remediation");
+  if (!supportsRemediation(finding) || finding.filePath.split("/").some(part => part.startsWith(".") || ["node_modules", "vendor"].includes(part))) {
+    throw bad("This finding is outside the verified single-file fix workflow. Use its rule-based guidance; dependency upgrades and exposed credentials need coordinated or manual changes.", 422, "REMEDIATION_UNSUPPORTED");
+  }
   let file;
   try { file = await getFileContent(scan.installationId, scan.owner, scan.repo, finding.filePath, scan.commitSha); }
   catch (error) {
@@ -23,6 +26,7 @@ async function source(scan, finding, { fullFile = false } = {}) {
   const ruleId=require("../utils/scanner-rule").canonicalRule(finding.ruleId);
   const guidance=require("./remediation-guidance.service").forFinding(finding);
   return { findingId: String(finding._id), scanId: String(scan._id), commitSha: scan.commitSha, filePath: finding.filePath,
+    scanner: finding.scanner, ruleId,
     language: language(finding.filePath), ...review,
     request: `Remediate the scanner finding ${ruleId}: ${finding.title}. ${guidance?guidance.steps.join(" "):""} ${review.sourceWindow ? `The supplied source is an exact excerpt at lines ${review.sourceWindow.startLine}–${review.sourceWindow.endLine}; the finding is at line ${finding.startLine}. Change only the affected code, preserving boundary lines and indentation.` : "Return the complete corrected source."} The application will compute a unified diff for a/${finding.filePath} and b/${finding.filePath}. Preserve behavior, avoid unrelated changes, do not add scanner suppressions, and suggest regression tests.`.slice(0, 3000) };
 }

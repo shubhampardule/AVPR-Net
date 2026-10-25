@@ -15,7 +15,7 @@ test("model requests contain canonical rule guidance without exposing host prefi
 test("remediation context loads only the finding file at its immutable scan commit", async () => {
   getFileContent.mockResolvedValue({ content: "export const value = 1;\n" });
   const scan = { _id: "scan-1", commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" };
-  const finding = { _id: "finding-1", filePath: "src/main file.js", ruleId: "securepatch.js.dynamic-eval", title: "Dynamic evaluation" };
+  const finding = { _id: "finding-1", filePath: "src/main file.js", scanner: "semgrep", ruleId: "securepatch.js.dynamic-eval", title: "Dynamic evaluation" };
   const context = await source(scan, finding);
   expect(getFileContent).toHaveBeenCalledWith("42", "org", "repo", "src/main file.js", scan.commitSha);
   expect(context).toMatchObject({ scanId: "scan-1", findingId: "finding-1", commitSha: scan.commitSha,
@@ -24,9 +24,9 @@ test("remediation context loads only the finding file at its immutable scan comm
 });
 
 test("remediation context fails closed when the scan is not pinned or an affected line exceeds its limit", async () => {
-  await expect(source({ commitSha: null }, { filePath: "src/main.js" })).rejects.toMatchObject({ statusCode: 409 });
+  await expect(source({ commitSha: null }, { scanner: "semgrep", filePath: "src/main.js" })).rejects.toMatchObject({ statusCode: 409 });
   getFileContent.mockResolvedValue({ content: "x".repeat(8001) });
-  await expect(source({ commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" }, { filePath: "src/main.js", startLine: 1 }))
+  await expect(source({ commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" }, { scanner: "semgrep", filePath: "src/main.js", startLine: 1 }))
     .rejects.toMatchObject({ statusCode: 413 });
 });
 
@@ -34,7 +34,7 @@ test("large files expose an exact bounded excerpt while validation preserves the
   const original = Array.from({ length: 1468 }, (_, i) => `const value${i} = ${i};\n`).join("");
   getFileContent.mockResolvedValue({ content: original });
   const scan = { _id: "scan-1", commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" };
-  const finding = { _id: "finding-1", filePath: "large.js", startLine: 700, ruleId: "test", title: "test" };
+  const finding = { _id: "finding-1", filePath: "large.js", scanner: "semgrep", startLine: 700, ruleId: "test", title: "test" };
   const context = await source(scan, finding);
   expect(context.originalCode.length).toBeLessThanOrEqual(4000);
   expect(context.sourceWindow.startLine).toBeLessThanOrEqual(700);
@@ -51,9 +51,21 @@ test("large files expose an exact bounded excerpt while validation preserves the
 test("source failures distinguish missing scans, GitHub access, and unavailable source lines", async () => {
   await expect(source(null, {})).rejects.toMatchObject({ statusCode: 404, code: "SOURCE_NOT_FOUND" });
   const scan = { commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" };
-  const finding = { filePath: "src/main.js", startLine: 9999 };
+  const finding = { scanner: "semgrep", filePath: "src/main.js", startLine: 9999 };
   getFileContent.mockRejectedValueOnce({ status: 403, message: "private GitHub response" });
   await expect(source(scan, finding)).rejects.toMatchObject({ statusCode: 403, code: "SOURCE_ACCESS_DENIED" });
   getFileContent.mockResolvedValue({ content: "const value = 1;\n".repeat(1000) });
   await expect(source(scan, finding)).rejects.toMatchObject({ statusCode: 409, code: "SOURCE_LINE_UNAVAILABLE" });
+});
+
+test.each([
+  { scanner: "secrets", filePath: "src/config.js" },
+  { scanner: "dependency", filePath: "package-lock.json" },
+  { scanner: "trivy", filePath: "Dockerfile" },
+  { scanner: "bandit", filePath: "src/main.js" },
+  { scanner: "semgrep", filePath: "src/main.go" },
+])("automatic remediation is blocked with guidance for unsupported finding types %#", async finding => {
+  await expect(source({ commitSha: "a".repeat(40), installationId: "42", owner: "org", repo: "repo" }, finding))
+    .rejects.toMatchObject({ statusCode: 422, code: "REMEDIATION_UNSUPPORTED" });
+  expect(getFileContent).not.toHaveBeenCalled();
 });

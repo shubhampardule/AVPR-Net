@@ -8,6 +8,7 @@ const { validateCode } = require("./code-validation");
 const digest = text => createHash("sha256").update(text).digest("hex");
 const {canonicalRule}=require("../utils/scanner-rule");
 const {computePolicyHash}=require("../utils/patch-policy");
+const { validateRemediationPatch } = require("../utils/remediation-patch-policy");
 const fail = code => Object.assign(new Error(code), { code });
 const sourceRoot = [path.join(__dirname,".."),__dirname].find(root=>require("node:fs").existsSync(path.join(root,"scanners/rules.yml")));
 function policyHash() {
@@ -101,6 +102,7 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
     if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
     const content = remediation.applyExactDiff(original, patch, finding.filePath);
     if (digest(content) !== proposedHash) throw fail("RESCAN_PATCH_MISMATCH");
+    validateRemediationPatch(finding, content);
     await validateRuleSpecificFix(root, finding, content);
     const suppressions = text => (text.match(/\b(?:nosemgrep|nosec)\b/gi)||[]).length;
     if(suppressions(content)>suppressions(original)) throw fail("RESCAN_SUPPRESSION_ADDED");

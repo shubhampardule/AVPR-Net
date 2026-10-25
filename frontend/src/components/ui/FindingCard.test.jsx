@@ -18,6 +18,16 @@ test("finding guidance explains a secret risk and a concrete first action", () =
   expect(guidance.next).toMatch(/revoke or rotate/i);
 });
 
+test("offers automatic fix generation only where the single-file verified workflow is supported", () => {
+  const { rerender } = render(<MemoryRouter><FindingCard finding={sample} organizationId="org-1" /></MemoryRouter>);
+  expect(screen.queryByRole("link", { name: /draft a fix/i })).toBeNull();
+  expect(screen.getByText("Manual remediation")).toBeTruthy();
+  rerender(<MemoryRouter><FindingCard finding={{ ...sample, scanner: "bandit", filePath: "src/app.py" }} organizationId="org-1" /></MemoryRouter>);
+  expect(screen.getByRole("link", { name: /draft a fix/i })).toBeTruthy();
+  rerender(<MemoryRouter><FindingCard finding={{ ...sample, scanner: "dependency", filePath: "package-lock.json" }} organizationId="org-1" /></MemoryRouter>);
+  expect(screen.queryByRole("link", { name: /draft a fix/i })).toBeNull();
+});
+
 test("renders versioned deterministic remediation separately from AI proposals", async () => {
   render(<MemoryRouter><FindingCard finding={{ ...sample, scanner: "semgrep", ruleId: "securepatch.js.sql-concatenation", remediationGuidance: {
     source: "deterministic", version: "securepatch-guidance-v1", title: "Bind SQL parameters",

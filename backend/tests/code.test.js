@@ -34,6 +34,47 @@ test("excerpt proposals map to real file lines and apply without changing surrou
   expect(provider.chat.mock.calls[0][0][1].content).toContain("excerpt review");
 });
 
+test("guided B608 proposals reject bound SQL identifiers before any patch is shown", async () => {
+  const { service, provider, validator } = setup("python");
+  const originalCode = 'query = f"SELECT {alias} FROM {_sql_quote(table)} LIMIT 0"\n';
+  const unsafeCode = 'query = "SELECT ? FROM ? LIMIT 0"\nrows = db.execute(query, (alias, table))\n';
+  const finding = { _id: "0123456789abcdef01234567", scanner: "bandit", ruleId: "B608", filePath: "src/query.py" };
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("python"), format: "code", code: unsafeCode }) });
+  const result = await service.generateCode({ language: "python", mode: "review", request: "Bind SQL values safely",
+    findingId: finding._id, targetPath: finding.filePath, originalCode }, true,
+  { finding, fullOriginalCode: originalCode });
+  expect(result).toMatchObject({ status: "unavailable", proposal: null, applied: false });
+  expect(provider.chat).toHaveBeenCalledTimes(2);
+  expect(validator).not.toHaveBeenCalled();
+  expect(result.error.message).toMatch(/cannot stand for table or column names/i);
+});
+
+test("guided B608 proposals may bind values when SQL identifiers remain fixed", async () => {
+  const { service, provider } = setup("python");
+  const originalCode = 'query = f"SELECT * FROM users WHERE id = {user_id}"\n';
+  const safeCode = 'query = "SELECT * FROM users WHERE id = ?"\nrows = db.execute(query, (user_id,))\n';
+  const finding = { _id: "0123456789abcdef01234567", scanner: "bandit", ruleId: "B608", filePath: "src/query.py" };
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("python"), format: "code", code: safeCode }) });
+  const result = await service.generateCode({ language: "python", mode: "review", request: "Bind SQL values safely",
+    findingId: finding._id, targetPath: finding.filePath, originalCode }, true,
+  { finding, fullOriginalCode: originalCode });
+  expect(result.status).toBe("complete");
+  expect(result.proposal.code).toContain("FROM users WHERE id = ?");
+});
+
+test("guided review can return no patch when the finding needs human judgment", async () => {
+  const { service, provider, validator } = setup("python");
+  const finding = { _id: "0123456789abcdef01234567", scanner: "bandit", ruleId: "B608", filePath: "src/query.py" };
+  provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("python"), format: "no_fix", code: "",
+    explanation: "The query uses a fixed table name and the data-flow evidence is not enough to justify a code change." }) });
+  const result = await service.generateCode({ language: "python", mode: "review", request: "Review this finding",
+    findingId: finding._id, targetPath: finding.filePath, originalCode: "query = build_query()\n" }, true,
+  { finding, fullOriginalCode: "query = build_query()\n" });
+  expect(result).toMatchObject({ status: "complete", proposal: null,
+    reviewRequired: { explanation: expect.stringContaining("not enough") }, applied: false });
+  expect(validator).not.toHaveBeenCalled();
+});
+
 test.each([0, -1, 1.5, "700", 1000001])("rejects invalid excerpt offsets %s before calling the model", async targetStartLine => {
   const { service, provider } = setup();
   await expect(service.generateCode({ language: "javascript", mode: "review", request: "Validate", originalCode: "const a = 1;", targetStartLine }))
