@@ -1,5 +1,4 @@
 const { Worker } = require("node:worker_threads");
-const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { MAX_SOURCE_BYTES } = require("../utils/review-source");
@@ -17,23 +16,6 @@ async function validateCode(language, code, format = "code") {
     return { status: "unavailable", executed: false, message: format === "diff"
       ? "Unified diff requires manual review; no file was changed or parsed"
       : "No safe parser is configured for this language" };
-  }
-  if (language === "python") {
-    return new Promise((resolve) => {
-      // This is trusted parser code. The generated proposal is only stdin data.
-      const parser = `import ast,sys; ast.parse(sys.stdin.read(${MAX_SOURCE_BYTES + 1})); print('VALID')`;
-      const child = execFile("python", ["-I", "-c", parser], { timeout: 3000, maxBuffer: 4096,
-        windowsHide: true, env: { PATH: process.env.PATH || process.env.Path || "",
-          SystemRoot: process.env.SystemRoot || "", TEMP: process.env.TEMP || "", PYTHONNOUSERSITE: "1" } }, (error, stdout, stderr) => {
-        if (!error && stdout.trim() === "VALID") {
-          resolve({ status: "passed", method: "python-ast", executed: false });
-        } else resolve({ status: /SyntaxError|IndentationError|TabError/.test(stderr || "") ? "failed" : "unavailable",
-          method: "python-ast", executed: false,
-          message: "Python AST check failed or interpreter was unavailable; generated code was not executed" });
-      });
-      child.stdin.on("error", () => {});
-      child.stdin.end(code);
-    });
   }
   return new Promise((resolve) => {
     const worker = new Worker(syntaxWorkerPath(), {

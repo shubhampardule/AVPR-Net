@@ -193,12 +193,11 @@ test.each(["javascript", "typescript"])("%s parser validates syntax but never ru
   expect(await validateCode(language, "const = ;")).toMatchObject({ status: "failed", executed: false });
 });
 
-test("Python parser never executes proposal and reports interpreter availability", async () => {
+test("Python parser checks syntax without executing the proposal", async () => {
   const result = await validateCode("python", "raise RuntimeError('must not execute')\n");
-  expect(["passed", "unavailable"]).toContain(result.status);
-  expect(result.executed).toBe(false);
+  expect(result).toMatchObject({ status: "passed", method: "lezer-python", executed: false });
   const bad = await validateCode("python", "def broken(:\n");
-  expect(["failed", "unavailable"]).toContain(bad.status);
+  expect(bad).toMatchObject({ status: "failed", method: "lezer-python", executed: false });
 });
 
 test.each(["c", "cpp", "bash"])("%s has honest unavailable parser status", async (language) => {

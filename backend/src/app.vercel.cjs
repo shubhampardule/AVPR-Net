@@ -729,7 +729,6 @@ var require_review_source = __commonJS({
 var require_code_validation = __commonJS({
   "src/services/code-validation.js"(exports2, module2) {
     var { Worker } = require("node:worker_threads");
-    var { execFile } = require("node:child_process");
     var fs = require("node:fs");
     var path = require("node:path");
     var { MAX_SOURCE_BYTES } = require_review_source();
@@ -743,34 +742,6 @@ var require_code_validation = __commonJS({
       }
       if (format === "diff" || !["python", "javascript", "typescript"].includes(language)) {
         return { status: "unavailable", executed: false, message: format === "diff" ? "Unified diff requires manual review; no file was changed or parsed" : "No safe parser is configured for this language" };
-      }
-      if (language === "python") {
-        return new Promise((resolve) => {
-          const parser = `import ast,sys; ast.parse(sys.stdin.read(${MAX_SOURCE_BYTES + 1})); print('VALID')`;
-          const child = execFile("python", ["-I", "-c", parser], {
-            timeout: 3e3,
-            maxBuffer: 4096,
-            windowsHide: true,
-            env: {
-              PATH: process.env.PATH || process.env.Path || "",
-              SystemRoot: process.env.SystemRoot || "",
-              TEMP: process.env.TEMP || "",
-              PYTHONNOUSERSITE: "1"
-            }
-          }, (error, stdout, stderr) => {
-            if (!error && stdout.trim() === "VALID") {
-              resolve({ status: "passed", method: "python-ast", executed: false });
-            } else resolve({
-              status: /SyntaxError|IndentationError|TabError/.test(stderr || "") ? "failed" : "unavailable",
-              method: "python-ast",
-              executed: false,
-              message: "Python AST check failed or interpreter was unavailable; generated code was not executed"
-            });
-          });
-          child.stdin.on("error", () => {
-          });
-          child.stdin.end(code);
-        });
       }
       return new Promise((resolve) => {
         const worker = new Worker(syntaxWorkerPath(), {
@@ -4735,7 +4706,7 @@ var require_patch_rescan_service = __commonJS({
     var fail = (code) => Object.assign(new Error(code), { code });
     var sourceRoot = [path.join(__dirname, ".."), __dirname].find((root) => require("node:fs").existsSync(path.join(root, "scanners/rules.yml")));
     function policyHash() {
-      if (true) return "4cdb281d54b802488d64c965ee5e13c544cb88ef7042aa70c5014d88253810a2";
+      if (true) return "b114b71df29017b6e143dab07b328a8e551b1418e78551a67a1986be2ddef55a";
       return computePolicyHash(sourceRoot);
     }
     function summarize(before, after, finding) {

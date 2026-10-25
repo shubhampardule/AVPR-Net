@@ -457,8 +457,8 @@ export default function Assistant({ demo = false }) {
           </>}
           {result?.proposal && <>
             <p className="text-sm leading-6 text-text-primary">{result.proposal.explanation}</p>
-            <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
-            {result.validation?.message && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
+            <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.proposal.format === "diff" ? "full-file check runs in rescan" : result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
+            {result.validation?.message && result.proposal.format !== "diff" && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
             {result.proposal.format === "diff" ? <PatchComparison originalCode={proposalSource?.originalCode}
               filename={proposalSource?.filename || "source"} commitSha={proposalSource?.commitSha} startLine={proposalSource?.startLine || 1} patch={result.proposal.code} />
               : <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>}
