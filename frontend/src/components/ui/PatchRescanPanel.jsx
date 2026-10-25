@@ -9,6 +9,8 @@ const errors = {
   RESCAN_DEADLINE_EXCEEDED: "No worker completed this rescan before its deadline. Check the worker, then retry.",
   RESCAN_SYNTAX_FAILED: "The proposed code failed syntax validation.",
   RESCAN_SUPPRESSION_ADDED: "The patch adds a scanner suppression instead of demonstrating a fix. Revise the proposal.",
+  RESCAN_REMEDIATION_PARSER_INCOMPLETE: "This patch removed the alert but did not use the safe XML parser and handle its errors correctly. No PR can be created from it. Add the correct imports and error handling, then generate a complete fix.",
+  RESCAN_REMEDIATION_DEPENDENCY_MISSING: "This patch uses defusedxml, but the project does not declare it as a direct dependency. No PR can be created from it. Add the dependency and rescan.",
 };
 export default function PatchRescanPanel({ context, patch, onVerified, onFeedback, autoStart = false }) {
   const [job, setJob] = useState(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);

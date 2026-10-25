@@ -61,6 +61,10 @@ test("provider/engine errors expose only fixed categories, never private diagnos
 test("public job payload omits the patch and worker lease",()=>{
  const payload=service.publicJob({...record,leaseToken:"secret"});expect(payload.patch).toBeUndefined();expect(payload.leaseToken).toBeUndefined();
 });
+test("a passed rescan from an older policy is shown as stale and cannot look verified",()=>{
+ const payload=service.publicJob({...record,status:"completed",policyHash:"old",result:{status:"passed"}});
+ expect(payload).toMatchObject({status:"failed",errorCode:"RESCAN_POLICY_CHANGED",result:null});
+});
 test("PR gate checks scope, exact source/patch hashes, policy, expiry and completed outcome",async()=>{
  Job.findOne.mockReturnValue(query({...record,result:{rulesHash:"rules"}}));
  expect(await service.requirePassed({jobId:id,scan,finding,patch:"diff",validation})).toMatchObject({status:"passed",jobId:id});

@@ -3819,6 +3819,7 @@ var require_remediation_guidance_service = __commonJS({
       "semgrep:securepatch.python.sql-formatting": ["Bind SQL parameters", "Formatting values into SQL text can let input change the query structure.", ["Use the database driver's parameter binding API with the correct placeholder syntax.", "Allowlist any dynamic identifiers such as table names instead of binding them as values.", "Test quotes and SQL metacharacters and verify they remain data."]],
       "semgrep:securepatch.python.insecure-yaml": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
       "bandit:B301": ["Do not unpickle untrusted data", "Loading a pickle can execute code during deserialization.", ["Use a data-only format such as JSON with explicit schema validation for untrusted input.", "If a legacy pickle must be loaded, restrict it to data you control and authenticate before loading; authentication alone does not make arbitrary sources safe.", "Add a test showing untrusted serialized input is rejected."]],
+      "bandit:B314": ["Use a hardened XML parser", "The standard-library XML parser can process attacker-controlled entity declarations.", ["Declare defusedxml as a direct project dependency; do not rely on a transitive install.", "Import and use defusedxml.ElementTree for the parse, and handle DefusedXmlException using the application's normal invalid-document error path.", "Do not assign the return value of defusedxml.defuse_stdlib(): it returns no parser and changes global parser behavior. If the required dependency, import and error handling cannot be changed safely, do not propose a partial fix.", "Test UTF-8 and UTF-16 DTD/entity inputs and confirm ordinary DOCX content still parses."]],
       "bandit:B602": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
       "bandit:B605": ["Run commands without a shell", "Shell parsing can reinterpret attacker-controlled text as additional commands or options.", ["Use subprocess APIs with an argument list and shell=False.", "Allowlist the executable and validate each argument; use a timeout for operations that may hang.", "Test spaces, quotes, leading dashes, and shell metacharacters in input values."]],
       "bandit:B506": ["Use safe YAML loading", "General YAML constructors can instantiate objects when the document is untrusted.", ["Use the library's safe loader for untrusted documents.", "Validate the parsed value against an explicit schema and size/depth limits.", "Test object-construction tags and malformed or oversized input."]],
@@ -4706,7 +4707,7 @@ var require_patch_rescan_service = __commonJS({
     var fail = (code) => Object.assign(new Error(code), { code });
     var sourceRoot = [path.join(__dirname, ".."), __dirname].find((root) => require("node:fs").existsSync(path.join(root, "scanners/rules.yml")));
     function policyHash() {
-      if (true) return "b114b71df29017b6e143dab07b328a8e551b1418e78551a67a1986be2ddef55a";
+      if (true) return "49ea71a4807b733c21282221477bc626efede935cff72ff0c2001f5cff81add3";
       return computePolicyHash(sourceRoot);
     }
     function summarize(before, after, finding) {
@@ -4746,6 +4747,33 @@ var require_patch_rescan_service = __commonJS({
       const signature = (result) => JSON.stringify(result.coverage.map((c) => [c.scanner, c.version, c.scanned, c.skipped ?? null, c.filesHash]).sort((a, b) => a[0].localeCompare(b[0])));
       if (before.coverage.some((c) => !c.filesHash || !c.version || !Number.isSafeInteger(c.scanned) || (c.skipped ?? 0) > 0) || signature(before) !== signature(after)) throw fail("RESCAN_COVERAGE_CHANGED");
     }
+    async function validateRuleSpecificFix(root, finding, content) {
+      if (finding.scanner !== "bandit" || canonicalRule(finding.ruleId) !== "B314" || !/\.py$/.test(finding.filePath)) return;
+      const imported = content.match(/^\s*from\s+defusedxml\s+import\s+ElementTree(?:\s+as\s+([A-Za-z_]\w*))?\s*$/m);
+      const alias = imported?.[1] || "ElementTree";
+      const exceptionImport = content.match(/^\s*from\s+defusedxml\.common\s+import\s+DefusedXmlException(?:\s+as\s+([A-Za-z_]\w*))?\s*$/m);
+      const exceptionAlias = exceptionImport?.[1] || "DefusedXmlException";
+      const safeParser = Boolean(imported && new RegExp(`\\b${alias}\\.fromstring\\s*\\(`).test(content) && exceptionImport && new RegExp(`\\bexcept\\s+${exceptionAlias}\\b`).test(content));
+      if (!safeParser || /^\s*(?:from\s+xml\.etree\s+import\s+ElementTree|import\s+xml\.etree\.ElementTree\s+as\s+ElementTree)\s*$/m.test(content)) {
+        throw fail("RESCAN_REMEDIATION_PARSER_INCOMPLETE");
+      }
+      const manifests = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"];
+      const rootEntries = await fs.readdir(root);
+      const dependencyFiles = [...manifests, ...rootEntries.filter((name) => /^requirements[^/]*\.txt$/i.test(name))];
+      let declared = false;
+      for (const name of new Set(dependencyFiles)) {
+        try {
+          const file = await fs.readFile(path.join(root, name), "utf8");
+          if (file.split(/\r?\n/).some((line) => !line.trimStart().startsWith("#") && /\bdefusedxml["']?\s*(?:>=|==|<=|~=|!=|=|<|>|;|\[|,|$)/i.test(line))) {
+            declared = true;
+            break;
+          }
+        } catch (error) {
+          if (error.code !== "ENOENT" && error.code !== "EISDIR") throw error;
+        }
+      }
+      if (!declared) throw fail("RESCAN_REMEDIATION_DEPENDENCY_MISSING");
+    }
     async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, signal }, {
       createWorkspace = require_workspace_service().createEphemeralWorkspace,
       createOrchestrator = () => new Orchestrator(),
@@ -4770,6 +4798,7 @@ var require_patch_rescan_service = __commonJS({
         if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
         const content = remediation.applyExactDiff(original, patch, finding.filePath);
         if (digest(content) !== proposedHash) throw fail("RESCAN_PATCH_MISMATCH");
+        await validateRuleSpecificFix(root, finding, content);
         const suppressions = (text) => (text.match(/\b(?:nosemgrep|nosec)\b/gi) || []).length;
         if (suppressions(content) > suppressions(original)) throw fail("RESCAN_SUPPRESSION_ADDED");
         const language = /\.py$/.test(finding.filePath) ? "python" : /\.tsx?$/.test(finding.filePath) ? "typescript" : "javascript";
@@ -4801,7 +4830,7 @@ var require_patch_rescan_service = __commonJS({
         if (!cleaned) await workspace.cleanup();
       }
     }
-    module2.exports = { rescanPatch, summarize, comparable, canonicalRule, digest, policyHash };
+    module2.exports = { rescanPatch, summarize, comparable, validateRuleSpecificFix, canonicalRule, digest, policyHash };
   }
 });
 
@@ -4816,22 +4845,25 @@ var require_patch_rescan_jobs_service = __commonJS({
     var { digest, rescanPatch, policyHash } = require_patch_rescan_service();
     var { bad } = require_input();
     var DEADLINE_MS = 10 * 60 * 1e3;
-    var publicJob = (job) => ({
-      id: String(job._id),
-      scanId: String(job.scan),
-      findingId: String(job.finding),
-      status: job.status,
-      patchHash: job.patchHash,
-      sourceHash: job.sourceHash,
-      proposedHash: job.proposedHash,
-      commitSha: job.commitSha,
-      targetPath: job.targetPath,
-      result: job.result,
-      errorCode: job.errorCode,
-      createdAt: job.createdAt,
-      completedAt: job.completedAt,
-      deadlineAt: job.deadlineAt
-    });
+    var publicJob = (job) => {
+      const stale = job.status === "completed" && job.policyHash !== policyHash();
+      return {
+        id: String(job._id),
+        scanId: String(job.scan),
+        findingId: String(job.finding),
+        status: stale ? "failed" : job.status,
+        patchHash: job.patchHash,
+        sourceHash: job.sourceHash,
+        proposedHash: job.proposedHash,
+        commitSha: job.commitSha,
+        targetPath: job.targetPath,
+        result: stale ? null : job.result,
+        errorCode: stale ? "RESCAN_POLICY_CHANGED" : job.errorCode,
+        createdAt: job.createdAt,
+        completedAt: job.completedAt,
+        deadlineAt: job.deadlineAt
+      };
+    };
     async function enqueue({ scan, finding, patch, actorId }) {
       if (!["semgrep", "bandit", "secrets"].includes(finding.scanner) || !/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw bad("This finding does not support patch rescanning", 400, "RESCAN_FINDING_UNSUPPORTED");
       await require_budget_service().consume(`patch-rescan-requests:${scan.organization}`, 60, 36e5);

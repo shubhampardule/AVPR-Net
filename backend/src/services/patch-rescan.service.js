@@ -49,6 +49,35 @@ function comparable(before, after) {
       signature(before) !== signature(after)) throw fail("RESCAN_COVERAGE_CHANGED");
 }
 
+async function validateRuleSpecificFix(root, finding, content) {
+  if (finding.scanner !== "bandit" || canonicalRule(finding.ruleId) !== "B314" || !/\.py$/.test(finding.filePath)) return;
+  // B314 is only remediated when the module uses defusedxml's parser. Merely
+  // removing the flagged call makes alert-count rescans pass even when the new
+  // name is undefined or defuse_stdlib() is incorrectly treated as a parser.
+  const imported = content.match(/^\s*from\s+defusedxml\s+import\s+ElementTree(?:\s+as\s+([A-Za-z_]\w*))?\s*$/m);
+  const alias = imported?.[1] || "ElementTree";
+  const exceptionImport = content.match(/^\s*from\s+defusedxml\.common\s+import\s+DefusedXmlException(?:\s+as\s+([A-Za-z_]\w*))?\s*$/m);
+  const exceptionAlias = exceptionImport?.[1] || "DefusedXmlException";
+  const safeParser = Boolean(imported && new RegExp(`\\b${alias}\\.fromstring\\s*\\(`).test(content) &&
+    exceptionImport && new RegExp(`\\bexcept\\s+${exceptionAlias}\\b`).test(content));
+  if (!safeParser || /^\s*(?:from\s+xml\.etree\s+import\s+ElementTree|import\s+xml\.etree\.ElementTree\s+as\s+ElementTree)\s*$/m.test(content)) {
+    throw fail("RESCAN_REMEDIATION_PARSER_INCOMPLETE");
+  }
+
+  const manifests = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"];
+  const rootEntries = await fs.readdir(root);
+  const dependencyFiles = [...manifests, ...rootEntries.filter(name => /^requirements[^/]*\.txt$/i.test(name))];
+  let declared = false;
+  for (const name of new Set(dependencyFiles)) {
+    try {
+      const file = await fs.readFile(path.join(root, name), "utf8");
+      if (file.split(/\r?\n/).some(line => !line.trimStart().startsWith("#") &&
+        /\bdefusedxml["']?\s*(?:>=|==|<=|~=|!=|=|<|>|;|\[|,|$)/i.test(line))) { declared = true; break; }
+    } catch (error) { if (error.code !== "ENOENT" && error.code !== "EISDIR") throw error; }
+  }
+  if (!declared) throw fail("RESCAN_REMEDIATION_DEPENDENCY_MISSING");
+}
+
 async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, signal }, {
   createWorkspace = require("./workspace.service").createEphemeralWorkspace,
   createOrchestrator = () => new Orchestrator(), parser = validateCode,
@@ -72,6 +101,7 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
     if (digest(original) !== sourceHash) throw fail("RESCAN_SOURCE_MISMATCH");
     const content = remediation.applyExactDiff(original, patch, finding.filePath);
     if (digest(content) !== proposedHash) throw fail("RESCAN_PATCH_MISMATCH");
+    await validateRuleSpecificFix(root, finding, content);
     const suppressions = text => (text.match(/\b(?:nosemgrep|nosec)\b/gi)||[]).length;
     if(suppressions(content)>suppressions(original)) throw fail("RESCAN_SUPPRESSION_ADDED");
     const language = /\.py$/.test(finding.filePath) ? "python" : /\.tsx?$/.test(finding.filePath) ? "typescript" : "javascript";
@@ -94,4 +124,4 @@ async function rescanPatch({ scan, finding, patch, sourceHash, proposedHash, sig
     return result;
   } finally { if (!cleaned) await workspace.cleanup(); }
 }
-module.exports = { rescanPatch, summarize, comparable, canonicalRule, digest, policyHash };
+module.exports = { rescanPatch, summarize, comparable, validateRuleSpecificFix, canonicalRule, digest, policyHash };

@@ -6,9 +6,12 @@ const Member = require("../models/OrganizationMember");
 const { digest, rescanPatch, policyHash } = require("./patch-rescan.service");
 const { bad } = require("../utils/input");
 const DEADLINE_MS = 10 * 60 * 1000;
-const publicJob = job => ({ id:String(job._id),scanId:String(job.scan),findingId:String(job.finding),status:job.status,
+const publicJob = job => {
+  const stale = job.status === "completed" && job.policyHash !== policyHash();
+  return { id:String(job._id),scanId:String(job.scan),findingId:String(job.finding),status:stale ? "failed" : job.status,
   patchHash:job.patchHash,sourceHash:job.sourceHash,proposedHash:job.proposedHash,commitSha:job.commitSha,targetPath:job.targetPath,
-  result:job.result,errorCode:job.errorCode,createdAt:job.createdAt,completedAt:job.completedAt,deadlineAt:job.deadlineAt });
+  result:stale ? null : job.result,errorCode:stale ? "RESCAN_POLICY_CHANGED" : job.errorCode,createdAt:job.createdAt,completedAt:job.completedAt,deadlineAt:job.deadlineAt };
+};
 
 async function enqueue({scan,finding,patch,actorId}) {
   if (!["semgrep","bandit","secrets"].includes(finding.scanner)||!/\.(?:js|jsx|ts|tsx|py)$/.test(finding.filePath)) throw bad("This finding does not support patch rescanning",400,"RESCAN_FINDING_UNSUPPORTED");

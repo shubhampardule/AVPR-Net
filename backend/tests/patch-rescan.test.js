@@ -2,7 +2,7 @@ jest.mock("../src/config/github",()=>({getInstallationOctokit:jest.fn()}));
 jest.mock("../src/scanners/process",()=>({cleanupWslWorkspace:jest.fn().mockResolvedValue()}));
 const fs=require("node:fs/promises"),os=require("node:os"),path=require("node:path");
 const {createTwoFilesPatch}=require("diff");
-const {summarize,comparable,rescanPatch,digest}=require("../src/services/patch-rescan.service");
+const {summarize,comparable,rescanPatch,digest,validateRuleSpecificFix}=require("../src/services/patch-rescan.service");
 const finding={scanner:"semgrep",filePath:"src/code.js",ruleId:"host.prefix.securepatch.js.dynamic-eval",startLine:2};
 const alert=(overrides={})=>({scanner:"semgrep",filePath:"src/code.js",ruleId:"securepatch.js.dynamic-eval",startLine:2,endLine:2,...overrides});
 test("a reproduced target disappearing without new alert counts passes only static checks",()=>{
@@ -19,6 +19,31 @@ test("coverage changes, skipped files and unknown versions cannot be accepted",(
  expect(()=>comparable(base,base)).not.toThrow();
  for(const update of [{version:"2"},{scanned:0},{filesHash:"other"},{skipped:1},{version:null}])
   expect(()=>comparable(base,{coverage:[{...base.coverage[0],...update}]})).toThrow("RESCAN_COVERAGE_CHANGED");
+});
+test("B314 cannot pass by only removing the flagged call or using an undefined defusedxml name",async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),"avpr-b314-policy-"));
+ const finding={scanner:"bandit",ruleId:"B314",filePath:"src/ingest.py"};
+ try {
+  await fs.mkdir(path.join(root,"src"));
+  await fs.writeFile(path.join(root,"pyproject.toml"),'dependencies = ["defusedxml>=0.7.1"]\n');
+  await expect(validateRuleSpecificFix(root,finding,"defused = defusedxml.defuse_stdlib()\nreturn defused.fromstring(xml)\n"))
+   .rejects.toMatchObject({code:"RESCAN_REMEDIATION_PARSER_INCOMPLETE"});
+  await expect(validateRuleSpecificFix(root,finding,"from xml.etree import ElementTree\nreturn ElementTree.fromstring(xml)\n"))
+   .rejects.toMatchObject({code:"RESCAN_REMEDIATION_PARSER_INCOMPLETE"});
+ } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
+test("B314 accepts only the declared defusedxml parser import and use",async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),"avpr-b314-policy-"));
+ const finding={scanner:"bandit",ruleId:"B314",filePath:"src/ingest.py"};
+ try {
+  await fs.mkdir(path.join(root,"src"));
+  await fs.writeFile(path.join(root,"pyproject.toml"),'dependencies = ["defusedxml>=0.7.1"]\n');
+  await expect(validateRuleSpecificFix(root,finding,"from defusedxml import ElementTree\nfrom defusedxml.common import DefusedXmlException\ntry:\n return ElementTree.fromstring(xml)\nexcept DefusedXmlException:\n raise\n"))
+   .resolves.toBeUndefined();
+  await fs.writeFile(path.join(root,"pyproject.toml"),'dependencies = ["requests>=2"]\n');
+  await expect(validateRuleSpecificFix(root,finding,"from defusedxml import ElementTree\nfrom defusedxml.common import DefusedXmlException\ntry:\n return ElementTree.fromstring(xml)\nexcept DefusedXmlException:\n raise\n"))
+   .rejects.toMatchObject({code:"RESCAN_REMEDIATION_DEPENDENCY_MISSING"});
+ } finally { await fs.rm(root,{recursive:true,force:true}); }
 });
 function results(items=[]){return {scannersRun:["semgrep","bandit","secrets"],scannerErrors:[],
  results:[{scanner:"semgrep",findings:items},{scanner:"bandit",findings:[]},{scanner:"secrets",findings:[]}],
