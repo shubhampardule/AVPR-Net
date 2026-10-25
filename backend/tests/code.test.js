@@ -72,7 +72,19 @@ test("guided review can return no patch when the finding needs human judgment", 
   { finding, fullOriginalCode: "query = build_query()\n" });
   expect(result).toMatchObject({ status: "complete", proposal: null,
     reviewRequired: { explanation: expect.stringContaining("not enough") }, applied: false });
+  expect(provider.chat.mock.calls[0][0][1].content).toContain("If correctness depends on a quoting helper, allowlist, or constant whose definition is outside the supplied excerpt, return format no_fix");
   expect(validator).not.toHaveBeenCalled();
+});
+
+test("local Hugging Face staging loads are classified as review-only", async () => {
+  const { service, provider } = setup("python");
+  const originalCode = "def verify(staging: Path):\n    return Model.from_pretrained(str(staging))\n";
+  const finding = { _id: "0123456789abcdef01234567", scanner: "bandit", ruleId: "B615", filePath: "src/export.py" };
+  const result = await service.generateCode({ language: "python", mode: "review", request: "Pin this download",
+    originalCode, targetPath: finding.filePath }, true, { finding, fullOriginalCode: originalCode });
+  expect(result).toMatchObject({ status: "complete", proposal: null, applied: false,
+    reviewRequired: { explanation: expect.stringContaining("local load from a Path named staging") } });
+  expect(provider.chat).not.toHaveBeenCalled();
 });
 
 test.each([0, -1, 1.5, "700", 1000001])("rejects invalid excerpt offsets %s before calling the model", async targetStartLine => {
@@ -175,6 +187,7 @@ test.each([
   provider.chat.mockResolvedValue({ text: JSON.stringify({ ...proposal("javascript"), format: "diff", code }) });
   const result = await service.generateCode({ language: "javascript", mode: "review", request: "Review source", originalCode: "let x = 1;\n" });
   expect(result).toMatchObject({ status: "unavailable", proposal: null });
+  expect(result.error.message).toMatch(/did not match the scanned source exactly/i);
   expect(provider.chat).toHaveBeenCalledTimes(2);
   expect(validator).not.toHaveBeenCalled();
 });
