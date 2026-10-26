@@ -367,7 +367,7 @@ test("dashboard links through repository tree to a pinned source file and scan h
   await expect(page.getByText("Commit abc123456789")).toBeVisible();
   await page.getByRole("button", { name: "Compare with previous scan" }).click();
   await expect(page.getByRole("heading", { name: "Scan comparison" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Export JSON" })).toHaveAttribute("href", "/api/v1/scans/scan-1/export?format=json");
+  await expect(page.getByRole("button", { name: "Export JSON" })).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 

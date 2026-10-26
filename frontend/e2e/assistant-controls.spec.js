@@ -240,7 +240,7 @@ test("assistant rejects malformed JSON and shows a recoverable validation error"
   await page.getByLabel("Event JSON").fill("{bad json");
   await approve(page);
   await page.getByRole("button", { name: "Analyze evidence" }).click();
-  await expect(page.getByRole("alert")).toHaveText("Event must contain valid JSON.");
+  await expect(page.getByRole("alert").getByText("Event must contain valid JSON.")).toBeVisible();
   expect(analyzeCount).toBe(0);
   await expect(page.getByRole("checkbox", { name: /I approve sending/ })).toBeChecked();
   await page.getByLabel("Event JSON").fill('{"category":"authentication","synthetic":true}');

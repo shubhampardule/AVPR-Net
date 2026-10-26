@@ -650,9 +650,9 @@ test.describe("workspace controls, with mocked APIs", () => {
 
     for (const format of ["json", "sarif"]) {
       const downloadPromise = page.waitForEvent("download");
-      await page.getByRole("link", { name: `Export ${format.toUpperCase()}` }).click();
+      await page.getByRole("button", { name: `Export ${format.toUpperCase()}` }).click();
       const download = await downloadPromise;
-      expect(download.suggestedFilename()).toBe(`scan.${format}`);
+      expect(download.suggestedFilename()).toBe(`scan-scan-1.${format}`);
     }
 
     await page.getByRole("button", { name: "Compare with previous scan" }).click();

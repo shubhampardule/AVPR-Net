@@ -517,9 +517,9 @@ export default function Assistant({ demo = false }) {
             <p className="mt-2 text-sm leading-6 text-text-secondary">{result.reviewRequired.explanation}</p>
             <p className="mt-2 text-xs text-text-muted">Review the source and scanner evidence. No patch was created or rescanned.</p>
           </div>}
-          {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.proposal?.sources || result.reviewRequired?.sources || result.sources || []}
+          {result && (guidedFix ? <details><summary className="cursor-pointer text-sm font-medium">Supporting sources</summary><div className="mt-3"><Sources sources={result.proposal?.sources || result.reviewRequired?.sources || result.sources || result.retrieved_sources || []}
             emptyMessage={result.proposal && !result.citations_verified ? "No verified source citation was returned. Retrieved passages are not presented as supporting evidence." : "No supporting sources were cited."} /></div></details>
-            : <Sources sources={result.proposal?.sources || result.sources || []} emptyMessage="No supporting sources were cited." />)}
+            : <Sources sources={result.proposal?.sources || result.sources || result.analysis?.sources || result.retrieved_sources || []} emptyMessage="No supporting sources were cited." />)}
           <TextList title="Application limitations" items={result?.limitations} />
           {result?.requestId && <p className="break-all font-mono text-[11px] text-text-muted">Request {result.requestId}</p>}
         </section>}
