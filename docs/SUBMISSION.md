@@ -17,10 +17,12 @@ BullMQ/Redis instead. Semgrep uses twelve project-owned versioned baseline rules
 Bandit analyzes Python. Credential-pattern checks omit matched values, and optional
 npm lockfile advisory matching uses OSV. Coverage and failures remain visible.
 
-NVIDIA Nemotron 3.5 Lightning supplies advisory evidence explanations and code/diff
-proposals. Nemotron 3 Embed 1B supplies 2048-dimensional query/passage embeddings
-for a small approved shared corpus. The API validates schemas/citation IDs, keeps
-scanner scores separate from AI opinion and imposes persistent usage budgets.
+Nebius Token Factory serves inference with NVIDIA open-source models (such as
+nvidia/Nemotron-3_5-Lightning) for advisory evidence explanations and patch proposals,
+backed by 2048-dimensional embeddings for an approved shared security corpus. The API
+validates schemas/citation IDs, keeps scanner scores separate from AI opinion, and enforces
+an automated credit guardrail (capped at promotional budgets like $25) to strictly avoid overages.
+
 
 Users can inspect paginated history/findings, compare compatible scans, review or
 dismiss issues with a reason, export JSON/SARIF, and draft a finding-specific fix.

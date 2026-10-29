@@ -1,20 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import {
-  ShieldCheck,
   LayoutDashboard,
   GitBranch,
   ShieldAlert,
+  Bot,
   Settings,
   LogOut,
   ChevronDown,
   Menu,
   X,
+  Sparkles,
 } from "lucide-react";
 import { API_BASE_URL } from "../../config/api";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { BrandLockup } from "../ui/BrandLogo";
 import NotificationCenter from "./NotificationCenter";
+import OnboardingTour from "../ui/OnboardingTour";
+
 
 export default function DashboardLayout() {
   const location = useLocation();
@@ -31,12 +34,29 @@ export default function DashboardLayout() {
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [contextError, setContextError] = useState("");
   const [signOutError, setSignOutError] = useState("");
+  const [showTour, setShowTour] = useState(false);
   const contextRequestId = useRef(0);
   const desiredOrganization = searchParams.get("org");
   useEffect(() => {
     const desired = organizations.find(item => (item.id || item._id) === desiredOrganization);
     if (desired) setSelectedOrg(desired);
   }, [desiredOrganization, organizations]);
+
+  // First-time onboarding tutorial trigger
+  useEffect(() => {
+    const tourDone = localStorage.getItem("avprnet_tour_completed");
+    if (!tourDone && !loading && organizations.length > 0) {
+      const timer = setTimeout(() => setShowTour(true), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, organizations.length]);
+
+  useEffect(() => {
+    const handleOpenTour = () => setShowTour(true);
+    window.addEventListener("open-onboarding-tour", handleOpenTour);
+    return () => window.removeEventListener("open-onboarding-tour", handleOpenTour);
+  }, []);
+
 
   const createOrganization = async (event) => {
     event.preventDefault();
@@ -114,6 +134,28 @@ export default function DashboardLayout() {
       if (normalizedOrganizations.length > 0) {
         const desired = searchParams.get("org") || sessionStorage.getItem(`securepatch-org:${currentUser?.id || currentUser?._id}`);
         setSelectedOrg(normalizedOrganizations.find(item => (item.id || item._id) === desired) || normalizedOrganizations[0]);
+      } else if (currentUser) {
+        // Auto-create default workspace on first login if user has none
+        try {
+          const defaultName = currentUser.name ? `${currentUser.name.split(" ")[0]}'s Workspace` : "Default Workspace";
+          const createRes = await fetch(`${API_BASE_URL}/organizations`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: defaultName }),
+          });
+          const createBody = await createRes.json();
+          if (createRes.ok && createBody.data?.organization) {
+            const newOrg = { ...createBody.data.organization, role: createBody.data.role };
+            setOrganizations([newOrg]);
+            setSelectedOrg(newOrg);
+            sessionStorage.setItem(`securepatch-org:${currentUser?.id || currentUser?._id}`, newOrg._id || newOrg.id);
+          } else {
+            setSelectedOrg(null);
+          }
+        } catch {
+          setSelectedOrg(null);
+        }
       } else {
         setSelectedOrg(null);
       }
@@ -131,15 +173,18 @@ export default function DashboardLayout() {
   };
 
   const handleOrganizationChange = (event) => {
-    const organizationId = event.target.value;
+    const value = event.target.value;
+    if (value === "__new__") {
+      setShowOrgForm(true);
+      return;
+    }
 
     const organization = organizations.find(
-      (item) =>
-        (item._id || item.id) === organizationId
+      (item) => (item._id || item.id) === value
     );
 
     setSelectedOrg(organization || null);
-    if (organization) sessionStorage.setItem(`securepatch-org:${user?.id || user?._id}`, organizationId);
+    if (organization) sessionStorage.setItem(`securepatch-org:${user?.id || user?._id}`, value);
   };
 
   const handleLogout = async () => {
@@ -167,8 +212,6 @@ export default function DashboardLayout() {
 
   return (
     <div className="review-workspace min-h-screen bg-bg-primary text-text-primary">
-      <NotificationCenter key={selectedOrg?._id || selectedOrg?.id || "no-workspace"} organizationId={selectedOrg?._id || selectedOrg?.id} />
-
       {/* ---------------------------------------------------------------- */}
       {/* Background                                                      */}
       {/* ---------------------------------------------------------------- */}
@@ -177,7 +220,7 @@ export default function DashboardLayout() {
       {/* Mobile Header                                                   */}
       {/* ---------------------------------------------------------------- */}
 
-      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-bg-primary border-b border-text-primary/[0.06]">
+      <header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-bg-sidebar border-b border-border-subtle">
 
         <div className="h-full px-4 flex items-center justify-between">
 
@@ -191,16 +234,29 @@ export default function DashboardLayout() {
 
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTour(true)}
+              className="p-2 rounded-lg bg-accent/10 text-accent border border-accent/20"
+              title="Tour"
+              aria-label="Start product tour"
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
+            <NotificationCenter
+              key={`mobile-${selectedOrg?._id || selectedOrg?.id || "no-workspace"}`}
+              organizationId={selectedOrg?._id || selectedOrg?.id}
+            />
             <ThemeToggle />
             <button
               onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-              className="p-2 rounded-lg bg-bg-elevated border border-text-primary/[0.08]"
+              className="p-2 rounded-lg bg-bg-card border border-border-subtle"
               aria-label="Toggle navigation"
               aria-expanded={mobileSidebarOpen}
             >
               {mobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
+
 
         </div>
 
@@ -223,8 +279,8 @@ export default function DashboardLayout() {
           className={`
             fixed lg:fixed top-0 left-0 z-40
             h-screen w-[250px]
-            bg-bg-secondary
-            border-r border-text-primary/[0.06]
+            bg-bg-sidebar
+            border-r border-border-subtle
             flex flex-col
             transition-transform duration-300
             ${
@@ -239,7 +295,7 @@ export default function DashboardLayout() {
           {/* Logo                                                         */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="h-16 px-5 flex items-center border-b border-text-primary/[0.06]">
+          <div className="h-16 px-5 flex items-center border-b border-border-subtle">
 
             <Link
               to="/dashboard"
@@ -256,16 +312,10 @@ export default function DashboardLayout() {
           {/* Organization Selector                                        */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="p-4 border-b border-text-primary/[0.06]">
-
-            <div className="mb-2 px-1 text-xs font-medium text-text-muted">
-              Workspace
-            </div>
-
-
+          <div data-tour="workspace-selector" className="p-4 border-b border-border-subtle">
             <div className="relative">
-
               <select
+                aria-label="Workspace"
                 disabled={loading || Boolean(contextError)}
                 value={
                   selectedOrg?._id ||
@@ -273,11 +323,10 @@ export default function DashboardLayout() {
                   ""
                 }
                 onChange={handleOrganizationChange}
-                className="appearance-none w-full rounded-md border border-text-primary/[0.1] bg-bg-elevated px-3 py-2.5 pr-8 text-sm text-text-primary focus:outline-none focus:border-accent-security/60"
+                className="appearance-none w-full rounded-md border border-border-subtle bg-bg-card px-3 py-2 pr-8 text-sm text-text-primary focus:outline-none focus:border-accent"
               >
-
                 {organizations.length === 0 ? (
-                  <option value="">{contextError ? "Organization list unavailable" : loading ? "Loading organizations…" : "No organization"}</option>
+                  <option value="">{contextError ? "Workspace list unavailable" : loading ? "Loading workspaces…" : "No workspace"}</option>
                 ) : (
                   organizations.map((org) => (
                     <option
@@ -288,121 +337,83 @@ export default function DashboardLayout() {
                     </option>
                   ))
                 )}
-
+                <option value="__new__">+ New workspace</option>
               </select>
 
-
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
-
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
             </div>
-
-            {!contextError && organizations.length > 0 && <button type="button" onClick={() => setShowOrgForm((open) => !open)} className="mt-3 text-sm font-medium text-accent-security hover:underline underline-offset-2">{showOrgForm ? "Cancel" : "Create organization"}</button>}
-            {!contextError && (showOrgForm || (!loading && organizations.length === 0)) && (
-              <form onSubmit={createOrganization} className="mt-3 space-y-2">
-                <label htmlFor="organization-name" className="block text-xs text-text-secondary">Organization name</label>
-                <input id="organization-name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required maxLength={150} placeholder="Your team or project" className="w-full rounded-lg border border-text-primary/10 bg-bg-elevated px-3 py-2 text-xs focus:border-accent-security focus:outline-none" />
-                {orgError && <p role="alert" className="text-xs text-severity-critical">{orgError}</p>}
-                <button disabled={creatingOrg || !organizationName.trim()} className="w-full rounded-lg bg-accent-security px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-50">{creatingOrg ? "Creating..." : "Create workspace"}</button>
-              </form>
-            )}
-
           </div>
 
-
           {/* ------------------------------------------------------------ */}
-          {/* Navigation                                                    */}
+          {/* Navigation (Navigation only: 5 items with distinct icons)    */}
           {/* ------------------------------------------------------------ */}
 
-          <nav aria-label="Workspace navigation" className="flex-1 p-3 overflow-y-auto">
+          <nav aria-label="Workspace navigation" className="flex-1 p-3 overflow-y-auto space-y-1">
+            <SidebarItem
+              tourId="nav-overview"
+              icon={LayoutDashboard}
+              label="Overview"
+              to="/dashboard"
+              active={location.pathname === "/dashboard"}
+            />
 
-            {/* Platform */}
+            <SidebarItem
+              tourId="nav-repositories"
+              icon={GitBranch}
+              label="Repositories"
+              to="/github"
+              active={location.pathname.startsWith("/github")}
+            />
 
-            <div className="mb-2 px-3 text-xs font-medium text-text-muted">
-              Platform
-            </div>
+            <SidebarItem
+              tourId="nav-findings"
+              icon={ShieldAlert}
+              label="Findings"
+              to="/findings"
+              active={location.pathname === "/findings"}
+            />
 
+            <SidebarItem
+              tourId="nav-assistant"
+              icon={Bot}
+              label="AI assistant"
+              to="/assistant"
+              active={location.pathname === "/assistant"}
+            />
 
-            <div className="space-y-1">
-
-
-              <SidebarItem
-                icon={LayoutDashboard}
-                label="Overview"
-                to="/dashboard"
-                active={
-                  location.pathname === "/dashboard"
-                }
-              />
-
-
-              <SidebarItem
-                icon={GitBranch}
-                label="Repositories"
-                to="/github"
-                active={location.pathname.startsWith("/github")}
-              />
-
-
-              <SidebarItem
-                icon={ShieldAlert}
-                label="Findings"
-                to="/findings"
-                active={location.pathname === "/findings"}
-              />
-              <SidebarItem icon={ShieldCheck} label="AI assistant" to="/assistant" active={location.pathname === "/assistant"} />
-
-            </div>
-
-
-            {/* Workspace */}
-
-            <div className="mb-2 mt-8 px-3 text-xs font-medium text-text-muted">
-              Workspace
-            </div>
-
-
-            <div className="space-y-1">
-
-              <SidebarItem
-                icon={Settings}
-                label="Settings"
-                to="/settings"
-                active={location.pathname === "/settings"}
-              />
-
-            </div>
-
+            <SidebarItem
+              tourId="nav-settings"
+              icon={Settings}
+              label="Settings"
+              to="/settings"
+              active={location.pathname === "/settings"}
+            />
           </nav>
+
 
 
           {/* ------------------------------------------------------------ */}
           {/* User                                                         */}
           {/* ------------------------------------------------------------ */}
 
-          <div className="p-3 border-t border-text-primary/[0.06]">
-
-            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-bg-elevated border border-text-primary/[0.06]">
-
-              <div className="w-8 h-8 rounded-lg bg-accent-security/10 border border-accent-security/20 flex items-center justify-center text-xs font-mono font-bold text-accent-security">
+          <div className="p-3 border-t border-border-subtle">
+            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-bg-card border border-border-subtle">
+              <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-xs font-mono font-bold text-accent">
                 {userInitial}
               </div>
 
-
               <div className="flex-1 min-w-0">
-
-                <div className="text-xs font-medium text-text-primary truncate">
+                <div className="text-sm font-medium text-text-primary truncate">
                   {loading
                     ? "Loading..."
                     : displayName}
                 </div>
 
-                <div className="truncate text-[11px] text-text-muted">
+                <div className="truncate text-xs text-text-muted">
                   {user?.email ||
                     (loading ? "Loading account…" : "Account details unavailable")}
                 </div>
-
               </div>
-
 
               <button
                 onClick={handleLogout}
@@ -411,17 +422,90 @@ export default function DashboardLayout() {
                 disabled={!user}
                 className="p-1.5 text-text-muted hover:text-severity-critical transition-colors"
               >
-
-                <LogOut className="w-3.5 h-3.5" />
-
+                <LogOut className="w-4 h-4" />
               </button>
-
             </div>
-
           </div>
 
         </aside>
 
+        {/* ---------------------------------------------------------------- */}
+        {/* New Workspace Modal                                             */}
+        {/* ---------------------------------------------------------------- */}
+
+        {showOrgForm && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-workspace-title"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <div className="w-full max-w-sm rounded-xl border border-border-subtle bg-bg-card p-6 shadow-2xl">
+              <div className="flex items-center justify-between pb-4 border-b border-border-subtle">
+                <h2 id="new-workspace-title" className="text-base font-semibold text-text-primary">
+                  New workspace
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOrgForm(false);
+                    setOrgError("");
+                    setOrganizationName("");
+                  }}
+                  className="text-text-muted hover:text-text-primary p-1 rounded-md transition"
+                  aria-label="Close modal"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={createOrganization} className="mt-4 space-y-4">
+                <div>
+                  <label htmlFor="organization-name" className="block text-xs font-medium text-text-secondary mb-1.5">
+                    Workspace name
+                  </label>
+                  <input
+                    id="organization-name"
+                    type="text"
+                    value={organizationName}
+                    onChange={(e) => setOrganizationName(e.target.value)}
+                    required
+                    autoFocus
+                    maxLength={150}
+                    placeholder="e.g. My Project, Team Alpha"
+                    className="w-full rounded-lg border border-border-subtle bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+                  />
+                  {orgError && (
+                    <p role="alert" className="mt-1.5 text-xs text-severity-critical">
+                      {orgError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowOrgForm(false);
+                      setOrgError("");
+                      setOrganizationName("");
+                    }}
+                    className="px-3 py-2 rounded-lg border border-border-subtle text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingOrg || !organizationName.trim()}
+                    className="px-4 py-2 rounded-lg bg-accent text-xs font-semibold text-white shadow-sm transition hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {creatingOrg ? "Creating..." : "Create workspace"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* ---------------------------------------------------------------- */}
         {/* Mobile Backdrop                                                 */}
@@ -448,7 +532,7 @@ export default function DashboardLayout() {
           {/* Desktop Topbar                                               */}
           {/* ------------------------------------------------------------ */}
 
-          <header className="workspace-toolbar sticky top-0 z-30 hidden h-16 items-center justify-between border-b border-text-primary/[0.06] bg-bg-primary px-8 lg:flex">
+          <header className="workspace-toolbar sticky top-0 z-30 hidden h-16 items-center justify-between border-b border-border-subtle bg-bg-primary px-8 lg:flex">
 
             <div className="flex items-center gap-2 text-xs font-medium text-text-muted">
 
@@ -464,9 +548,21 @@ export default function DashboardLayout() {
 
 
             <div className="flex items-center gap-3">
-
+              <button
+                type="button"
+                data-tour="quick-tour-btn"
+                onClick={() => setShowTour(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-accent/30 bg-accent/10 text-xs font-semibold text-accent hover:bg-accent/20 transition cursor-pointer shadow-sm"
+                title="Start product tour"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Tour</span>
+              </button>
+              <NotificationCenter
+                key={`desktop-${selectedOrg?._id || selectedOrg?.id || "no-workspace"}`}
+                organizationId={selectedOrg?._id || selectedOrg?.id}
+              />
               <ThemeToggle />
-
             </div>
 
           </header>
@@ -509,6 +605,14 @@ export default function DashboardLayout() {
 
       </div>
 
+      <OnboardingTour
+        isOpen={showTour}
+        onClose={() => setShowTour(false)}
+        onFinish={() => {
+          localStorage.setItem("avprnet_tour_completed", "true");
+          setShowTour(false);
+        }}
+      />
     </div>
   );
 }
@@ -525,14 +629,15 @@ function SidebarItem({
   badge,
   to,
   disabled = false,
+  tourId,
 }) {
   const className = `
     w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
-    text-left transition-all
+    text-left transition-all text-sm
     ${
       active
-        ? "bg-text-primary/[0.06] text-text-primary border border-text-primary/[0.07]"
-        : "text-text-muted hover:text-text-primary hover:bg-text-primary/[0.035]"
+        ? "bg-accent/15 text-accent font-medium border border-accent/25 shadow-sm"
+        : "text-text-secondary hover:text-text-primary hover:bg-white/[0.04]"
     }
     ${
       disabled
@@ -543,20 +648,16 @@ function SidebarItem({
 
   if (disabled) {
     return (
-      <div className={className} aria-current={active ? "page" : undefined}>
-
-        <Icon className="w-4 h-4" />
-
-        <span className="text-xs font-medium flex-1">
+      <div data-tour={tourId} className={className} aria-current={active ? "page" : undefined}>
+        <Icon className="w-4 h-4 text-text-muted" />
+        <span className="text-sm font-medium flex-1">
           {label}
         </span>
-
         {badge && (
-          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-text-primary/[0.04] border border-text-primary/[0.06] text-text-muted uppercase">
+          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] border border-border-subtle text-text-muted uppercase">
             {badge}
           </span>
         )}
-
       </div>
     );
   }
@@ -564,25 +665,22 @@ function SidebarItem({
   return (
     <Link
       to={to}
+      data-tour={tourId}
       className={className} aria-current={active ? "page" : undefined}
     >
-
       <Icon
         className={`w-4 h-4 ${
-          active ? "text-accent-security" : ""
+          active ? "text-accent" : "text-text-muted"
         }`}
       />
-
-      <span className="text-xs font-medium flex-1">
+      <span className="text-sm font-medium flex-1">
         {label}
       </span>
-
       {badge && (
-        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-text-primary/[0.04] border border-text-primary/[0.06] text-text-muted uppercase">
+        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] border border-border-subtle text-text-muted uppercase">
           {badge}
         </span>
       )}
-
     </Link>
   );
 }

@@ -2,7 +2,7 @@
 
 A repository security platform for scanning code, reviewing vulnerabilities, and evaluating suggested fixes.
 
-[Visit AVPR-Net](https://avpr-psi.vercel.app/)
+[Visit AVPR-Net](https://avpr-psi.vercel.app/) · [High-Accuracy Remediation Architecture & Roadmap](./REMEDIATION_README.md)
 
 ## Features
 
@@ -23,7 +23,7 @@ A repository security platform for scanning code, reviewing vulnerabilities, and
 - **Backend:** Node.js, Express, Passport
 - **Database:** MongoDB
 - **Scanning:** Semgrep, Bandit, credential checks, OSV
-- **AI:** NVIDIA-hosted inference and embeddings
+- **AI:** Nebius Token Factory inference with open-source NVIDIA Nemotron models
 - **Deployment:** Vercel services, Queues, and scanner worker
 
 ## Getting started
@@ -34,7 +34,8 @@ A repository security platform for scanning code, reviewing vulnerabilities, and
 - MongoDB Atlas or a replica set supporting transactions
 - Google OAuth and GitHub App credentials
 - Semgrep and Bandit installed for full scanner coverage
-- An NVIDIA API key for AI features
+- A Nebius Token Factory API key (`NEBIUS_API_KEY`) or NVIDIA API key for AI features
+
 
 ### Backend
 

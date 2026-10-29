@@ -81,10 +81,11 @@ function createAssistantRouter(options = {}) {
       }
       if (!demo && req.method === "POST") {
         const operation = req.path.split("/").filter(Boolean).at(-1) || "unknown";
+        const prov = provider.health?.().provider === "nebius" ? "Nebius Token Factory" : "NVIDIA";
         await require("../services/audit.service").recordAuditEvent(req, {
           action: "ai.request_consented",
           target: `assistant/${operation}`,
-          details: { operation, provider: "NVIDIA" },
+          details: { operation, provider: prov },
         });
       }
       const result = await require("../services/ai-context").run({ signal: controller.signal }, () => fn(req));
@@ -108,9 +109,11 @@ function createAssistantRouter(options = {}) {
     languages: service.languages(), execution: "disabled" })));
   router.get("/policy", handle(async (req) => {
     const organization = await findOrganization(req.params.organizationId);
-    return { hostedAiEnabled: Boolean(organization && organization.hostedAiEnabled !== false), provider: "NVIDIA",
+    const provName = provider.health?.().providerName || "NVIDIA";
+    return { hostedAiEnabled: Boolean(organization && organization.hostedAiEnabled !== false), provider: provName,
       consentRequired: true, dataHandling: "Sanitized request evidence and up to four excerpts from the approved shared knowledge index are sent for hosted inference." };
   }));
+
   router.get("/knowledge", handle(async () => rag.diagnostics()));
   if (!demo) router.get("/preview/finding/:findingId", handle(async (req) => {
     const { objectId } = require("../utils/input");

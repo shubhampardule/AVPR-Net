@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import MystiqueScaleTransition from "../components/ui/MystiqueScaleTransition";
 
 const ThemeContext = createContext(null);
 const STORAGE_KEY = "securepatch-theme";
@@ -23,6 +24,12 @@ function syncDocumentTheme(theme) {
 
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(readTheme);
+  const [transitionState, setTransitionState] = useState({
+    active: false,
+    origin: null,
+    from: "dark",
+    to: "light",
+  });
   const transitionTimer = useRef(null);
 
   useEffect(() => {
@@ -36,8 +43,30 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => () => window.clearTimeout(transitionTimer.current), []);
 
-  const toggleTheme = useCallback(() => {
+  const toggleTheme = useCallback((eventOrOrigin) => {
+    if (transitionState.active) return;
+
+    let origin = null;
+    if (eventOrOrigin) {
+      if (typeof eventOrOrigin.clientX === "number" && typeof eventOrOrigin.clientY === "number") {
+        origin = { x: eventOrOrigin.clientX, y: eventOrOrigin.clientY };
+      } else if (typeof eventOrOrigin.x === "number" && typeof eventOrOrigin.y === "number") {
+        origin = eventOrOrigin;
+      }
+    }
+
     const nextTheme = theme === "dark" ? "light" : "dark";
+
+    setTransitionState({
+      active: true,
+      origin,
+      from: theme,
+      to: nextTheme,
+    });
+  }, [theme, transitionState.active]);
+
+  const handleMidpoint = useCallback(() => {
+    const nextTheme = transitionState.to;
     const root = document.documentElement;
     window.clearTimeout(transitionTimer.current);
     root.classList.add("theme-changing");
@@ -48,13 +77,30 @@ export function ThemeProvider({ children }) {
     try {
       window.localStorage.setItem(STORAGE_KEY, nextTheme);
     } catch {
-      // Keep the in-memory preference even when storage is unavailable.
+      // Keep preference
     }
     setTheme(nextTheme);
-  }, [theme]);
+  }, [transitionState.to]);
+
+  const handleComplete = useCallback(() => {
+    setTransitionState((prev) => ({ ...prev, active: false }));
+  }, []);
 
   const value = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme]);
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+      <MystiqueScaleTransition
+        isActive={transitionState.active}
+        origin={transitionState.origin}
+        themeFrom={transitionState.from}
+        themeTo={transitionState.to}
+        onMidpoint={handleMidpoint}
+        onComplete={handleComplete}
+      />
+    </ThemeContext.Provider>
+  );
 }
 
 export function useTheme() {

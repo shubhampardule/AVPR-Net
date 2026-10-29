@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { getNvidiaConfig } = require("../config/nvidia");
+const { defaultBudgetService } = require("./ai-budget.service");
 
 class NvidiaError extends Error {
   constructor(code, message, requestId, status = null) {
@@ -20,11 +21,12 @@ const malformed = (requestId) => new NvidiaError(
 class NvidiaService {
   constructor({ env = process.env, fetchImpl = globalThis.fetch,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    logger = null } = {}) {
+    logger = null, budgetService = defaultBudgetService } = {}) {
     this.env = env;
     this.fetch = fetchImpl;
     this.sleep = sleep;
     this.logger = logger;
+    this.budgetService = budgetService;
   }
 
   health() {
@@ -32,12 +34,15 @@ class NvidiaService {
       const config = getNvidiaConfig(this.env);
       return { configured: Boolean(config.apiKey), reachable: null,
         status: config.apiKey ? "configured_unverified" : "missing_key",
+        provider: config.provider, providerName: config.providerName,
         chatModel: config.chatModel, embeddingModel: config.embeddingModel,
-        embeddingDimensions: config.embeddingDimensions };
+        embeddingDimensions: config.embeddingDimensions,
+        budget: this.budgetService?.getUsage() };
     } catch (_) {
       return { configured: false, reachable: null, status: "invalid_configuration" };
     }
   }
+
 
   settings() {
     let config;
@@ -138,12 +143,27 @@ class NvidiaService {
       throw invalid("Provide 1–20 text messages totaling at most 48000 bytes");
     }
     const config = this.settings();
+    if (this.budgetService) {
+      try {
+        this.budgetService.checkBudget(config.maxTokens);
+      } catch (err) {
+        throw new NvidiaError(err.code || "AI_BUDGET_EXCEEDED", err.message, null, 429);
+      }
+    }
     const { data, requestId } = await this.request("chat/completions", {
       model: config.chatModel, messages, temperature: 0.2, top_p: 0.95,
       max_tokens: config.maxTokens, stream: false,
       chat_template_kwargs: { enable_thinking: false },
       ...(json ? { response_format: { type: "json_object" } } : {}),
     }, config);
+    if (data?.usage && this.budgetService) {
+      this.budgetService.recordUsage({
+        promptTokens: data.usage.prompt_tokens,
+        completionTokens: data.usage.completion_tokens,
+        totalTokens: data.usage.total_tokens,
+        model: config.chatModel,
+      });
+    }
     const choice = data?.choices?.[0];
     if (choice?.finish_reason !== "stop" || typeof choice?.message?.content !== "string" ||
       !choice.message.content.trim() || choice.message.content.length > 100000) throw malformed(requestId);
@@ -157,10 +177,18 @@ class NvidiaService {
       throw invalid("Provide 1–16 nonempty texts of at most 3000 bytes and passage/query mode");
     }
     const config = this.settings();
+    if (this.budgetService) {
+      try {
+        this.budgetService.checkBudget(500);
+      } catch (err) {
+        throw new NvidiaError(err.code || "AI_BUDGET_EXCEEDED", err.message, null, 429);
+      }
+    }
     const { data, requestId } = await this.request("embeddings", {
       model: config.embeddingModel, input: texts, input_type: inputType,
       encoding_format: "float", truncate: "NONE",
     }, config);
+
     if (!Array.isArray(data?.data) || data.data.length !== texts.length) throw malformed(requestId);
     const ordered = [...data.data].sort((a, b) => a?.index - b?.index);
     if (ordered.some((item, index) => item?.index !== index ||

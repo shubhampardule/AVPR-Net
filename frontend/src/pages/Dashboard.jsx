@@ -1,24 +1,25 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import {
-  Activity,
   AlertCircle,
   ArrowRight,
   Clock3,
-  FolderGit2,
+  GitBranch,
+  GitPullRequest,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Siren,
+  Terminal,
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
 import { ScanStatusBadge } from "../components/ui/ScanStatusBadge";
 
 const RISK_LEVELS = [
-  { key: "critical", label: "Critical", color: "text-severity-critical", bar: "bg-severity-critical", border: "border-severity-critical/15" },
-  { key: "high", label: "High", color: "text-severity-high", bar: "bg-severity-high", border: "border-severity-high/15" },
-  { key: "medium", label: "Medium", color: "text-severity-medium", bar: "bg-severity-medium", border: "border-severity-medium/15" },
-  { key: "low", label: "Low", color: "text-severity-low", bar: "bg-severity-low", border: "border-severity-low/15" },
+  { key: "critical", label: "Critical", color: "text-severity-critical", bar: "bg-severity-critical", border: "border-severity-critical/30" },
+  { key: "high", label: "High", color: "text-severity-high", bar: "bg-severity-high", border: "border-severity-high/30" },
+  { key: "medium", label: "Medium", color: "text-severity-medium", bar: "bg-severity-medium", border: "border-severity-medium/30" },
+  { key: "low", label: "Low", color: "text-severity-low", bar: "bg-severity-low", border: "border-severity-low/30" },
 ];
 
 export default function Dashboard() {
@@ -71,163 +72,298 @@ export default function Dashboard() {
   const displayName = user?.name || user?.displayName || user?.email?.split("@")[0] || "Developer";
   const refresh = () => loadOverview(undefined, true);
 
+  const hasRepositories = (overview?.repositories?.total ?? 0) > 0;
+
   return (
     <main className="app-page">
-      <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      {/* Page Header (No repeated eyebrow labels, clean typography) */}
+      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="mb-2 text-sm font-medium text-text-secondary">Organization overview</p>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">
             {selectedOrg?.name || `Welcome back, ${displayName}.`}
           </h1>
-          <p className="mt-2 text-sm text-text-secondary">
-            Organization security activity and prioritized findings.
+          <p className="mt-1 text-sm text-text-secondary">
+            Continuous vulnerability analysis, risk triage, and agentic remediation.
           </p>
         </div>
-        <button
-          onClick={refresh}
-          disabled={contextLoading || !organizationId || refreshing || loading}
-          className="inline-flex items-center justify-center gap-2 self-start rounded-md border border-text-primary/[0.12] bg-bg-elevated px-3 py-2 text-sm font-medium text-text-secondary transition hover:border-text-primary/[0.2] hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={refresh}
+            disabled={contextLoading || !organizationId || refreshing || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border-subtle bg-bg-card px-3.5 py-2 text-sm font-medium text-text-secondary transition hover:text-text-primary hover:border-text-secondary/30 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </header>
 
-      {!contextLoading && !organizationId ? (
-        <Notice icon={FolderGit2} title="No organization selected" detail="Choose an organization from the workspace selector to view its security overview." />
-      ) : error ? (
-        <div className="rounded-xl border border-severity-critical/20 bg-severity-critical/[0.04] p-5">
-          <div className="flex items-start gap-3">
+      {/* Error State */}
+      {error && (
+        <div className="rounded-xl border border-severity-critical/30 bg-severity-critical/[0.06] p-6 mb-8">
+          <div className="flex items-start gap-3.5">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-severity-critical" />
             <div className="min-w-0 flex-1">
               <h2 className="text-sm font-semibold text-severity-critical">Unable to load the security overview</h2>
-              <p className="mt-1 text-xs text-text-secondary">{error}</p>
-              <button onClick={refresh} className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-text-primary hover:text-accent-security">
-                Retry <ArrowRight className="h-3 w-3" />
+              <p className="mt-1 text-sm text-text-secondary">{error}</p>
+              <button onClick={refresh} className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-text-primary hover:underline">
+                Retry <ArrowRight className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
         </div>
-      ) : loading || contextLoading ? (
+      )}
+
+      {/* Loading Skeleton */}
+      {loading || contextLoading ? (
         <DashboardSkeleton />
-      ) : overview ? (
+      ) : overview && !hasRepositories ? (
+        /* Empty / First-Run State: Connect a repository with 3 short numbered steps */
+        <section aria-label="Connect repository onboarding" className="rounded-xl border border-border-subtle bg-bg-card p-8 sm:p-12 text-center max-w-2xl mx-auto shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-accent border border-accent/20 mb-6">
+            <GitBranch className="h-7 w-7" />
+          </div>
+
+          <h2 className="text-xl font-bold tracking-tight text-text-primary sm:text-2xl">
+            Connect a repository
+          </h2>
+          <p className="mt-2 text-sm text-text-secondary max-w-md mx-auto">
+            Authorize your GitHub repository to enable continuous vulnerability detection, automated risk triage, and agentic patch remediation.
+          </p>
+
+          <div className="mt-8 text-left grid grid-cols-1 gap-3.5 max-w-md mx-auto">
+            <div className="flex items-start gap-3.5 p-4 rounded-lg border border-border-subtle bg-bg-primary">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white font-mono text-xs font-bold">
+                1
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-text-primary">Install GitHub App</p>
+                <p className="text-xs text-text-secondary mt-0.5">Authorize AVPR-Net with repository read and pull-request permissions.</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3.5 p-4 rounded-lg border border-border-subtle bg-bg-primary">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white font-mono text-xs font-bold">
+                2
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-text-primary">Select Repositories</p>
+                <p className="text-xs text-text-secondary mt-0.5">Choose which repositories AVPR-Net should index and monitor.</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3.5 p-4 rounded-lg border border-border-subtle bg-bg-primary">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white font-mono text-xs font-bold">
+                3
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-text-primary">Run Baseline Scan</p>
+                <p className="text-xs text-text-secondary mt-0.5">Run security engines to establish an initial vulnerability baseline.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <Link
+              to="/github"
+              data-tour="add-repo-btn"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:opacity-95 transition cursor-pointer"
+            >
+              Connect a repository
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </section>
+      ) : overview && hasRepositories ? (
         <>
-          <section aria-label="Organization metrics" className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-5">
-            <MetricCard label="Repositories" value={overview.repositories.total ?? "—"} detail={overview.repositories.connected ? "Accessible through GitHub App" : "GitHub App not connected"} icon={FolderGit2} tone="blue" />
-            <MetricCard label="Total scans" value={overview.totals.scans} detail="Scans recorded for this organization" icon={Activity} tone="green" />
-            <MetricCard label="Historical findings" value={overview.totals.findings} detail={`All scan records · ${overview.totals.criticalAndHigh} historical critical/high`} icon={ShieldAlert} tone="amber" />
-            <MetricCard label="Current unresolved" value={overview.totals.currentFindings ?? "—"} detail="Open or acknowledged in latest full scans" icon={ShieldCheck} tone="green" />
-            <MetricCard label="Current critical + high" value={overview.totals.currentCriticalAndHigh ?? "—"} detail="Open or acknowledged in latest full scans" icon={Siren} tone="red" />
+          {/* Stat Cards (Hide cards without a real data source) */}
+          <section aria-label="Security overview metrics" className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Card 1: Open Findings */}
+            <MetricCard
+              label="Open findings"
+              value={overview.totals?.currentFindings ?? overview.totals?.findings ?? 0}
+              detail="Unresolved findings in latest full scans"
+              icon={ShieldAlert}
+            />
+
+            {/* Card 2: Critical / High */}
+            <MetricCard
+              label="Critical/High"
+              value={overview.totals?.currentCriticalAndHigh ?? 0}
+              detail="Urgent vulnerabilities requiring immediate triage"
+              icon={Siren}
+              severityBadge={
+                (overview.totals?.currentCriticalAndHigh ?? 0) > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-severity-critical/10 text-severity-critical border border-severity-critical/20">
+                    Action required
+                  </span>
+                ) : null
+              }
+            />
+
+            {/* Card 3: Patches Verified (Only show if data exists) */}
+            {overview.totals?.patchesVerified != null && (
+              <MetricCard
+                label="Patches verified"
+                value={overview.totals.patchesVerified}
+                detail="Passed all automated verification gates"
+                icon={ShieldCheck}
+              />
+            )}
+
+            {/* Card 4: Draft PRs Opened (Only show if data exists) */}
+            {(overview.totals?.draftPRsOpened != null || overview.totals?.draftPRs != null) && (
+              <MetricCard
+                label="Draft PRs opened"
+                value={overview.totals?.draftPRsOpened ?? overview.totals?.draftPRs}
+                detail="Remediation pull requests submitted"
+                icon={GitPullRequest}
+              />
+            )}
           </section>
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-            <section className="overflow-hidden rounded-xl border border-text-primary/[0.07] bg-bg-secondary xl:col-span-7">
-              <SectionHeader title="Historical risk distribution" detail="Final AVPR-Net risk category across all recorded scans" />
-              {overview.totals.findings === 0 ? (
-                <div className="p-6"><EmptyState title="No findings recorded" detail="Risk distribution will appear after a scan persists findings for this organization." /></div>
+          {/* Main 2-Column Analytics: Severity Breakdown & Scanner Activity */}
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-12 mb-8">
+            {/* Severity Breakdown Card */}
+            <section className="rounded-xl border border-border-subtle bg-bg-card p-6 shadow-sm xl:col-span-7">
+              <div className="flex items-center justify-between pb-4 border-b border-border-subtle mb-5">
+                <div>
+                  <h2 className="text-base font-semibold text-text-primary">Severity Breakdown</h2>
+                  <p className="text-xs text-text-secondary mt-0.5">Distribution across all recorded findings</p>
+                </div>
+              </div>
+
+              {(overview.totals?.findings ?? 0) === 0 ? (
+                <div className="py-8 text-center text-sm text-text-muted">
+                  No findings recorded yet.
+                </div>
               ) : (
-                <div className="space-y-4 p-5">
+                <div className="space-y-4">
                   {RISK_LEVELS.map((level) => {
-                    const count = overview.riskDistribution[level.key] || 0;
-                    const percent = overview.totals.findings ? (count / overview.totals.findings) * 100 : 0;
+                    const count = overview.riskDistribution?.[level.key] || 0;
+                    const total = overview.totals.findings || 1;
+                    const percent = ((count / total) * 100).toFixed(0);
                     return (
-                      <div key={level.key}>
-                        <div className="mb-1.5 flex items-center justify-between text-xs">
-                          <span className={`font-medium ${level.color}`}>{level.label} Risk</span>
-                          <span className="font-mono-code text-text-secondary">{count}</span>
+                      <div key={level.key} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className={`font-semibold ${level.color}`}>{level.label}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-semibold text-text-primary">{count}</span>
+                            <span className="text-xs text-text-muted">({percent}%)</span>
+                          </div>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-text-primary/[0.06]" aria-label={`${level.label} risk: ${count}`}>
-                          <div className={`h-full rounded-full ${level.bar}`} style={{ width: `${percent}%` }} />
+                        <div className="h-2.5 overflow-hidden rounded-full bg-border-subtle" aria-label={`${level.label}: ${count}`}>
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${level.bar}`}
+                            style={{ width: `${percent}%` }}
+                          />
                         </div>
                       </div>
                     );
                   })}
-                  <p className="pt-1 text-[11px] text-text-muted">Counts include all persisted findings in this organization. Scanner severity is shown separately on each finding.</p>
                 </div>
               )}
             </section>
 
-            <section className="overflow-hidden rounded-xl border border-text-primary/[0.07] bg-bg-secondary xl:col-span-5">
-              <SectionHeader title="Scanner activity" detail="Most recent recorded scanner outcomes" />
+            {/* Scanner Activity */}
+            <section className="rounded-xl border border-border-subtle bg-bg-card p-6 shadow-sm xl:col-span-5">
+              <div className="flex items-center justify-between pb-4 border-b border-border-subtle mb-4">
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-4 w-4 text-text-muted" />
+                  <h2 className="text-base font-semibold text-text-primary">Scanner Activity</h2>
+                </div>
+              </div>
+
               {Object.keys(overview.scannerStatus || {}).length === 0 ? (
-                <div className="p-5"><p className="text-xs leading-5 text-text-muted">No scanner execution status is available in recorded scan data yet.</p></div>
+                <p className="py-6 text-sm text-text-muted">No scanner execution status recorded yet.</p>
               ) : (
-                <div className="divide-y divide-text-primary/[0.05]">
+                <div className="divide-y divide-border-subtle">
                   {Object.entries(overview.scannerStatus).map(([scanner, info]) => (
-                    <div key={scanner} className="flex items-center justify-between gap-3 px-5 py-3.5">
-                      <span className="text-xs font-medium capitalize text-text-primary">{scanner}</span>
-                        <span className={`inline-flex items-center gap-1.5 text-xs ${info.status === "completed" ? "text-severity-low" : "text-severity-critical"}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${info.status === "completed" ? "bg-severity-low" : "bg-severity-critical"}`} />
-                        {info.status === "completed" ? "Completed" : "Failed"}
-                        <span className="text-text-muted">· {formatDate(info.scanAt)}</span>
+                    <div key={scanner} className="flex items-center justify-between gap-3 py-3">
+                      <span className="font-mono text-xs font-semibold uppercase tracking-wider text-text-primary">{scanner}</span>
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${info.status === "completed" ? "text-severity-success" : "text-severity-critical"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${info.status === "completed" ? "bg-severity-success" : "bg-severity-critical"}`} />
+                        {info.status === "completed" ? "Healthy" : "Failed"}
+                        <span className="text-text-muted font-normal">· {formatDate(info.scanAt)}</span>
                       </span>
                     </div>
                   ))}
                 </div>
               )}
             </section>
-
-            <section className="overflow-hidden rounded-xl border border-text-primary/[0.07] bg-bg-secondary xl:col-span-7">
-              <SectionHeader title="Recent scans" detail="Latest scan activity for this organization" action={<Link to="/github" className="inline-flex items-center gap-1 text-sm font-medium text-text-secondary hover:text-text-primary">Repositories <ArrowRight className="h-3 w-3" /></Link>} />
-              {overview.recentScans.length === 0 ? (
-                <div className="p-6"><EmptyState title="No scans yet" detail="Run a scan from a connected repository to see its results here." action={<Link to="/github" className="mt-3 inline-flex items-center gap-1.5 text-xs text-accent-security hover:underline">View repositories <ArrowRight className="h-3 w-3" /></Link>} /></div>
-              ) : (
-                <div className="divide-y divide-text-primary/[0.05]">
-                  {overview.recentScans.map((scan) => (
-                    <Link key={scan._id} to={`/github/${encodeURIComponent(scan.owner)}/${encodeURIComponent(scan.repo)}/scan`} className="block px-5 py-4 transition hover:bg-text-primary/[0.02]">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-mono-code text-xs font-medium text-text-primary">{scan.owner}/{scan.repo}</span>
-                        <ScanStatusBadge status={scan.status} />
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-                        <span>{scan.summary?.total ?? 0} findings</span>
-                        <span className="text-severity-critical">Critical {scan.summary?.critical ?? 0}</span>
-                        <span className="text-severity-high">High {scan.summary?.high ?? 0}</span>
-                        <span className="text-severity-medium">Medium {scan.summary?.medium ?? 0}</span>
-                        <span className="text-severity-low">Low {scan.summary?.low ?? 0}</span>
-                        <span>{formatDate(scan.createdAt)}</span>
-                        {scan.durationMs != null && <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" />{formatDuration(scan.durationMs)}</span>}
-                      </div>
-                      {((scan.scannersUsed?.length || 0) > 0 || (scan.scannerErrors?.length || 0) > 0) && (
-                        <div className="mt-2 text-xs text-text-muted">
-                          Scanners: {[...(scan.scannersUsed || []).map((name) => `${name} completed`), ...(scan.scannerErrors || []).map(({ scanner }) => `${scanner} failed`)].join(" · ")}
-                        </div>
-                      )}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="overflow-hidden rounded-xl border border-text-primary/[0.07] bg-bg-secondary xl:col-span-5">
-              <SectionHeader title="Prioritized findings" detail="Open and acknowledged findings from each repository's latest full scan, ordered by risk" />
-              {overview.currentFindingsStatus?.repositoriesUsingEarlierSuccessfulResult > 0 && <p role="status" className="border-b border-severity-medium/10 bg-severity-medium/[0.04] px-5 py-3 text-xs leading-5 text-severity-medium">Newer scans are partial, failed, or still running for {overview.currentFindingsStatus.repositoriesUsingEarlierSuccessfulResult} {overview.currentFindingsStatus.repositoriesUsingEarlierSuccessfulResult === 1 ? "repository" : "repositories"}. Results remain based on the last successful full scan; these runs do not clear findings. <Link to="/github" className="ml-1 underline underline-offset-2">Review repositories</Link></p>}
-              {overview.currentFindingsStatus?.repositoriesWithoutSuccessfulBaseline > 0 && <p role="status" className="border-b border-severity-medium/10 bg-severity-medium/[0.04] px-5 py-3 text-xs leading-5 text-severity-medium">{overview.currentFindingsStatus.repositoriesWithoutSuccessfulBaseline} {overview.currentFindingsStatus.repositoriesWithoutSuccessfulBaseline === 1 ? "repository has" : "repositories have"} no full-coverage scan yet and {overview.currentFindingsStatus.repositoriesWithoutSuccessfulBaseline === 1 ? "is" : "are"} excluded from current findings. <Link to="/github" className="ml-1 underline underline-offset-2">Open repositories</Link></p>}
-              {overview.priorityFindings.length === 0 ? (
-                <div className="p-6"><EmptyState title="No current findings to prioritize" detail={overview.currentFindingsStatus?.repositoriesWithSuccessfulBaseline ? "The latest successful full scans have no open or acknowledged findings." : overview.totals.scans ? "No repository has a successful full-coverage scan yet. Partial and failed scans do not establish a clean result." : "Current findings will appear after the first successful full scan."} /></div>
-              ) : (
-                <div className="divide-y divide-text-primary/[0.05]">
-                  {overview.priorityFindings.map((finding) => (
-                    <Link key={finding._id} to={`/github/${encodeURIComponent(finding.owner)}/${encodeURIComponent(finding.repo)}/scan?scanId=${encodeURIComponent(finding.scan)}`} className="block px-5 py-4 transition hover:bg-text-primary/[0.02]">
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <RiskBadge category={finding.riskCategory} />
-                        <span className="text-xs text-text-muted">Scanner severity: {finding.severity}</span>
-                        <span className="ml-auto text-xs text-text-secondary">{Number(finding.riskScore).toFixed(2)} / 10</span>
-                      </div>
-                      <p className="text-sm font-medium text-text-primary">{finding.title}</p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
-                        <span>{finding.owner}/{finding.repo}</span><span>·</span><span>{finding.cwe}</span><span>·</span><span className="truncate">{finding.filePath}{finding.startLine ? `:${finding.startLine}` : ""}</span><span>·</span><span className="capitalize">{finding.scanner}</span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </section>
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Link to="/github" className="inline-flex items-center gap-2 rounded-md bg-accent-security px-4 py-2.5 text-sm font-semibold text-on-accent transition hover:bg-accent-security">View repositories <ArrowRight className="h-3.5 w-3.5" /></Link>
-            {overview.recentScans[0] && <Link to={`/github/${encodeURIComponent(overview.recentScans[0].owner)}/${encodeURIComponent(overview.recentScans[0].repo)}`} className="inline-flex items-center gap-2 rounded-md border border-text-primary/[0.12] bg-bg-elevated px-4 py-2.5 text-sm text-text-secondary transition hover:border-text-primary/[0.2] hover:text-text-primary">Open latest repository <ArrowRight className="h-3.5 w-3.5" /></Link>}
+          {/* Recent Findings Table */}
+          <section className="rounded-xl border border-border-subtle bg-bg-card overflow-hidden shadow-sm mb-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border-subtle">
+              <div>
+                <h2 className="text-base font-semibold text-text-primary">Recent Findings</h2>
+                <p className="text-xs text-text-secondary mt-0.5">High-priority security findings from latest scans</p>
+              </div>
+              <Link to="/findings" className="text-sm font-semibold text-accent hover:underline inline-flex items-center gap-1">
+                View all findings <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            {(!overview.priorityFindings || overview.priorityFindings.length === 0) ? (
+              <div className="p-8 text-center text-sm text-text-muted">
+                No active findings to prioritize. All current scans are clean.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-bg-primary/50 text-xs font-semibold text-text-secondary border-b border-border-subtle">
+                    <tr>
+                      <th scope="col" className="px-6 py-3">Finding</th>
+                      <th scope="col" className="px-6 py-3">Severity</th>
+                      <th scope="col" className="px-6 py-3">Repository</th>
+                      <th scope="col" className="px-6 py-3">Location</th>
+                      <th scope="col" className="px-6 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-subtle">
+                    {overview.priorityFindings.map((finding) => (
+                      <tr key={finding._id} className="hover:bg-white/[0.02] transition">
+                        <td className="px-6 py-4">
+                          <p className="font-semibold text-text-primary line-clamp-1">{finding.title}</p>
+                          {finding.cwe && (
+                            <span className="font-mono text-xs text-text-muted mt-0.5 block">{finding.cwe}</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <RiskBadge category={finding.riskCategory} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap font-mono text-xs text-text-secondary">
+                          {finding.owner}/{finding.repo}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-xs text-text-muted truncate max-w-[200px]">
+                          {finding.filePath}{finding.startLine ? `:${finding.startLine}` : ""}
+                        </td>
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <Link
+                            to={`/github/${encodeURIComponent(finding.owner)}/${encodeURIComponent(finding.repo)}/scan?scanId=${encodeURIComponent(finding.scan)}`}
+                            className="text-xs font-medium text-accent hover:underline inline-flex items-center gap-1"
+                          >
+                            Inspect <ArrowRight className="h-3 w-3" />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Quick Action Link to Repositories */}
+          <div className="flex items-center gap-3">
+            <Link
+              to="/github"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95 transition"
+            >
+              View Repositories <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </>
       ) : null}
@@ -235,46 +371,48 @@ export default function Dashboard() {
   );
 }
 
-function MetricCard({ label, value, detail, icon: Icon, tone }) {
-  const styles = {
-    blue: "text-severity-info border-severity-info/15 bg-severity-info/10",
-    green: "text-severity-low border-severity-low/15 bg-severity-low/10",
-    amber: "text-severity-medium border-severity-medium/15 bg-severity-medium/10",
-    red: "text-severity-critical border-severity-critical/15 bg-severity-critical/10",
-  };
+function MetricCard({ label, value, detail, icon: Icon, severityBadge }) {
   return (
-    <div className="rounded-xl border border-text-primary/[0.07] bg-bg-secondary p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-xl border border-border-subtle bg-bg-card p-5 sm:p-6 shadow-sm transition">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-text-muted">{label}</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p>
-          <p className="mt-1 text-xs leading-5 text-text-muted">{detail}</p>
+          <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">{label}</p>
+          <p className="mt-2 text-3xl font-bold tracking-tight text-text-primary">{value}</p>
+          <p className="mt-1.5 text-xs text-text-muted line-clamp-1">{detail}</p>
+          {severityBadge && <div className="mt-2">{severityBadge}</div>}
         </div>
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${styles[tone]}`}><Icon className="h-3.5 w-3.5" /></div>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-bg-primary text-text-secondary">
+          <Icon className="h-5 w-5" />
+        </div>
       </div>
     </div>
   );
 }
 
-function SectionHeader({ title, detail, action }) {
-  return <div className="flex items-center justify-between gap-3 border-b border-text-primary/[0.06] px-5 py-4"><div><h2 className="text-sm font-semibold">{title}</h2><p className="mt-1 text-xs leading-5 text-text-muted">{detail}</p></div>{action}</div>;
-}
-
 function RiskBadge({ category }) {
   const item = RISK_LEVELS.find(({ key }) => key === category?.toLowerCase());
-  return <span className={`rounded-md border px-2 py-1 text-xs font-medium ${item ? `${item.color} ${item.border} bg-text-primary/[0.02]` : "border-text-primary/[0.08] text-text-muted"}`}>Risk: {item?.label || "Unknown"}</span>;
-}
-
-function EmptyState({ title, detail, action }) {
-  return <div className="py-3 text-center"><ShieldCheck className="mx-auto h-7 w-7 text-accent-security" /><h3 className="mt-3 text-sm font-semibold text-text-primary">{title}</h3><p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-text-muted">{detail}</p>{action}</div>;
-}
-
-function Notice({ icon: Icon, title, detail }) {
-  return <div className="rounded-xl border border-dashed border-text-primary/[0.1] bg-bg-secondary p-10 text-center"><Icon className="mx-auto h-8 w-8 text-text-muted" /><h2 className="mt-4 text-sm font-semibold">{title}</h2><p className="mx-auto mt-2 max-w-md text-xs text-text-secondary">{detail}</p></div>;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${item ? `${item.color} ${item.border} bg-white/[0.02]` : "border-border-subtle text-text-muted"}`}>
+      {item?.label || "Unknown"}
+    </span>
+  );
 }
 
 function DashboardSkeleton() {
-  return <div aria-label="Loading dashboard" className="space-y-5"><div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[0, 1, 2, 3].map((item) => <div key={item} className="h-28 animate-pulse rounded-xl border border-text-primary/[0.06] bg-bg-secondary" />)}</div><div className="grid grid-cols-1 gap-5 xl:grid-cols-2">{[0, 1].map((item) => <div key={item} className="h-64 animate-pulse rounded-xl border border-text-primary/[0.06] bg-bg-secondary" />)}</div></div>;
+  return (
+    <div aria-label="Loading dashboard" className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[0, 1, 2, 3].map((item) => (
+          <div key={item} className="h-32 animate-pulse rounded-xl border border-border-subtle bg-bg-card" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        {[0, 1].map((item) => (
+          <div key={item} className="h-72 animate-pulse rounded-xl border border-border-subtle bg-bg-card" />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function formatDate(value) {

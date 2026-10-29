@@ -288,7 +288,11 @@ const connectInstallation = async () => {
 
               </div>
 
-              <button onClick={() => setAddRepoOpen(true)} className="group inline-flex items-center justify-center gap-2 rounded-lg border border-text-primary/[0.10] bg-bg-elevated px-3.5 py-2 text-xs font-medium text-text-secondary shadow-sm transition-all duration-200 hover:border-accent-blue/30 hover:bg-accent-blue/5 hover:text-text-primary">
+              <button
+                data-tour="add-repo-btn"
+                onClick={() => setAddRepoOpen(true)}
+                className="group inline-flex items-center justify-center gap-2 rounded-lg border border-text-primary/[0.10] bg-bg-elevated px-3.5 py-2 text-xs font-medium text-text-secondary shadow-sm transition-all duration-200 hover:border-accent-blue/30 hover:bg-accent-blue/5 hover:text-text-primary"
+              >
                 <GithubIcon className="h-4 w-4 text-text-muted transition-colors group-hover:text-accent-blue" />
                 <span>Add repository</span>
                 <Plus className="h-3.5 w-3.5 text-text-muted transition-transform duration-200 group-hover:text-accent-blue" />
@@ -313,7 +317,11 @@ const connectInstallation = async () => {
                 <h3 className="mt-4 font-medium">No repositories found</h3>
                 <p className="mt-2 text-sm text-text-secondary">This installation currently grants AVPR-Net access to no repositories. Open GitHub’s app settings, select the missing repositories, then return here and refresh access.</p>
 
-                <button onClick={() => setAddRepoOpen(true)} className="mt-5 inline-flex items-center gap-2 rounded-lg border border-text-primary/[0.10] bg-text-primary/[0.04] px-3.5 py-2 text-xs font-medium text-text-secondary transition hover:border-accent-blue/30 hover:text-text-primary">
+                <button
+                  data-tour="add-repo-btn"
+                  onClick={() => setAddRepoOpen(true)}
+                  className="mt-5 inline-flex items-center gap-2 rounded-lg border border-text-primary/[0.10] bg-text-primary/[0.04] px-3.5 py-2 text-xs font-medium text-text-secondary transition hover:border-accent-blue/30 hover:text-text-primary"
+                >
                   <Plus className="h-3.5 w-3.5" />
                   Add repository
                 </button>

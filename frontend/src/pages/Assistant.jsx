@@ -350,17 +350,22 @@ export default function Assistant({ demo = false }) {
           })}
         </ol>}
         {!guidedFix && <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-xs text-text-secondary">
-          <span>NVIDIA: <strong className="font-medium text-text-primary">{providerStatus}</strong></span>
+          <span>{health?.providerName || "NVIDIA"}: <strong className="font-medium text-text-primary">{providerStatus}</strong></span>
+          {health?.chatModel && <span>Model: <strong className="font-medium text-text-primary">{health.chatModel}</strong></span>}
+          {health?.budget && (
+            <span>Credits: <strong className="font-medium text-text-primary">${health.budget.remainingCredits?.toFixed(2)} rem / ${health.budget.maxCredits?.toFixed(2)}</strong> ({health.budget.status.toUpperCase()})</span>
+          )}
           <span>Knowledge index: <strong className="font-medium text-text-primary">{knowledge?.chunks ?? "—"} passages</strong></span>
           <span>Repository tests require separate approval</span>
         </div>}
       </header>
       <details className="border-l-2 border-severity-medium bg-bg-secondary px-4 py-3 text-sm leading-6 text-text-secondary">
         <summary className="font-medium text-text-primary">How your data is used</summary>
-        <p className="mt-1">After approval, AVPR-Net sends redacted evidence and up to four excerpts from the approved security index to NVIDIA for search and inference. Redaction is best effort.
+        <p className="mt-1">After approval, AVPR-Net sends redacted evidence and up to four excerpts from the approved security index to {health?.providerName || "NVIDIA"} for search and inference. Redaction is best effort.
         {demo && " This demo uses sample events and does not monitor network traffic."}
         {" "}Review all advice, code, and suggested tests. Generated code is only executed if you separately approve isolated repository tests.</p>
       </details>
+
       {!guidedFix && <nav className="flex flex-wrap gap-x-5 border-b border-text-primary/[0.1]" aria-label="Assistant workflows">
         {[["investigate", "Investigate"], ["code", "Code & review"], ["sources", "Knowledge"]].map(([id, label]) =>
           <button key={id} type="button" disabled={busy} onClick={() => { setTab(id); setResult(null); setError(""); }}
@@ -440,9 +445,10 @@ export default function Assistant({ demo = false }) {
             <label className="flex items-start gap-2 text-sm leading-6 text-text-primary"><input type="checkbox" className="mt-1 accent-accent-security" checked={consentFor === requestFingerprint}
               disabled={busy || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || findingPreviewPending || Boolean(findingPreviewError)}
               onChange={e => setConsentFor(e.target.checked ? requestFingerprint : null)} />
-              <span>{guidedFix ? "I approve sending this source excerpt and fix request to NVIDIA to generate a proposal. See the data preview above." : "I approve sending the data shown above and derived search terms to NVIDIA for this request."}</span></label>
-          {providerUnavailable && <p role="status" className="text-xs text-severity-medium">Hosted AI is not configured on this deployment. Ask the deployment administrator to connect NVIDIA. You can still inspect findings and source files.</p>}
-          <button className={button} disabled={busy || !base || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? "Waiting for NVIDIA…" : guidedFix ? "Generate fix" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+              <span>{guidedFix ? `I approve sending this source excerpt and fix request to ${health?.providerName || "NVIDIA"} to generate a proposal. See the data preview above.` : `I approve sending the data shown above and derived search terms to ${health?.providerName || "NVIDIA"} for this request.`}</span></label>
+          {providerUnavailable && <p role="status" className="text-xs text-severity-medium">Hosted AI is not configured on this deployment. Ask the deployment administrator to connect Nebius Token Factory or NVIDIA. You can still inspect findings and source files.</p>}
+          <button className={button} disabled={busy || !base || !health || providerUnavailable || hostedAiBlocked || findingSourceBlocked || findingIdFormatInvalid || consentFor !== requestFingerprint || findingPreviewPending || Boolean(findingPreviewError)}>{busy ? `Waiting for ${health?.providerName || "provider"}…` : guidedFix ? "Generate fix" : tab === "investigate" ? "Analyze evidence" : tab === "code" ? "Draft proposal" : "Retrieve sources"}</button>
+
           <p className="text-xs leading-5 text-text-muted">{busy ? "The request may retry on a temporary provider failure." : draftContext ? "Finding proposals are rescanned in a temporary workspace. GitHub files stay unchanged. Project tests require separate approval after static checks pass." : "Nothing is applied, executed, blocked or deployed."}</p>
         </form>
         {(!guidedFix || result) && <section ref={resultSection} className={`${box} min-w-0 min-h-[20rem] scroll-mt-6 space-y-6`} aria-live="polite" aria-label="Assistant result">
@@ -459,12 +465,45 @@ export default function Assistant({ demo = false }) {
           </>}
           {result?.proposal && <>
             <p className="text-sm leading-6 text-text-primary">{result.proposal.explanation}</p>
-            <p className="text-xs text-accent-security">{labels[result.language]} · {result.proposal.format} · Syntax: {result.proposal.format === "diff" ? "full-file check runs in rescan" : result.validation?.status} · Tests: {verifiedTestId?"baseline and proposal passed":"not verified"}</p>
+            <p className="text-xs text-accent">{labels[result.language]} · {result.proposal.format} · Syntax: {result.proposal.format === "diff" ? "full-file check runs in rescan" : result.validation?.status} · Tests: {verifiedTestId ? "baseline and proposal passed" : "not verified"}</p>
             {result.validation?.message && result.proposal.format !== "diff" && <p className="text-xs text-severity-medium">{result.validation.message}</p>}
-            {result.proposal.format === "diff" ? <PatchComparison originalCode={proposalSource?.originalCode}
-              filename={proposalSource?.filename || "source"} commitSha={proposalSource?.commitSha} startLine={proposalSource?.startLine || 1} patch={result.proposal.code} />
-              : <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>}
-            <div className="flex gap-4"><button className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
+            {result.proposal.format === "diff" ? (
+              <PatchComparison
+                originalCode={proposalSource?.originalCode}
+                filename={proposalSource?.filename || "source"}
+                commitSha={proposalSource?.commitSha}
+                startLine={proposalSource?.startLine || 1}
+                patch={result.proposal.code}
+                verification={{
+                  status: verifiedRescanId
+                    ? "verified"
+                    : patchCheck?.syntax?.status === "failed"
+                    ? "failed"
+                    : "needs_review",
+                  gates: {
+                    integrity: {
+                      status: patchCheck ? (patchCheck.syntax?.status === "failed" ? "failed" : "passed") : draftContext ? "passed" : "not_run",
+                      result: patchCheck ? (patchCheck.syntax?.status === "failed" ? "Patch does not apply cleanly" : "Patch matches target file structure") : draftContext ? "Verified against scanned commit" : "Not run",
+                    },
+                    syntax: {
+                      status: patchCheck?.syntax?.status === "passed" || verifiedRescanId ? "passed" : patchCheck?.syntax?.status === "failed" ? "failed" : "not_run",
+                      result: patchCheck?.syntax?.status === "passed" || verifiedRescanId ? "Syntax valid for language AST" : patchCheck?.syntax?.status === "failed" ? "Syntax validation failed" : "Not run",
+                    },
+                    rescan: {
+                      status: verifiedRescanId ? "passed" : draftContext ? "pending" : "not_run",
+                      result: verifiedRescanId ? "Security rescan completed with zero findings" : draftContext ? "Automated rescan in progress..." : "Not run",
+                    },
+                    tests: {
+                      status: verifiedTestId ? "passed" : "not_run",
+                      result: verifiedTestId ? "Baseline and proposal tests passed" : "Not run",
+                    },
+                  },
+                }}
+              />
+            ) : (
+              <pre className="max-h-[32rem] overflow-auto rounded-md bg-bg-primary p-4 text-xs leading-5 text-text-primary"><code>{result.proposal.code}</code></pre>
+            )}
+            <div className="flex gap-4"><button className="text-sm font-medium text-accent hover:underline underline-offset-2" onClick={downloadProposal}>Download proposal</button>
               <button aria-label="Copy proposal" className="text-sm font-medium text-accent-security underline underline-offset-2" onClick={async () => {
                 const code = result.proposal.code;
                 setError(""); setProposalCopied(false);

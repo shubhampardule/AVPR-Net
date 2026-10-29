@@ -1,9 +1,17 @@
 import React, { useMemo, useState } from "react";
 import { applyPatch, diffLines, parsePatch } from "diff";
+import PatchVerificationPanel from "./PatchVerificationPanel";
 
 const lines = text => text.replace(/\r\n/g, "\n").split("\n").slice(0, text.endsWith("\n") ? -1 : undefined);
 
-export default function PatchComparison({ originalCode, patch, filename = "source", commitSha, startLine = 1 }) {
+export default function PatchComparison({
+  originalCode,
+  patch,
+  filename = "source",
+  commitSha,
+  startLine = 1,
+  verification,
+}) {
   const [view, setView] = useState("split");
   const comparison = useMemo(() => {
     try {
@@ -35,34 +43,92 @@ export default function PatchComparison({ originalCode, patch, filename = "sourc
     } catch { return null; }
   }, [originalCode, patch, filename, startLine]);
 
-  return <section aria-label="Before and after code comparison" className="min-w-0 overflow-hidden rounded-lg border border-text-primary/15 bg-bg-primary">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-text-primary/10 bg-bg-elevated px-4 py-3">
-      <div className="min-w-0"><p className="break-all font-mono text-xs text-text-primary">{filename}</p>
-        <p className="mt-1 text-xs text-text-muted">{commitSha ? `Scanned commit ${commitSha.slice(0, 7)} · ` : ""}{startLine > 1 ? `Excerpt from line ${startLine} · ` : ""}Proposed change · not applied</p></div>
-      <div role="group" aria-label="Code comparison view" className="flex gap-1 rounded-md border border-text-primary/15 p-1">
-        {[["split", "Side by side"], ["unified", "Unified diff"]].map(([value, label]) => <button type="button" key={value}
-          aria-pressed={view === value} disabled={value === "split" && !comparison} onClick={() => setView(value)}
-          className={`rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-security disabled:opacity-40 ${view === value ? "bg-text-primary/10 text-text-primary" : "text-text-secondary hover:bg-text-primary/5"}`}>{label}</button>)}
-      </div>
+  return (
+    <div className="space-y-4">
+      {verification && (
+        <PatchVerificationPanel
+          status={verification.status}
+          gates={verification.gates}
+        />
+      )}
+
+      <section aria-label="Before and after code comparison" className="min-w-0 overflow-hidden rounded-xl border border-border-subtle bg-bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle bg-bg-card px-4 py-3">
+          <div className="min-w-0">
+            <p className="break-all font-mono text-sm font-semibold text-text-primary">{filename}</p>
+            <p className="mt-0.5 text-xs text-text-muted">{commitSha ? `Scanned commit ${commitSha.slice(0, 7)} · ` : ""}{startLine > 1 ? `Excerpt from line ${startLine} · ` : ""}Proposed change · not applied</p>
+          </div>
+          <div role="group" aria-label="Code comparison view" className="flex gap-1 rounded-lg border border-border-subtle bg-bg-primary p-1">
+            {[["split", "Side by side"], ["unified", "Unified diff"]].map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={view === value}
+                disabled={value === "split" && !comparison}
+                onClick={() => setView(value)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  view === value
+                    ? "bg-accent text-white shadow-sm"
+                    : "text-text-secondary hover:text-text-primary"
+                } disabled:opacity-40`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!comparison && (
+          <p role="status" className="border-b border-border-subtle px-4 py-3 text-xs text-severity-medium">
+            A side-by-side preview is unavailable because this patch could not be matched exactly to the submitted source. Review the unified diff below.
+          </p>
+        )}
+
+        {view === "split" && comparison ? (
+          <div className="overflow-x-auto" tabIndex={0} aria-label="Scrollable before and after source">
+            <div className="min-w-[40rem]">
+              <div className="grid grid-cols-2 border-b border-border-subtle text-xs font-semibold bg-bg-primary/50">
+                <h3 className="border-r border-border-subtle px-4 py-2.5 text-text-primary">
+                  Before <span className="ml-2 font-normal text-text-muted">Scanned source</span>
+                </h3>
+                <h3 className="px-4 py-2.5 text-text-primary">
+                  After <span className="ml-2 font-normal text-text-muted">Proposed source</span>
+                </h3>
+              </div>
+              <div className="max-h-[36rem] overflow-y-auto py-2 font-mono text-xs leading-6">
+                {comparison.rows.map((row, index) => (
+                  <div key={index} className="grid grid-cols-2">
+                    {["before", "after"].map(side => (
+                      <div
+                        key={side}
+                        className={`flex min-w-0 ${side === "before" ? "border-r border-border-subtle" : ""} ${
+                          row[side]?.changed
+                            ? side === "before"
+                              ? "bg-severity-critical/15 text-severity-critical"
+                              : "bg-severity-success/15 text-severity-success"
+                            : ""
+                        }`}
+                      >
+                        <span aria-hidden="true" className="w-10 shrink-0 select-none pr-2 text-right text-text-muted">{row[side]?.number}</span>
+                        <span aria-hidden="true" className="w-4 shrink-0 select-none text-text-muted">{row[side]?.changed ? side === "before" ? "−" : "+" : ""}</span>
+                        <pre className="m-0 min-w-0 flex-1 whitespace-pre-wrap break-all pr-4 text-text-primary"><code>{row[side]?.text || " "}</code></pre>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <pre className="max-h-[36rem] overflow-auto p-4 font-mono text-xs leading-6 text-text-primary bg-bg-primary/40"><code>{patch}</code></pre>
+        )}
+
+        {view === "split" && comparison && (
+          <p className="border-t border-border-subtle px-4 py-2 text-xs text-text-muted sm:hidden">
+            Scroll horizontally to compare both columns, or choose Unified diff.
+          </p>
+        )}
+      </section>
     </div>
-    {!comparison && <p role="status" className="border-b border-text-primary/10 px-4 py-3 text-xs text-severity-medium">A side-by-side preview is unavailable because this patch could not be matched exactly to the submitted source. Review the unified diff below.</p>}
-    {view === "split" && comparison ? <div className="overflow-x-auto" tabIndex={0} aria-label="Scrollable before and after source">
-      <div className="min-w-[40rem]">
-        <div className="grid grid-cols-2 border-b border-text-primary/10 text-xs font-semibold">
-          <h3 className="border-r border-text-primary/10 px-4 py-2.5">Before <span className="ml-2 font-normal text-text-muted">Scanned source</span></h3>
-          <h3 className="px-4 py-2.5">After <span className="ml-2 font-normal text-text-muted">Proposed source</span></h3>
-        </div>
-        <div className="max-h-[36rem] overflow-y-auto py-2 font-mono text-xs leading-6">
-          {comparison.rows.map((row, index) => <div key={index} className="grid grid-cols-2">
-            {["before", "after"].map(side => <div key={side} className={`flex min-w-0 ${side === "before" ? "border-r border-text-primary/10" : ""} ${row[side]?.changed ? side === "before" ? "bg-severity-critical/10" : "bg-accent-security/10" : ""}`}>
-              <span aria-hidden="true" className="w-10 shrink-0 select-none pr-2 text-right text-text-muted">{row[side]?.number}</span>
-              <span aria-hidden="true" className="w-4 shrink-0 select-none text-text-muted">{row[side]?.changed ? side === "before" ? "−" : "+" : ""}</span>
-              <pre className="m-0 min-w-0 flex-1 whitespace-pre-wrap break-all pr-4 text-text-primary"><code>{row[side]?.text || " "}</code></pre>
-            </div>)}
-          </div>)}
-        </div>
-      </div>
-    </div> : <pre className="max-h-[36rem] overflow-auto p-4 font-mono text-xs leading-6 text-text-primary"><code>{patch}</code></pre>}
-    {view === "split" && comparison && <p className="border-t border-text-primary/10 px-4 py-2 text-xs text-text-muted sm:hidden">Scroll horizontally to compare both columns, or choose Unified diff.</p>}
-  </section>;
+  );
 }

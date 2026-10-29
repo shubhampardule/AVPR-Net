@@ -12,9 +12,10 @@ export default {
         "on-accent": "var(--on-accent)",
         bg: {
           primary: 'var(--bg-primary)',
+          sidebar: 'var(--bg-sidebar)',
           secondary: 'var(--bg-secondary)',
           elevated: 'var(--bg-elevated)',
-          card: 'var(--bg-elevated)',
+          card: 'var(--bg-card)',
           subtle: 'var(--bg-subtle)',
         },
         border: {
@@ -31,13 +32,14 @@ export default {
           security: 'var(--accent-security)',
           blue: 'var(--accent-blue)',
           cyan: 'var(--accent-blue)',
-          indigo: '#8C93B4',
+          indigo: '#6366F1',
         },
         severity: {
           critical: 'var(--severity-critical)',
           high: 'var(--severity-high)',
           medium: 'var(--severity-medium)',
           low: 'var(--severity-low)',
+          success: 'var(--severity-success)',
           info: 'var(--severity-info)',
         },
       },

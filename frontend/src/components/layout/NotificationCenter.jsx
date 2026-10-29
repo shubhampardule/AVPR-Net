@@ -8,7 +8,7 @@ function formatTime(value) {
   return Number.isNaN(date.getTime()) ? "Time unavailable" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-export default function NotificationCenter({ organizationId }) {
+export default function NotificationCenter({ organizationId, className = "relative" }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -114,14 +114,32 @@ export default function NotificationCenter({ organizationId }) {
     finally { preferenceBusyRef.current = false; setPreferenceBusy(false); }
   }
 
-  return <div ref={root} className="fixed right-[6.5rem] top-3 z-[60] lg:right-[5.5rem]">
-    <button type="button" disabled={!organizationId} onClick={() => { setOpen(value => !value); if (!open) load(); }}
-      aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`} aria-expanded={open}
-      className="relative flex h-10 w-10 items-center justify-center rounded-md border border-text-primary/10 bg-bg-elevated text-text-primary transition-colors hover:bg-text-primary/[0.08] disabled:cursor-not-allowed disabled:opacity-50">
-      <Bell className="h-4 w-4" aria-hidden="true" />
-      {unreadCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-severity-medium px-1 text-center text-[11px] font-bold leading-4 text-on-accent">{unreadCount > 99 ? "99+" : unreadCount}</span>}
-    </button>
-    {open && <section role="dialog" aria-label="Notifications" className="absolute right-[-5.75rem] top-11 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-xl border border-text-primary/10 bg-bg-secondary text-text-primary shadow-2xl sm:right-0">
+  return (
+    <div ref={root} className={className}>
+      <button
+        type="button"
+        disabled={!organizationId}
+        onClick={() => {
+          setOpen((value) => !value);
+          if (!open) load();
+        }}
+        aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+        aria-expanded={open}
+        className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-text-primary/10 bg-bg-elevated text-text-primary transition-colors hover:bg-text-primary/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Bell className="h-4 w-4" aria-hidden="true" />
+        {unreadCount > 0 && (
+          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-severity-medium px-1 text-center text-[10px] font-bold leading-4 text-on-accent">
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <section
+          role="dialog"
+          aria-label="Notifications"
+          className="absolute right-0 top-11 z-[70] w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-text-primary/10 bg-bg-secondary text-text-primary shadow-2xl"
+        >
       <header className="flex items-center justify-between border-b border-text-primary/10 px-4 py-3">
         <div><h2 className="text-sm font-semibold">Notifications</h2><p className="mt-0.5 text-[11px] text-text-muted">For this workspace · in-app only</p></div>
         <button type="button" disabled={busy || unreadCount === 0} onClick={markAllRead} className="flex items-center gap-1.5 text-xs text-text-primary underline underline-offset-2 disabled:opacity-40"><CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />Mark all read</button>
@@ -142,7 +160,9 @@ export default function NotificationCenter({ organizationId }) {
           <input type="checkbox" aria-label="Notify me about scan results" className="accent-accent-security" checked={scanResults} disabled={preferenceBusy} onChange={event => changePreference(event.target.checked)} />
         </label>
         <p className="mt-2 text-[11px] text-text-muted">Stored for 90 days. Email alerts are not configured.</p>
-      </footer>
-    </section>}
-  </div>;
+        </footer>
+      </section>
+    )}
+  </div>
+  );
 }
