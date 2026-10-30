@@ -1,8 +1,29 @@
 .DS_Store
+Thumbs.db
 node_modules/
 dist/
+build/
+coverage/
 *.log
+
+# Environment variables
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
+
+# Credentials and secrets
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+secrets/
+credentials/
+.credentials
+
+# Local and virtual environments
 .local/
+.venv*/

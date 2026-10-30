@@ -17,6 +17,6 @@ async function main() {
   if (result.status !== "complete") process.exitCode = 1;
 }
 main().catch((error) => {
-  console.error(JSON.stringify({ code: error.code || "ASSISTANT_FAILED", message: "Request failed; check fixture schema and local configuration" }));
+  console.error(JSON.stringify({ code: error.code || "ASSISTANT_FAILED", message: error.message || "Request failed; check fixture schema and local configuration" }));
   process.exitCode = 1;
 });
